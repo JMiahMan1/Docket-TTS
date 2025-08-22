@@ -1,0 +1,5 @@
+services:
+  tts-converter:
+    build: .
+    stdin_open: true 
+    tty: true
