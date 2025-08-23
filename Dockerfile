@@ -1,19 +1,48 @@
-# 1. Start with a stable Python base image
-FROM python:3.11-slim
+# Stage 1: Builder
+FROM fedora:42 AS builder
 
-# 2. Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
+# Install build tools and dependencies
+RUN dnf -y install \
+    python3 \
+    python3-pip \
+    python3-devel \
     wget \
-    tar \
+    ca-certificates \
+    espeak-ng \
     poppler-utils \
     ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    && dnf clean all
 
-# 3. Set a working directory
+# Upgrade pip
+RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install Piper via pip (includes the CLI)
+RUN pip3 install --no-cache-dir piper-tts
+
+# Stage 2: Final Image
+FROM fedora:42
+
+# Install runtime dependencies
+RUN dnf -y install \
+    python3 \
+    python3-virtualenv \
+    wget \
+    poppler-utils \
+    ffmpeg \
+    espeak-ng \
+    && dnf clean all
+
+# Prepare app environment
 WORKDIR /app
 
-# 4. Install Python libraries, now including Celery and Redis
+# Set up Python virtual environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Upgrade pip inside venv
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install Python dependencies (app requirements)
 RUN pip install --no-cache-dir \
     Flask \
     python-docx \
@@ -21,31 +50,23 @@ RUN pip install --no-cache-dir \
     beautifulsoup4 \
     gunicorn \
     celery \
-    redis
+    redis \
+    onnxruntime \
+    piper-tts
 
-# 5. Download and install the Piper TTS binary
-RUN wget https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.tar.gz && \
-    tar -zxvf piper_amd64.tar.gz && \
-    mv ./piper /opt/piper && \
-    ln -s /opt/piper/piper /usr/local/bin/piper && \
-    rm piper_amd64.tar.gz
-
-# 6. Tell the system where to find Piper's shared library files
-ENV LD_LIBRARY_PATH=/opt/piper/lib
-
-# 7. Download the "hfc_male" voice model
+# Download voice model (optional; baked into image)
 RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx && \
     wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json
 
-# 8. Copy the web application and templates
+# Copy application files
 COPY app.py .
 COPY celery_config.py .
 COPY text_formatter.py .
 COPY abbreviations.json .
 COPY templates ./templates
 
-# 9. Expose the port the web server will run on
+# Expose port
 EXPOSE 5000
 
-# 10. Set the command to run the Gunicorn server
+# Default CMD: start your Gunicorn app
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--timeout", "120", "app:app"]

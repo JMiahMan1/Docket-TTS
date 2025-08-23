@@ -91,7 +91,7 @@ def convert_to_speech_task(input_filepath, original_filename):
 
     try:
         command = (
-            f"piper --model {MODEL_PATH} --output-raw | "
+            f"piper --model {MODEL_PATH} --output-raw --ssml | "
             f"ffmpeg -f s16le -ar 22050 -ac 1 -i - -f mp3 -q:a 0 {output_filepath}"
         )
         # Pass the formatted SSML text to the piper command
