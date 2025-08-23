@@ -1,5 +1,30 @@
 services:
-  tts-converter:
+  redis:
+    image: "redis:alpine"
+    restart: always
+
+  web:
     build: .
-    stdin_open: true 
-    tty: true
+    ports:
+      - "8000:5000"
+    volumes:
+      - generated_data:/app/generated
+      - uploads_data:/app/uploads
+    depends_on:
+      - redis
+    restart: always
+
+  worker:
+    build: .
+    # The worker runs a different command: it starts Celery
+    command: celery -A app.celery worker --loglevel=info
+    volumes:
+      - generated_data:/app/generated
+      - uploads_data:/app/uploads
+    depends_on:
+      - redis
+    restart: always
+
+volumes:
+  uploads_data:
+  generated_data:

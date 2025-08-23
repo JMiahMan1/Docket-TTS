@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Text-to-Speech Converter</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 40px auto; padding: 0 20px; background-color: #f4f4f4; }
+        .container { background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        h1 { color: #1a1a1a; text-align: center; }
+        .form-upload { margin-top: 30px; padding: 20px; border: 2px dashed #ccc; border-radius: 5px; text-align: center; }
+        .form-upload input[type="file"] { width: 100%; padding: 10px; }
+        .form-upload input[type="submit"] { background-color: #007bff; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top: 20px; transition: background-color 0.3s; }
+        .form-upload input[type="submit"]:hover { background-color: #0056b3; }
+        .flash-error { color: #721c24; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 15px; margin-bottom: 20px; border-radius: 4px;}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Piper TTS Web Interface 🔊</h1>
+        <p style="text-align:center;">Upload a <code>.txt</code>, <code>.docx</code>, <code>.epub</code>, or <code>.pdf</code> file to convert it to an MP3.</p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="flash-error">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <form method="post" enctype="multipart/form-data" class="form-upload">
+            <input type="file" name="file">
+            <br>
+            <input type="submit" value="Upload and Convert to MP3">
+        </form>
+    </div>
+</body>
+</html>
