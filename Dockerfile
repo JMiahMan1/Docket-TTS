@@ -40,6 +40,8 @@ RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hf
 # 8. Copy the web application and templates
 COPY app.py .
 COPY celery_config.py .
+COPY text_formatter.py .
+COPY abbreviations.json .
 COPY templates ./templates
 
 # 9. Expose the port the web server will run on

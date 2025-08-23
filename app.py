@@ -1,13 +1,16 @@
 import os
 import subprocess
 import uuid
-from flask import Flask, request, render_template, render_template_string, send_from_directory, flash, redirect, url_for, jsonify
+from flask import Flask, request, render_template, send_from_directory, flash, redirect, url_for, jsonify
 from werkzeug.utils import secure_filename
 import docx
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
 from celery import Celery, Task
+
+# Import the new text formatting module
+import text_formatter
 
 # --- Configuration ---
 UPLOAD_FOLDER = '/app/uploads'
@@ -45,8 +48,6 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def extract_text(filepath):
-    # (Text extraction functions remain the same as before)
-    # ...
     extension = filepath.rsplit('.', 1)[1].lower()
     text = ""
     try:
@@ -71,15 +72,18 @@ def extract_text(filepath):
         return None
     return text
 
-
-# --- Celery Background Task ---
+# --- Celery Background Task (MODIFIED) ---
 @celery.task
 def convert_to_speech_task(input_filepath, original_filename):
     """This function runs in the background, handled by a Celery worker."""
-    text_content = extract_text(input_filepath)
-    if not text_content:
-        # Return an error state
+    raw_text = extract_text(input_filepath)
+    if not raw_text:
         return {'status': 'Error', 'message': 'Could not extract text from file.'}
+
+    # Use the new text_formatter module to process the text
+    print("Formatting text for TTS...")
+    formatted_text = text_formatter.process_text(raw_text)
+    print("Text formatting complete.")
 
     unique_id = str(uuid.uuid4())
     output_filename = f"{os.path.splitext(original_filename)[0]}_{unique_id}.mp3"
@@ -90,21 +94,23 @@ def convert_to_speech_task(input_filepath, original_filename):
             f"piper --model {MODEL_PATH} --output-raw | "
             f"ffmpeg -f s16le -ar 22050 -ac 1 -i - -f mp3 -q:a 0 {output_filepath}"
         )
+        # Pass the formatted SSML text to the piper command
         subprocess.run(
-            command, shell=True, input=text_content.encode('utf-8'),
+            command, shell=True, input=formatted_text.encode('utf-8'),
             check=True, stderr=subprocess.PIPE
         )
-        # Return the successful result
         return {'status': 'Success', 'filename': output_filename}
     except subprocess.CalledProcessError as e:
         return {'status': 'Error', 'message': e.stderr.decode()}
     except Exception as e:
         return {'status': 'Error', 'message': str(e)}
 
-# --- Flask Routes ---
+# --- Flask Routes (Unchanged) ---
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
+        # (This function remains the same as before)
+        # ...
         if 'file' not in request.files:
             flash('No file part in the request.', 'error')
             return redirect(request.url)
@@ -117,22 +123,17 @@ def upload_file():
         input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
         file.save(input_filepath)
 
-        # Start the background task
         task = convert_to_speech_task.delay(input_filepath, original_filename)
-        
-        # Redirect to a results page with the task ID
         return redirect(url_for('task_result', task_id=task.id))
 
     return render_template('index.html')
 
 @app.route('/result/<task_id>')
 def task_result(task_id):
-    """Renders the page that will poll for the task's status."""
     return render_template('result.html', task_id=task_id)
 
 @app.route('/status/<task_id>')
 def task_status(task_id):
-    """Provides the status of a background task to the frontend."""
     task = celery.AsyncResult(task_id)
     if task.state == 'PENDING':
         response = {'state': 'PENDING', 'status': 'Waiting for worker...'}
