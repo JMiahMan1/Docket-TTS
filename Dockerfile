@@ -51,8 +51,8 @@ RUN pip install --no-cache-dir \
     gunicorn \
     celery \
     redis \
-    onnxruntime \
-    piper-tts
+    inflect \
+    pyttsx3
 
 # Download voice model (optional; baked into image)
 RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx && \
@@ -61,8 +61,9 @@ RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hf
 # Copy application files
 COPY app.py .
 COPY celery_config.py .
-COPY text_formatter.py .
-COPY abbreviations.json .
+#COPY text_formatter.py .
+COPY tts_service.py .
+COPY normalization.json .
 COPY templates ./templates
 
 # Expose port
