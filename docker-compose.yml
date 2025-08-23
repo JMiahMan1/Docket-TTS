@@ -1,10 +1,30 @@
 services:
-  tts-converter:
+  redis:
+    image: "redis:alpine"
+    restart: always
+
+  web:
     build: .
-    # Map port 8000 on your local machine to port 5000 inside the container
     ports:
       - "8000:5000"
-    # Mount volumes to persist uploads and generated files (optional but good practice)
     volumes:
-      - ./uploads:/app/uploads
-      - ./generated:/app/generated
+      - generated_data:/app/generated
+      - uploads_data:/app/uploads
+    depends_on:
+      - redis
+    restart: always
+
+  worker:
+    build: .
+    # The worker runs a different command: it starts Celery
+    command: celery -A app.celery worker --loglevel=info
+    volumes:
+      - generated_data:/app/generated
+      - uploads_data:/app/uploads
+    depends_on:
+      - redis
+    restart: always
+
+volumes:
+  uploads_data:
+  generated_data:

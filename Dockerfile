@@ -1,10 +1,7 @@
-# 1. Start with a stable Python base image to run the web app
+# 1. Start with a stable Python base image
 FROM python:3.11-slim
 
 # 2. Install system dependencies
-# - ca-certificates: For secure downloads (SSL)
-# - ffmpeg: For audio conversion to MP3
-# - poppler-utils: For 'pdftotext' to read PDFs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
@@ -16,12 +13,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 3. Set a working directory
 WORKDIR /app
 
-# 4. Install Python libraries for the web app and file parsing
+# 4. Install Python libraries, now including Celery and Redis
 RUN pip install --no-cache-dir \
     Flask \
     python-docx \
     EbookLib \
-    beautifulsoup4
+    beautifulsoup4 \
+    gunicorn \
+    celery \
+    redis
 
 # 5. Download and install the Piper TTS binary
 RUN wget https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.tar.gz && \
@@ -33,15 +33,17 @@ RUN wget https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.t
 # 6. Tell the system where to find Piper's shared library files
 ENV LD_LIBRARY_PATH=/opt/piper/lib
 
-# 7. Download the NEW "hfc_male" voice model
+# 7. Download the "hfc_male" voice model
 RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx && \
     wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json
 
-# 8. Copy the web application file into the container
+# 8. Copy the web application and templates
 COPY app.py .
+COPY celery_config.py .
+COPY templates ./templates
 
 # 9. Expose the port the web server will run on
 EXPOSE 5000
 
-# 10. Set the command to run the web application
-CMD ["python", "app.py"]
+# 10. Set the command to run the Gunicorn server
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--timeout", "120", "app:app"]
