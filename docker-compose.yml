@@ -1,5 +1,10 @@
 services:
   tts-converter:
     build: .
-    stdin_open: true 
-    tty: true
+    # Map port 8000 on your local machine to port 5000 inside the container
+    ports:
+      - "8000:5000"
+    # Mount volumes to persist uploads and generated files (optional but good practice)
+    volumes:
+      - ./uploads:/app/uploads
+      - ./generated:/app/generated
