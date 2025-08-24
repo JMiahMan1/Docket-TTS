@@ -23,6 +23,7 @@ RUN dnf -y install \
     poppler-utils \
     ffmpeg \
     espeak-ng \
+    ghostscript \
     && dnf clean all
 
 # Prepare app environment
@@ -42,6 +43,7 @@ RUN pip install --no-cache-dir \
     redis \
     python-docx \
     EbookLib \
+    PyMuPDF \
     beautifulsoup4 \
     inflect \
     piper-tts

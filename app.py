@@ -12,6 +12,7 @@ import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
 from celery import Celery, Task
+import fitz
 
 from tts_service import TTSService
 
@@ -52,17 +53,39 @@ def allowed_file(filename):
     """Check if the uploaded file has an allowed extension."""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
 def extract_text(filepath):
-    """Extracts text content from various file types."""
+    """
+    Extracts text content from various file types.
+    Includes a Ghostscript pre-processing step for difficult PDFs.
+    """
     extension = Path(filepath).suffix.lower()
     text = ""
     try:
         if extension == '.pdf':
-            result = subprocess.run(
-                ['pdftotext', filepath, '-'], 
-                capture_output=True, text=True, check=True
-            )
-            text = result.stdout
+            cleaned_filepath = f"{filepath}.cleaned.pdf"
+            
+            # --- Pre-processing Step using Ghostscript ---
+            # This "re-bakes" the PDF to fix font encoding and structural errors.
+            gs_command = [
+                'gs',
+                '-sDEVICE=pdfwrite',
+                '-dCompatibilityLevel=1.7',
+                '-dNOPAUSE',
+                '-dBATCH',
+                f'-sOutputFile={cleaned_filepath}',
+                filepath
+            ]
+            subprocess.run(gs_command, check=True, capture_output=True)
+            
+            # --- Extract text from the CLEANED file ---
+            with fitz.open(cleaned_filepath) as doc:
+                for page in doc:
+                    text += page.get_text() + "\n"
+            
+            # Clean up the temporary file
+            os.remove(cleaned_filepath)
+
         elif extension == '.docx':
             doc = docx.Document(filepath)
             text = "\n".join([para.text for para in doc.paragraphs])
@@ -75,6 +98,9 @@ def extract_text(filepath):
             text = Path(filepath).read_text(encoding='utf-8')
     except Exception as e:
         app.logger.error(f"Error extracting text from {filepath}: {e}")
+        # Clean up temp file on error as well
+        if 'cleaned_filepath' in locals() and os.path.exists(cleaned_filepath):
+            os.remove(cleaned_filepath)
         return None
     return text
 

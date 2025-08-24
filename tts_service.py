@@ -78,19 +78,31 @@ def normalize_text(text: str) -> str:
     # Remove common footnote markers like [1], (1), or ¹
     text = re.sub(r'\[\d+\]|\(\d+\)|[¹²³⁴⁵⁶⁷⁸⁹⁰]+', '', text)
     
+    # Handle scripture references FIRST, as they are the most specific rule.
     text = expand_scripture_references(text)
-    for abbr, expanded in ABBREVIATIONS.items(): text = re.sub(rf"\b{re.escape(abbr)}\b", expanded, text, flags=re.IGNORECASE)
 
+    # Create a dictionary of ONLY non-biblical abbreviations
+    non_bible_abbrs = {
+        k: v for k, v in ABBREVIATIONS.items()
+        if not any(book in v for book in BIBLE_BOOKS)
+    }
+    # Now, only expand general abbreviations, leaving Bible books untouched.
+    for abbr, expanded in non_bible_abbrs.items():
+        text = re.sub(rf"\b{re.escape(abbr)}\b", expanded, text, flags=re.IGNORECASE)
+
+    # Handle specific Bible references with 'f' or 'ff'
     def bible_ff_repl(match):
         book, verse = match.group(1), _inflect.number_to_words(match.group(2))
         suffix = BIBLE_REFS.get(match.group(3).lower(), "")
         return f"{book} verse {verse} {suffix}"
     text = re.sub(r"([A-Za-z]+\s?\d*):(\d+)(ff|f)\b", bible_ff_repl, text)
 
+    # Expand contractions, symbols, and punctuation
     for contr, expanded in CONTRACTIONS.items(): text = text.replace(contr, expanded)
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
+    # Smarter heading detection
     lines = text.split('\n')
     processed_lines = []
     for line in lines:
@@ -98,23 +110,37 @@ def normalize_text(text: str) -> str:
         if not stripped_line:
             processed_lines.append(line)
             continue
-            
-        is_short_heading = 0 < len(stripped_line) < 50 and stripped_line[-1] not in '.?!:,;'
+        
+        #A line is a heading if the majority of its letters are uppercase.
         is_mostly_caps_heading = False
-        if len(stripped_line) >= 5:
+        if len(stripped_line) >= 3: 
             letters = [char for char in stripped_line if char.isalpha()]
-            if len(letters) > 0:
+            if len(letters) > 1:
                 uppercase_letters = [char for char in letters if char.isupper()]
-                if (len(uppercase_letters) / len(letters)) > 0.8:
+                if (len(uppercase_letters) / len(letters)) > 0.75:
                     is_mostly_caps_heading = True
 
-        if is_short_heading or is_mostly_caps_heading:
+        # A line is a heading if it's a short phrase in Title Case.
+        is_title_case_heading = False
+        words = stripped_line.split()
+        word_count = len(words)
+        # Must be a short phrase, end with a letter, and start with a capital.
+        if (1 < word_count < 9) and (stripped_line[-1].isalpha()) and (stripped_line[0].isupper()):
+            # At least half the words must be capitalized.
+            capitalized_words = sum(1 for word in words if word[0].isupper())
+            if (capitalized_words / word_count) >= 0.5:
+                is_title_case_heading = True
+
+        if is_mostly_caps_heading or is_title_case_heading:
             processed_lines.append(stripped_line + ". ,")
         else:
             processed_lines.append(line)
     text = '\n'.join(processed_lines)
     
+    # Convert any remaining standalone digits to words
     text = re.sub(r"\b\d+\b", lambda m: _inflect.number_to_words(m.group(), andword=""), text)
+
+    # Final cleanup
     text = re.sub(r"\s+", " ", text).strip()
     text = text.replace(":", ",")
     return text
