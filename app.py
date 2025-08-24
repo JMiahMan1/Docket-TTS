@@ -1,6 +1,7 @@
 import os
 import subprocess
 import uuid
+from pathlib import Path
 from flask import (
     Flask, request, render_template, send_from_directory,
     flash, redirect, url_for, jsonify
@@ -12,13 +13,12 @@ from ebooklib import epub
 from bs4 import BeautifulSoup
 from celery import Celery, Task
 
-# Import new TTS service
-from tts_service import TTSService, normalize_text
-import pyttsx3
+from tts_service import TTSService
 
 # --- Configuration ---
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
+VOICES_FOLDER = '/app/voices'
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'epub'}
 
 # --- Flask App Initialization ---
@@ -26,7 +26,7 @@ app = Flask(__name__)
 app.config.from_mapping(
     UPLOAD_FOLDER=UPLOAD_FOLDER,
     GENERATED_FOLDER=GENERATED_FOLDER,
-    SECRET_KEY='supersecretkey_for_flash_messages'
+    SECRET_KEY='a-secure-and-random-secret-key'
 )
 
 # --- Celery Configuration ---
@@ -49,73 +49,78 @@ os.makedirs(GENERATED_FOLDER, exist_ok=True)
 
 # --- Helper Functions ---
 def allowed_file(filename):
+    """Check if the uploaded file has an allowed extension."""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-
 def extract_text(filepath):
-    extension = filepath.rsplit('.', 1)[1].lower()
+    """Extracts text content from various file types."""
+    extension = Path(filepath).suffix.lower()
     text = ""
     try:
-        if extension == 'pdf':
-            result = subprocess.run(['pdftotext', filepath, '-'], capture_output=True, text=True, check=True)
+        if extension == '.pdf':
+            # Use poppler-utils to extract text from PDF
+            result = subprocess.run(
+                ['pdftotext', filepath, '-'], 
+                capture_output=True, text=True, check=True
+            )
             text = result.stdout
-        elif extension == 'docx':
+        elif extension == '.docx':
             doc = docx.Document(filepath)
             text = "\n".join([para.text for para in doc.paragraphs])
-        elif extension == 'epub':
+        elif extension == '.epub':
             book = epub.read_epub(filepath)
-            text_parts = []
             for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
                 soup = BeautifulSoup(item.get_body_content(), 'html.parser')
-                text_parts.append(soup.get_text())
-            text = "\n".join(text_parts)
-        elif extension == 'txt':
-            with open(filepath, 'r', encoding='utf-8') as f:
-                text = f.read()
+                text += soup.get_text() + "\n\n"
+        elif extension == '.txt':
+            text = Path(filepath).read_text(encoding='utf-8')
     except Exception as e:
-        print(f"Error extracting text from {filepath}: {e}")
+        app.logger.error(f"Error extracting text from {filepath}: {e}")
         return None
     return text
 
-
 def list_available_voices():
-    """Return a list of available voices from pyttsx3."""
-    engine = pyttsx3.init()
-    voices = engine.getProperty("voices")
-    return [{"id": v.id, "name": v.name} for v in voices]
+    """Scans the voices folder and returns a list of available Piper models."""
+    voices = []
+    voice_dir = Path(VOICES_FOLDER)
+    if voice_dir.is_dir():
+        for voice_file in voice_dir.glob("*.onnx"):
+            # The name is the filename without the extension
+            voices.append({"id": voice_file.name, "name": voice_file.stem})
+    return sorted(voices, key=lambda v: v['name'])
 
 
 # --- Celery Background Task ---
 @celery.task
-def convert_to_speech_task(input_filepath, original_filename, voice_id=None):
-    """Background task for TTS conversion."""
+def convert_to_speech_task(input_filepath, original_filename, voice_name=None):
+    """Background task that handles text extraction, normalization, and TTS conversion."""
     text_content = extract_text(input_filepath)
     if not text_content:
-        return {'status': 'Error', 'message': 'Could not extract text from file.'}
+        return {'status': 'Error', 'message': 'Could not extract text from the uploaded file.'}
 
-    unique_id = str(uuid.uuid4())
-    base_name = os.path.splitext(original_filename)[0]
+    unique_id = str(uuid.uuid4().hex[:8])
+    base_name = Path(original_filename).stem
     output_filename = f"{base_name}_{unique_id}.mp3"
     output_filepath = os.path.join(GENERATED_FOLDER, output_filename)
 
     try:
-        tts = TTSService(voice=voice_id)
-        normalized_text = normalize_text(text_content)
-        tts.synthesize(normalized_text, output_filepath)
+        # Initialize the TTS service with the selected voice
+        tts = TTSService(voice=voice_name)
+        # Synthesize audio and get the normalized text back
+        _, normalized_text = tts.synthesize(text_content, output_filepath)
 
-        # Save normalized text alongside MP3
+        # Save the processed text for user reference
         text_filename = f"{base_name}_{unique_id}.txt"
         text_filepath = os.path.join(GENERATED_FOLDER, text_filename)
-        with open(text_filepath, "w", encoding="utf-8") as f:
-            f.write(normalized_text)
+        Path(text_filepath).write_text(normalized_text, encoding="utf-8")
 
         return {
             'status': 'Success',
             'filename': output_filename,
-            'textfile': text_filename,
-            'normalized_text': normalized_text
+            'textfile': text_filename
         }
     except Exception as e:
+        app.logger.error(f"TTS Conversion failed: {e}")
         return {'status': 'Error', 'message': str(e)}
 
 
@@ -126,63 +131,54 @@ def upload_file():
         if 'file' not in request.files:
             flash('No file part in the request.', 'error')
             return redirect(request.url)
+            
         file = request.files['file']
         if file.filename == '' or not allowed_file(file.filename):
-            flash('Invalid file. Please select a txt, docx, epub, or pdf.', 'error')
+            flash('Invalid file. Please select a TXT, DOCX, EPUB, or PDF file.', 'error')
             return redirect(request.url)
 
         original_filename = secure_filename(file.filename)
         input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
         file.save(input_filepath)
 
-        # Get selected voice
-        voice_id = request.form.get("voice") or None
+        voice_name = request.form.get("voice")
+        task = convert_to_speech_task.delay(input_filepath, original_filename, voice_name)
+        
+        return render_template('result.html', task_id=task.id)
 
-        # Start background task
-        task = convert_to_speech_task.delay(input_filepath, original_filename, voice_id)
-        return redirect(url_for('task_result', task_id=task.id))
-
-    # Show upload page with available voices
     voices = list_available_voices()
     return render_template('index.html', voices=voices)
 
-@app.route('/speak_sample/<voice_id>')
-def speak_sample(voice_id):
-    """Generate a short sample for the selected voice."""
+@app.route('/speak_sample/<voice_name>')
+def speak_sample(voice_name):
+    """Generates a short audio sample for the selected voice."""
     sample_text = "This is a sample of my voice."
-    unique_id = str(uuid.uuid4())
-    filename = f"sample_{unique_id}.mp3"
+    filename = f"sample_{Path(voice_name).stem}.mp3"
     filepath = os.path.join(GENERATED_FOLDER, filename)
-
-    try:
-        tts = TTSService(voice=voice_id)
-        tts.synthesize(sample_text, filepath)
-        return send_from_directory(app.config["GENERATED_FOLDER"], filename)
-    except Exception as e:
-        return f"Error generating sample: {e}", 500
-
-@app.route('/result/<task_id>')
-def task_result(task_id):
-    return render_template('result.html', task_id=task_id)
-
+    
+    # Generate a new sample only if it doesn't already exist
+    if not os.path.exists(filepath):
+        try:
+            tts = TTSService(voice=voice_name)
+            tts.synthesize(sample_text, filepath)
+        except Exception as e:
+            return f"Error generating sample: {e}", 500
+            
+    return send_from_directory(app.config["GENERATED_FOLDER"], filename)
 
 @app.route('/status/<task_id>')
 def task_status(task_id):
+    """Reports the status of a background task."""
     task = celery.AsyncResult(task_id)
     if task.state == 'PENDING':
-        response = {'state': 'PENDING', 'status': 'Waiting for worker...'}
+        response = {'state': 'PENDING', 'status': 'Waiting for the worker to start...'}
     elif task.state != 'FAILURE':
         response = {'state': task.state, 'status': task.info}
     else:
         response = {'state': task.state, 'status': str(task.info)}
     return jsonify(response)
 
-
 @app.route('/generated/<name>')
 def download_file(name):
+    """Serves the generated audio or text file for download."""
     return send_from_directory(app.config["GENERATED_FOLDER"], name)
-
-
-@app.route('/generated_text/<name>')
-def download_text(name):
-    return send_from_directory(app.config["GENERATED_FOLDER"], name, mimetype="text/plain")

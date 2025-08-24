@@ -1,32 +1,25 @@
-# Stage 1: Builder
+# Stage 1: Builder for fetching Piper assets
 FROM fedora:42 AS builder
 
-# Install build tools and dependencies
-RUN dnf -y install \
-    python3 \
-    python3-pip \
-    python3-devel \
-    wget \
-    ca-certificates \
-    espeak-ng \
-    poppler-utils \
-    ffmpeg \
-    && dnf clean all
+# Install build tools
+RUN dnf -y install wget && dnf clean all
 
-# Upgrade pip
-RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
+# Prepare voice directory
+WORKDIR /voices
 
-# Install Piper via pip (includes the CLI)
-RUN pip3 install --no-cache-dir piper-tts
+# Download a high-quality default voice model
+# This is the recommended US English male voice from the original Dockerfile
+RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx && \
+    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json
 
-# Stage 2: Final Image
+
+# Stage 2: Final Application Image
 FROM fedora:42
 
-# Install runtime dependencies
+# Install runtime dependencies for Piper and the web app
 RUN dnf -y install \
     python3 \
     python3-virtualenv \
-    wget \
     poppler-utils \
     ffmpeg \
     espeak-ng \
@@ -34,40 +27,37 @@ RUN dnf -y install \
 
 # Prepare app environment
 WORKDIR /app
-
-# Set up Python virtual environment
-RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Upgrade pip inside venv
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+# Set up and activate Python virtual environment
+RUN python3 -m venv /opt/venv
+RUN . /opt/venv/bin/activate
 
-# Install Python dependencies (app requirements)
+# Install Python dependencies
+# Removed pyttsx3, kept inflect and other necessary libraries
 RUN pip install --no-cache-dir \
     Flask \
-    python-docx \
-    EbookLib \
-    beautifulsoup4 \
     gunicorn \
     celery \
     redis \
+    python-docx \
+    EbookLib \
+    beautifulsoup4 \
     inflect \
-    pyttsx3
+    piper-tts
 
-# Download voice model (optional; baked into image)
-RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json
+# Copy voice models from the builder stage
+COPY --from=builder /voices /app/voices
 
 # Copy application files
 COPY app.py .
 COPY celery_config.py .
-#COPY text_formatter.py .
 COPY tts_service.py .
 COPY normalization.json .
 COPY templates ./templates
 
-# Expose port
+# Expose port for the web application
 EXPOSE 5000
 
-# Default CMD: start your Gunicorn app
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--timeout", "120", "app:app"]
+# Start the Gunicorn web server
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app:app"]
