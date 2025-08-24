@@ -58,7 +58,6 @@ def extract_text(filepath):
     text = ""
     try:
         if extension == '.pdf':
-            # Use poppler-utils to extract text from PDF
             result = subprocess.run(
                 ['pdftotext', filepath, '-'], 
                 capture_output=True, text=True, check=True
@@ -85,43 +84,43 @@ def list_available_voices():
     voice_dir = Path(VOICES_FOLDER)
     if voice_dir.is_dir():
         for voice_file in voice_dir.glob("*.onnx"):
-            # The name is the filename without the extension
             voices.append({"id": voice_file.name, "name": voice_file.stem})
     return sorted(voices, key=lambda v: v['name'])
 
 
 # --- Celery Background Task ---
-@celery.task
-def convert_to_speech_task(input_filepath, original_filename, voice_name=None):
-    """Background task that handles text extraction, normalization, and TTS conversion."""
-    text_content = extract_text(input_filepath)
-    if not text_content:
-        return {'status': 'Error', 'message': 'Could not extract text from the uploaded file.'}
-
-    unique_id = str(uuid.uuid4().hex[:8])
-    base_name = Path(original_filename).stem
-    output_filename = f"{base_name}_{unique_id}.mp3"
-    output_filepath = os.path.join(GENERATED_FOLDER, output_filename)
-
+@celery.task(bind=True)
+def convert_to_speech_task(self, input_filepath, original_filename, voice_name=None):
+    """Background task that reports progress during conversion."""
     try:
-        # Initialize the TTS service with the selected voice
+        # Step 1: Extracting text
+        self.update_state(state='PROGRESS', meta={'current': 1, 'total': 3, 'status': 'Extracting text...'})
+        text_content = extract_text(input_filepath)
+        if not text_content:
+            raise ValueError('Could not extract text from the file.')
+
+        # Step 2: Synthesizing Audio (includes normalization)
+        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 3, 'status': 'Synthesizing audio...'})
+        unique_id = str(uuid.uuid4().hex[:8])
+        base_name = Path(original_filename).stem
+        output_filename = f"{base_name}_{unique_id}.mp3"
+        output_filepath = os.path.join(GENERATED_FOLDER, output_filename)
+        
         tts = TTSService(voice=voice_name)
-        # Synthesize audio and get the normalized text back
         _, normalized_text = tts.synthesize(text_content, output_filepath)
 
-        # Save the processed text for user reference
+        # Step 3: Finalizing
+        self.update_state(state='PROGRESS', meta={'current': 3, 'total': 3, 'status': 'Saving files...'})
         text_filename = f"{base_name}_{unique_id}.txt"
         text_filepath = os.path.join(GENERATED_FOLDER, text_filename)
         Path(text_filepath).write_text(normalized_text, encoding="utf-8")
 
-        return {
-            'status': 'Success',
-            'filename': output_filename,
-            'textfile': text_filename
-        }
+        return {'status': 'Success', 'filename': output_filename, 'textfile': text_filename}
     except Exception as e:
-        app.logger.error(f"TTS Conversion failed: {e}")
-        return {'status': 'Error', 'message': str(e)}
+        app.logger.error(f"TTS Conversion failed in task {self.request.id}: {e}")
+        self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
+        # Raising the exception ensures Celery marks it as a failure
+        raise e
 
 
 # --- Flask Routes ---
@@ -156,7 +155,6 @@ def speak_sample(voice_name):
     filename = f"sample_{Path(voice_name).stem}.mp3"
     filepath = os.path.join(GENERATED_FOLDER, filename)
     
-    # Generate a new sample only if it doesn't already exist
     if not os.path.exists(filepath):
         try:
             tts = TTSService(voice=voice_name)
@@ -168,14 +166,20 @@ def speak_sample(voice_name):
 
 @app.route('/status/<task_id>')
 def task_status(task_id):
-    """Reports the status of a background task."""
+    """Reports the status of a background task, including progress."""
     task = celery.AsyncResult(task_id)
     if task.state == 'PENDING':
-        response = {'state': 'PENDING', 'status': 'Waiting for the worker to start...'}
-    elif task.state != 'FAILURE':
+        response = {
+            'state': task.state,
+            'status': {'current': 0, 'total': 3, 'status': 'Waiting for worker...'}
+        }
+    elif task.state == 'PROGRESS':
         response = {'state': task.state, 'status': task.info}
-    else:
+    elif task.state == 'SUCCESS':
+         response = {'state': task.state, 'status': task.info}
+    else: # FAILURE or other states
         response = {'state': task.state, 'status': str(task.info)}
+
     return jsonify(response)
 
 @app.route('/generated/<name>')
