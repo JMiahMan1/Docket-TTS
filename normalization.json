@@ -4,6 +4,7 @@
     "1 Cor.": "First Corinthians",
     "1 Jn": "First John",
     "1 Jn.": "First John",
+    "1 Kgs": "First Kings",
     "1 Kings": "First Kings",
     "1 Pet": "First Peter",
     "1 Pet.": "First Peter",
@@ -17,6 +18,7 @@
     "2 Cor.": "Second Corinthians",
     "2 Jn": "Second John",
     "2 Jn.": "Second John",
+    "2 Kgs": "Second Kings",
     "2 Kings": "Second Kings",
     "2 Pet": "Second Peter",
     "2 Pet.": "Second Peter",
@@ -243,6 +245,7 @@
     "RBB.": "Revista biblica brasileira",
     "ResQuart": "Restoration Quarterly",
     "ResQuart.": "Restoration Quarterly",
+    "Rev": "Revelation",
     "Rev.": "Revelation",
     "RevExp": "Review and Exposition",
     "RevExp.": "Review and Exposition",
@@ -278,7 +281,6 @@
     "St.": "Street",
     "Supt": "Superintendent",
     "Supt.": "Superintendent",
-
     "TDNT": "Theological Dictionary of the New Testament",
     "TDNT.": "Theological Dictionary of the New Testament",
     "Them": "Themelios",
@@ -309,7 +311,6 @@
     "Vol.": "Volume",
     "vs": "versus",
     "vs.": "versus",
-
     "WTJ": "Westminster Theological Journal",
     "WTJ.": "Westminster Theological Journal",
     "Zech": "Zechariah",
@@ -329,6 +330,7 @@
     "Hebrews", "James", "First Peter", "Second Peter", "First John", "Second John", "Third John", "Jude", "Revelation"
   ],
   "ambiguous_bible_abbrs": ["Is", "Rev", "Acts", "Job", "Song", "Amos"],
+  "case_sensitive_abbrs": ["Bib", "Di", "Enc", "Int", "Rev", "SE", "ST", "Them"],
   "bible_refs": {"ff": "and following", "f": "and the following verse"},
   "contractions": {
     "can't": "cannot", "won't": "will not", "n't": " not", "'re": " are", "'ll": " will",

@@ -17,7 +17,6 @@
                     <div class="card-body p-4">
                         <h1 class="mb-4 text-center">📖 Docket TTS Converter</h1>
 
-                        <!-- Flash messages -->
                         {% with messages = get_flashed_messages(with_categories=true) %}
                           {% if messages %}
                             {% for category, message in messages %}
@@ -29,7 +28,6 @@
                           {% endif %}
                         {% endwith %}
 
-                        <!-- Upload form -->
                         <form method="post" enctype="multipart/form-data">
                             <div class="mb-3">
                                 <label for="file" class="form-label">Choose a text, DOCX, EPUB, or PDF file:</label>
@@ -48,25 +46,21 @@
                                         🔊 Sample
                                     </button>
                                 </div>
-                                <div class="form-text">
-                                    Don’t see your preferred voice? Install additional voices on your system.
-                                </div>
                             </div>
 
                             <button type="submit" class="btn btn-primary w-100">Convert to Speech</button>
                         </form>
 
-                        <!-- Sample playback -->
                         <div class="mt-4" id="sampleContainer" style="display:none;">
                             <h5>Voice Sample</h5>
                             <audio id="sampleAudio" controls></audio>
                         </div>
                     </div>
+                    <div class="card-footer text-center">
+                        <a href="/files">View Generated Files</a>
+                    </div>
                 </div>
 
-                <p class="text-center text-muted mt-4 small">
-                    Powered by Flask, Celery, and pyttsx3
-                </p>
             </div>
         </div>
     </div>
@@ -85,4 +79,3 @@
     </script>
 </body>
 </html>
-

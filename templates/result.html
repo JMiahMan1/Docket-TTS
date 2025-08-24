@@ -25,7 +25,10 @@
 
                         <div id="result" class="mt-4"></div>
                         <div id="error" class="alert alert-danger mt-4" style="display:none;"></div>
-
+                    </div>
+                    <div class="card-footer text-center" id="footer-links" style="display:none;">
+                        <a href="/">Convert Another File</a> | 
+                        <a href="/files">View All Files</a>
                     </div>
                 </div>
             </div>
@@ -57,6 +60,7 @@
                         progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
                         progressBar.classList.add('bg-success');
                         progressText.innerText = '✅ Conversion Complete!';
+                        document.getElementById('footer-links').style.display = 'block';
 
                         const resultData = data.status;
                         if (resultData.status === 'Success') {
@@ -88,6 +92,7 @@
                         progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
                         progressBar.classList.add('bg-danger');
                         progressText.innerText = '❌ Conversion Failed';
+                        document.getElementById('footer-links').style.display = 'block';
                         
                         const errorDiv = document.getElementById('error');
                         errorDiv.innerText = data.status;

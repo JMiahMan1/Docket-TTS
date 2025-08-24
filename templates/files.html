@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Generated Files - Docket-TTS</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-lg-10">
+                <div class="card shadow-lg border-0 rounded-3">
+                    <div class="card-body p-4">
+                        <div class="d-flex justify-content-between align-items-center mb-4">
+                            <h1 class="mb-0">📦 Generated Files</h1>
+                            <a href="/" class="btn btn-secondary">← Back to Upload</a>
+                        </div>
+
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% for category, message in messages %}
+                              <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                              </div>
+                            {% endfor %}
+                        {% endwith %}
+
+                        {% if file_pairs %}
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Audio File (.mp3)</th>
+                                        <th>Normalized Text (.txt)</th>
+                                        <th class="text-end">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for pair in file_pairs %}
+                                    <tr>
+                                        <td>
+                                            <a href="{{ url_for('download_file', name=pair.mp3) }}">{{ pair.mp3 }}</a>
+                                        </td>
+                                        <td>
+                                            {% if pair.txt %}
+                                            <a href="{{ url_for('download_file', name=pair.txt) }}">{{ pair.txt }}</a>
+                                            {% else %}
+                                            <span class="text-muted">No text file</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-end">
+                                            <form method="POST" action="{{ url_for('delete_file', filename=pair.mp3) }}" onsubmit="return confirm('Are you sure you want to delete these files?');">
+                                                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info text-center">
+                            You haven't generated any files yet.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
