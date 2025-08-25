@@ -1,49 +1,79 @@
-# 1. Start with a stable Python base image
-FROM python:3.11-slim
+# Stage 1: Builder for fetching Piper assets
+FROM fedora:42 AS builder
 
-# 2. Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    wget \
-    tar \
+# Install build tools
+RUN dnf -y install wget && dnf clean all
+
+# Prepare voice directory
+WORKDIR /voices
+
+# Download high-quality voice models
+RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx && \
+    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json && \
+    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/high/en_US-ryan-high.onnx && \
+    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/high/en_US-ryan-high.onnx.json
+
+
+# Stage 2: Final Application Image
+FROM fedora:42
+
+# Install runtime dependencies
+RUN dnf -y install \
+    python3 \
+    python3-virtualenv \
     poppler-utils \
     ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    espeak-ng \
+    ghostscript \
+    cmake \
+    gcc-c++ \
+    python3-sentencepiece \
+    python3-torch \
+    && dnf clean all
 
-# 3. Set a working directory
+# Prepare app environment
 WORKDIR /app
+ENV PATH="/opt/venv/bin:$PATH"
 
-# 4. Install Python libraries, now including Celery and Redis
-RUN pip install --no-cache-dir \
+# Set up and activate Python virtual environment
+RUN python3 -m venv --system-site-packages /opt/venv
+RUN . /opt/venv/bin/activate
+
+# Install Python dependencies with an increased timeout
+RUN pip install --no-cache-dir --timeout=600 \
     Flask \
-    python-docx \
-    EbookLib \
-    beautifulsoup4 \
     gunicorn \
     celery \
-    redis
+    redis \
+    python-docx \
+    EbookLib \
+    PyMuPDF \
+    beautifulsoup4 \
+    inflect \
+    piper-tts \
+    mutagen \
+    argostranslate
 
-# 5. Download and install the Piper TTS binary
-RUN wget https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_amd64.tar.gz && \
-    tar -zxvf piper_amd64.tar.gz && \
-    mv ./piper /opt/piper && \
-    ln -s /opt/piper/piper /usr/local/bin/piper && \
-    rm piper_amd64.tar.gz
+# Download and install the Hebrew to English translation model
+RUN python -c "\
+from argostranslate import package;\
+package.update_package_index();\
+available_packages = package.get_available_packages();\
+package_to_install = next(filter(lambda x: x.from_code == 'he' and x.to_code == 'en', available_packages));\
+package.install_from_path(package_to_install.download());\
+"
 
-# 6. Tell the system where to find Piper's shared library files
-ENV LD_LIBRARY_PATH=/opt/piper/lib
+# Copy voice models from the builder stage
+COPY --from=builder /voices /app/voices
 
-# 7. Download the "hfc_male" voice model
-RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json
-
-# 8. Copy the web application and templates
+# Copy application files
 COPY app.py .
 COPY celery_config.py .
+COPY tts_service.py .
+COPY normalization.json .
 COPY templates ./templates
 
-# 9. Expose the port the web server will run on
+# Expose port for the web application
 EXPOSE 5000
 
-# 10. Set the command to run the Gunicorn server
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "300", "app:app"]
