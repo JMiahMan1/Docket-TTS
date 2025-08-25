@@ -115,7 +115,7 @@ def normalize_text(text: str) -> str:
             if (capitalized_words / word_count) >= 0.5: is_title_case_heading = True
 
         if is_mostly_caps_heading or is_title_case_heading:
-            processed_lines.append(stripped_line + ". ,")
+            processed_lines.append(", .. " + stripped_line + " .. ,")
         else:
             processed_lines.append(line)
     text = '\n'.join(processed_lines)

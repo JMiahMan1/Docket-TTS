@@ -44,6 +44,7 @@ RUN pip install --no-cache-dir \
     python-docx \
     EbookLib \
     PyMuPDF \
+    mutagen \
     beautifulsoup4 \
     inflect \
     piper-tts
