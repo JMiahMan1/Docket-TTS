@@ -26,9 +26,10 @@
                         <div id="result" class="mt-4"></div>
                         <div id="error" class="alert alert-danger mt-4" style="display:none;"></div>
                     </div>
-                    <div class="card-footer text-center" id="footer-links" style="display:none;">
+                    <div class="card-footer text-center" id="footer-links">
                         <a href="/">Convert Another File</a> | 
-                        <a href="/files">View All Files</a>
+                        <a href="/files">View All Files</a> |
+                        <a href="/jobs">View Running Jobs</a>
                     </div>
                 </div>
             </div>
@@ -51,7 +52,6 @@
                         progressBar.setAttribute('aria-valuenow', percent);
                         progressText.innerText = progress.status;
                         
-                        // Continue polling
                         setTimeout(() => checkStatus(taskId), 1500);
 
                     } else if (data.state === 'SUCCESS') {
@@ -60,20 +60,17 @@
                         progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
                         progressBar.classList.add('bg-success');
                         progressText.innerText = '✅ Conversion Complete!';
-                        document.getElementById('footer-links').style.display = 'block';
-
+                        
                         const resultData = data.status;
                         if (resultData.status === 'Success') {
                             const resultDiv = document.getElementById('result');
                             
-                            // Audio download link
                             const audioLink = document.createElement('a');
                             audioLink.href = `/generated/${resultData.filename}`;
                             audioLink.innerText = `Download Audio (${resultData.filename})`;
                             audioLink.className = 'btn btn-primary result-link';
                             resultDiv.appendChild(audioLink);
 
-                            // Text download link
                             if (resultData.textfile) {
                                 const textLink = document.createElement('a');
                                 textLink.href = `/generated/${resultData.textfile}`;
@@ -82,7 +79,6 @@
                                 resultDiv.appendChild(textLink);
                             }
                         } else {
-                            // Handle case where task succeeds but returns a functional error
                             const errorDiv = document.getElementById('error');
                             errorDiv.innerText = resultData.message || 'An unknown processing error occurred.';
                             errorDiv.style.display = 'block';
@@ -92,7 +88,6 @@
                         progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
                         progressBar.classList.add('bg-danger');
                         progressText.innerText = '❌ Conversion Failed';
-                        document.getElementById('footer-links').style.display = 'block';
                         
                         const errorDiv = document.getElementById('error');
                         errorDiv.innerText = data.status;

@@ -76,5 +76,4 @@ COPY templates ./templates
 # Expose port for the web application
 EXPOSE 5000
 
-# Start the Gunicorn web server
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "300", "app:app"]

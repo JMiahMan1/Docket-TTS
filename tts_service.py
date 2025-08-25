@@ -13,6 +13,7 @@ if NORMALIZATION_PATH.exists():
     BIBLE_BOOKS = NORMALIZATION.get("bible_books", [])
     AMBIGUOUS_BIBLE_ABBRS = NORMALIZATION.get("ambiguous_bible_abbrs", [])
     CASE_SENSITIVE_ABBRS = NORMALIZATION.get("case_sensitive_abbrs", [])
+    ROMAN_EXCEPTIONS = set(NORMALIZATION.get("roman_numeral_exceptions", []))
     BIBLE_REFS = NORMALIZATION.get("bible_refs", {})
     CONTRACTIONS = NORMALIZATION.get("contractions", {})
     SYMBOLS = NORMALIZATION.get("symbols", {})
@@ -20,7 +21,9 @@ if NORMALIZATION_PATH.exists():
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
 else:
+    # Provide empty fallbacks if the file is missing
     ABBREVIATIONS, BIBLE_BOOKS, AMBIGUOUS_BIBLE_ABBRS, CASE_SENSITIVE_ABBRS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], [], {}, {}, {}, {}, {}, {}
+    ROMAN_EXCEPTIONS = set()
 
 _inflect = inflect.engine()
 
@@ -35,7 +38,6 @@ def normalize_hebrew(text: str) -> str:
             translated_text = HEBREW_TO_ENGLISH.translate(hebrew_text)
             return f" , translation from Hebrew: {translated_text} , "
         return " [Hebrew text] "
-
     return re.sub(r'[\u0590-\u05FF]+', translate_match, text)
 
 def normalize_greek(text: str) -> str:
@@ -44,6 +46,38 @@ def normalize_greek(text: str) -> str:
         text = text.replace(char, replacement)
     return text
 
+def roman_to_int(s):
+    """Converts a Roman numeral string to an integer."""
+    roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
+    s = s.upper()
+    i = 0
+    num = 0
+    while i < len(s):
+        if i + 1 < len(s) and s[i:i+2] in ["IV", "IX", "XL", "XC", "CD", "CM"]:
+            num += roman_map[s[i+1]] - roman_map[s[i]]
+            i += 2
+        else:
+            num += roman_map[s[i]]
+            i += 1
+    return num
+
+def expand_roman_numerals(text: str) -> str:
+    """Finds and replaces Roman numerals with a spoken-word equivalent, ignoring exceptions."""
+    pattern = re.compile(r'\b([IVXLCDMivxlcdm]+)\b')
+    def replacer(match):
+        roman_str = match.group(1)
+        if roman_str.upper() in ROMAN_EXCEPTIONS:
+            return roman_str 
+        try:
+            if len(roman_str) == 1 and roman_str.upper() == 'I' and "I" not in ROMAN_EXCEPTIONS:
+                 return roman_str
+            integer_val = roman_to_int(roman_str)
+            return f"Roman Numeral {integer_val}"
+        except (KeyError, IndexError):
+            return roman_str
+    return pattern.sub(replacer, text)
+
+# --- Original Scripture Reference Feature ---
 def build_scripture_patterns():
     all_abbrs = [re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)]
     ambiguous_lower = [a.lower() for a in AMBIGUOUS_BIBLE_ABBRS]
@@ -71,16 +105,19 @@ def expand_scripture_references(text: str) -> str:
 
 def normalize_text(text: str) -> str:
     """Cleans and normalizes text to be more TTS-friendly."""
-    # Run foreign language normalization first
+    text = re.sub(r'\s*,\s*\.', '.', text) 
+    text = re.sub(r'\s*\.\s*,', ',', text)
+    text = re.sub(r'(\s*[\.,]\s*){2,}', '. ', text)
+    
     text = normalize_hebrew(text)
     text = normalize_greek(text)
     for phrase, replacement in LATIN_PHRASES.items():
         text = re.sub(rf'\b{re.escape(phrase)}\b', replacement, text, flags=re.IGNORECASE)
     
     text = re.sub(r'\[\d+\]|\(\d+\)|\b\d+\)|[¹²³⁴⁵⁶⁷⁸⁹⁰]+', '', text)
+    text = expand_roman_numerals(text)
     text = expand_scripture_references(text)
 
-    # Handle Case-Sensitive and Insensitive Abbreviations
     non_bible_abbrs = { k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS) }
     case_sensitive_set = {abbr.lower().replace('.', '') for abbr in CASE_SENSITIVE_ABBRS}
     for abbr, expanded in non_bible_abbrs.items():
@@ -100,7 +137,6 @@ def normalize_text(text: str) -> str:
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
-    # Smarter heading detection
     lines = text.split('\n')
     processed_lines = []
     for line in lines:
@@ -119,8 +155,9 @@ def normalize_text(text: str) -> str:
         if (1 < word_count < 9) and (stripped_line[-1].isalpha()) and (stripped_line[0].isupper()):
             capitalized_words = sum(1 for word in words if word[0].isupper())
             if (capitalized_words / word_count) >= 0.5: is_title_case_heading = True
+
         if is_mostly_caps_heading or is_title_case_heading:
-            processed_lines.append(". " + stripped_line + ". ,")
+            processed_lines.append(". . . " + stripped_line + ". . . ")
         else:
             processed_lines.append(line)
     text = '\n'.join(processed_lines)

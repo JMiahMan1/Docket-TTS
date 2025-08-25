@@ -1,16 +1,19 @@
-# Docker TTS with Piper 🗣️  
+# Docker TTS with Piper and Audiobook Tools 🗣️📖
 
-This project provides a simple, self-contained Docker solution to convert text files (`.txt`) and PDF files (`.pdf`) into speech (`.mp3`) using the high-quality, local **Piper TTS** engine. It is controlled by a simple shell script for easy use.  
+This project provides a simple, self-contained web application to convert various document types (`.txt`, `.pdf`, `.docx`, `.epub`) into high-quality speech (`.mp3`) using the local **Piper TTS** engine. It also includes a feature to merge multiple generated MP3 files into a single, tagged M4B audiobook.
+
+The entire application is containerized with Docker and managed via Docker Compose for easy setup and deployment.
 
 ---
 
 ## ✨ Features
-- **Versatile Input**: Converts both `.txt` and `.pdf` files.  
-- **High-Quality Voice**: Uses the fast and natural-sounding Piper TTS engine.  
-- **Containerized**: Fully containerized with Docker for easy setup and portability. The environment is consistent and works anywhere Docker is installed.  
-- **Simple Usage**: A single, straightforward command-line script handles the entire process.  
-- **MP3 Output**: Generates a standard `.mp3` audio file.  
-- **Robust Error Handling**: The main script provides clear error messages if the conversion fails.  
+- **Web Interface**: Modern, easy-to-use web UI for uploading files and managing generated audio.
+- **Versatile Input**: Converts `.txt`, `.pdf`, `.docx`, and `.epub` files.
+- **High-Quality Voices**: Uses the fast and natural-sounding Piper TTS engine, with support for multiple voices.
+- **Metadata Extraction**: Automatically extracts Title and Author from document properties and text to tag the final audio files.
+- **Audiobook Creation**: Merge multiple generated MP3 files into a single M4B audiobook directly from the file management page.
+- **Background Processing**: Uses Celery and Redis to handle long conversions without timing out, with a real-time progress bar.
+- **Containerized**: Fully containerized for easy setup and portability. The environment is consistent and works anywhere Docker is installed.
 
 ---
 
@@ -19,91 +22,75 @@ Before you begin, ensure you have the following installed on your host machine:
 
 - **Docker Engine** → [Installation Guide](https://docs.docker.com/engine/install/)  
 - **Docker Compose** → [Installation Guide](https://docs.docker.com/compose/install/)  
-- **A bash-compatible shell** → Standard on Linux and macOS.  
-- **pdftotext** → Required to extract text from PDF files. It is part of the `poppler-utils` package.  
-
-### Install `poppler-utils`  
-```bash
-# Debian/Ubuntu
-sudo apt-get update && sudo apt-get install poppler-utils
-
-# Fedora/CentOS
-sudo dnf install poppler-utils
-
-# macOS (with Homebrew)
-brew install poppler
-```
 
 ---
 
 ## 📂 Project Structure
-The repository contains the following key files:
-
 ```
 .
-├── docker-compose.yml   # Defines and configures the Docker service.
-├── Dockerfile           # Builds the Docker image with Piper and dependencies.
-├── speak.sh             # Main script you run to convert files.
-└── tts.sh               # Internal script inside the container for conversion.
+├── app.py               # Main Flask web application
+├── tts_service.py       # Handles text normalization and Piper TTS synthesis
+├── celery_config.py     # Configuration for the Celery background worker
+├── templates/           # HTML templates for the web interface
+├── Dockerfile           # Builds the Docker image with all dependencies
+├── docker-compose.yml   # Defines and configures the Docker services (web, worker, redis)
+└── README.md            # This file
 ```
 
 ---
 
 ## ⚙️ Setup
-Follow these steps to set up the project. You only need to do this once.
+Follow these steps to set up and run the project.
 
-### 1. Make the Script Executable  
+### 1. Build and Run the Services
+This single command builds the Docker images and starts the web server, background worker, and Redis services.
+
 ```bash
-chmod +x speak.sh
+docker compose up --build
 ```
 
-### 2. Build the Docker Image  
-This command builds the Docker image, downloading the Piper engine and all its dependencies:  
+The application will be available at [http://localhost:8000](http://localhost:8000).
+
+To stop the services, press **Ctrl+C** in the terminal, and then run:
+
 ```bash
-docker compose build
+docker compose down
 ```
 
 ---
 
 ## ▶️ Usage
-To convert a file, use the `speak.sh` script. It takes two arguments: the input file and the desired output filename.
 
-**Syntax**:
-```bash
-./speak.sh <input-file.pdf|txt> <output-file.mp3>
-```
+### Converting a Document to Speech
+1. Navigate to [http://localhost:8000](http://localhost:8000) in your web browser.  
+2. Choose a document file (`.txt`, `.pdf`, `.docx`, or `.epub`) to upload.  
+3. Select a voice from the dropdown menu. You can click the **Sample** button to hear a preview.  
+4. Click **Convert to Speech**.  
+5. You will be redirected to a progress page. Once complete, you will see download links for the generated MP3 and the normalized text file.  
 
-**Example (Converting a PDF)**:
-```bash
-./speak.sh my_document.pdf my_audiobook.mp3
-```
-
-**Example (Converting a Text File)**:
-```bash
-./speak.sh my_notes.txt my_notes_audio.mp3
-```
-
-The script will process the file and save the resulting audio to the output path you specified.
+### Creating an M4B Audiobook
+1. From the home page or result page, navigate to the **View Generated Files** page.  
+2. This page lists all the audio files you have created.  
+3. Use the checkboxes to select two or more MP3 files that you want to combine into an audiobook.  
+4. Click the **Merge Selected to Audiobook** button.  
+5. You will be redirected to the progress page. When the process is finished, a download link for your new `.m4b` audiobook file will appear.  
+   - The audiobook will be tagged with the title and author from the first MP3 file selected.  
 
 ---
 
-## 🎤 Customization: Changing the Voice
-You can easily change the voice model by modifying the `Dockerfile`.
+## 🎤 Customization: Changing Voices
+You can easily add or change the available voice models by modifying the `Dockerfile`.
 
-1. **Find a New Voice**  
-   Browse the [Piper Voice Library on Hugging Face](https://huggingface.co/rhasspy/piper-voices/tree/main).  
-
-2. **Get the Download Links**  
-   Navigate to the voice you want (e.g., `en_GB/vctk/medium`).  
-   Copy the link addresses for both the `.onnx` and `.onnx.json` files.  
-
-3. **Edit the Dockerfile**  
-   Open the `Dockerfile` and find the section for downloading the voice model (Step #5).  
-   Replace the two `wget` URLs with the new links.  
-
-4. **Rebuild the Image**  
-   Save the `Dockerfile` and run:  
+1. **Find a New Voice**: Browse the [Piper Voice Library](https://huggingface.co/rhasspy/piper-voices).  
+2. **Get Download Links**: Navigate to the voice you want (e.g., `en_GB/vctk/medium`). Copy the link addresses for both the `.onnx` and `.onnx.json` files.  
+3. **Edit the Dockerfile**: Open the `Dockerfile` and find the section labeled  
+   ```dockerfile
+   # Download high-quality voice models
+   ```  
+   Add or replace the `wget` URLs with the new links.  
+4. **Rebuild the Image**: Save the `Dockerfile` and run:  
    ```bash
-   docker compose build
-   ```
-   All subsequent conversions will now use the new voice.  
+   docker compose up --build --force-recreate
+   ```  
+   All subsequent conversions will have the new voice available.  
+
