@@ -60,6 +60,22 @@ def roman_to_int(s):
             i += 1
     return num
 
+def int_to_roman(num):
+    """Converts an integer to its canonical Roman numeral string."""
+    val_map = [
+        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
+        (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
+        (10, "X"), (9, "IX"), (5, "V"), (4, "IV"),
+        (1, "I")
+    ]
+    roman_str = ""
+    while num > 0:
+        for i, r in val_map:
+            while num >= i:
+                roman_str += r
+                num -= i
+    return roman_str
+
 def expand_roman_numerals(text: str) -> str:
     """Finds and replaces Roman numerals with a spoken-word equivalent, ignoring exceptions."""
     pattern = re.compile(r'\b([IVXLCDMivxlcdm]+)\b')

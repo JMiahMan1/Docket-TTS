@@ -19,6 +19,7 @@ import fitz  # PyMuPDF
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, COMM
 import redis
+import base64
 
 from tts_service import TTSService
 
@@ -270,6 +271,17 @@ def list_files():
     audio_files = [data for data in paired_files.values() if 'mp3_name' in data]
     return render_template('files.html', audio_files=audio_files)
 
+@app.route('/create-audiobook', methods=['POST'])
+def create_audiobook():
+    files_to_merge = sorted(request.form.getlist('files_to_merge'))
+    audiobook_title = request.form.get('title', 'Untitled Audiobook')
+    audiobook_author = request.form.get('author', 'Unknown Author')
+    if not files_to_merge:
+        flash("Please select at least one MP3 file.", "warning")
+        return redirect(url_for('list_files'))
+    task = create_audiobook_task.delay(files_to_merge, audiobook_title, audiobook_author)
+    return render_template('result.html', task_id=task.id)
+
 @app.route('/merge', methods=['POST'])
 def merge_mp3s():
     files_to_merge = request.form.getlist('files_to_merge')
@@ -342,25 +354,30 @@ def jobs_page():
                         'worker': worker_name
                     })
 
-        # 2. Get queued jobs by inspecting the Redis queue directly
+        # 2. Get queued jobs by inspecting and decoding the Redis queue
         if redis_client:
-            # Celery's default queue name is 'celery'
             queued_task_messages = redis_client.lrange('celery', 0, -1)
             for message in queued_task_messages:
                 try:
-                    # Decode message and load the JSON body
-                    j = json.loads(message.decode('utf-8'))
-                    # The arguments are base64 encoded, but we can decode the properties to get the ID
-                    task_id = j['headers']['id']
-                    # The arguments are inside a nested tuple
-                    task_args = j['body'][0]
+                    # First, decode the outer message
+                    outer_message = json.loads(message.decode('utf-8'))
+                    
+                    # Then, decode the body from base64
+                    encoded_body = outer_message.get('body')
+                    decoded_body_bytes = base64.b64decode(encoded_body)
+                    
+                    # Finally, decode the inner message to get the arguments
+                    inner_message = json.loads(decoded_body_bytes.decode('utf-8'))
+                    
+                    task_id = outer_message.get('headers', {}).get('id')
+                    task_args = inner_message[0] # Arguments are the first element
                     original_filename = Path(task_args[1]).name if len(task_args) > 1 else "N/A"
                     
                     queued_jobs.append({
                         'id': task_id,
                         'name': original_filename
                     })
-                except (json.JSONDecodeError, KeyError, IndexError) as e:
+                except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
                     app.logger.error(f"Could not parse queued task message: {e}")
         
     except Exception as e:
@@ -368,7 +385,6 @@ def jobs_page():
         flash("Could not connect to the Celery worker or Redis. One may be offline or starting up.", "error")
         
     return render_template('jobs.html', running_jobs=running_jobs, queued_jobs=queued_jobs)
-
 
 @app.route('/delete-bulk', methods=['POST'])
 def delete_bulk():
