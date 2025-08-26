@@ -21,7 +21,6 @@ if NORMALIZATION_PATH.exists():
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
 else:
-    # Provide empty fallbacks if the file is missing
     ABBREVIATIONS, BIBLE_BOOKS, AMBIGUOUS_BIBLE_ABBRS, CASE_SENSITIVE_ABBRS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], [], {}, {}, {}, {}, {}, {}
     ROMAN_EXCEPTIONS = set()
 
@@ -64,20 +63,30 @@ def roman_to_int(s):
 def expand_roman_numerals(text: str) -> str:
     """Finds and replaces Roman numerals with a spoken-word equivalent, ignoring exceptions."""
     pattern = re.compile(r'\b([IVXLCDMivxlcdm]+)\b')
+    
     def replacer(match):
         roman_str = match.group(1)
+        
         if roman_str.upper() in ROMAN_EXCEPTIONS:
             return roman_str 
+
         try:
-            if len(roman_str) == 1 and roman_str.upper() == 'I' and "I" not in ROMAN_EXCEPTIONS:
-                 return roman_str
+            #Convert the found word (e.g., "did") to an integer (1001).
             integer_val = roman_to_int(roman_str)
+            #Convert the integer back to a proper Roman numeral ("MI").
+            canonical_roman = int_to_roman(integer_val)
+            
+            #If the proper form doesn't match the original word, it's a false positive.
+            if canonical_roman.lower() != roman_str.lower():
+                return roman_str # Return the original word unchanged.
+
             return f"Roman Numeral {integer_val}"
         except (KeyError, IndexError):
+            # If any error occurs, it's not a valid numeral.
             return roman_str
+            
     return pattern.sub(replacer, text)
 
-# --- Original Scripture Reference Feature ---
 def build_scripture_patterns():
     all_abbrs = [re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)]
     ambiguous_lower = [a.lower() for a in AMBIGUOUS_BIBLE_ABBRS]
@@ -175,10 +184,41 @@ class TTSService:
             raise ValueError(f"Voice model not found at {self.voice_path}")
 
     def synthesize(self, text: str, output_path: str):
+        """
+        Generates audio by piping Piper's raw output to FFmpeg for proper MP3 encoding.
+        """
         normalized_text = normalize_text(text)
-        command = ["piper", "--model", str(self.voice_path), "--output_file", output_path]
-        process = subprocess.Popen(command, stdin=subprocess.PIPE, text=True)
-        process.communicate(input=normalized_text)
-        if process.returncode != 0:
-            raise RuntimeError("Piper TTS process failed.")
+        
+        # Piper outputs raw audio (s16le, 22050Hz, mono) to standard output
+        piper_command = ["piper", "--model", str(self.voice_path), "--output_file", "-"]
+        
+        # FFmpeg reads the raw audio from its standard input and encodes it to MP3
+        ffmpeg_command = [
+            "ffmpeg",
+            "-f", "s16le",       # Format of the input audio
+            "-ar", "22050",      # Audio rate
+            "-ac", "1",          # Audio channels (mono)
+            "-i", "-",           # Read from standard input
+            "-acodec", "libmp3lame", # Encode using the LAME MP3 encoder
+            "-q:a", "2",         # Set VBR quality (0-9, lower is better)
+            output_path
+        ]
+
+        # Chain the processes together
+        piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout)
+
+        # Send the text to Piper and close its input stream
+        piper_process.stdin.write(normalized_text.encode('utf-8'))
+        piper_process.stdin.close()
+        
+        # Allow piper_process.stdout to be read by ffmpeg_process
+        piper_process.stdout.close()
+        
+        # Wait for FFmpeg to finish encoding
+        ffmpeg_process.wait()
+
+        if ffmpeg_process.returncode != 0:
+            raise RuntimeError("FFmpeg encoding process failed.")
+            
         return output_path, normalized_text
