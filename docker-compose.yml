@@ -8,6 +8,7 @@ services:
     ports:
       - "8000:5000"
     volumes:
+      - .:/app
       - generated_data:/app/generated
       - uploads_data:/app/uploads
     command: gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 300 --reload app:app
@@ -20,6 +21,7 @@ services:
     # The worker runs a different command: it starts Celery
     command: celery -A app.celery worker --loglevel=info
     volumes:
+      - .:/app
       - generated_data:/app/generated
       - uploads_data:/app/uploads
     depends_on:
