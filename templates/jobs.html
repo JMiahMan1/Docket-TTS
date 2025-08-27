@@ -27,7 +27,7 @@
 
         <div class="card shadow-sm border-0 rounded-3 mb-4">
             <div class="card-header bg-primary text-white">
-                <h4 class="mb-0">Currently Running Jobs</h4>
+                <h4 class="mb-0">Running Jobs</h4>
             </div>
             <div class="card-body">
                 {% if running_jobs %}
@@ -53,7 +53,7 @@
                 </div>
                 {% else %}
                 <div class="alert alert-info text-center mb-0">
-                    No conversion jobs are currently running.
+                    No jobs are currently running.
                 </div>
                 {% endif %}
             </div>
@@ -61,10 +61,10 @@
 
         <div class="card shadow-sm border-0 rounded-3">
             <div class="card-header">
-                <h4 class="mb-0">Queued Jobs</h4>
+                <h4 class="mb-0">Waiting Jobs</h4>
             </div>
             <div class="card-body">
-                {% if queued_jobs %}
+                {% if waiting_jobs %}
                 <div class="table-responsive">
                     <table class="table table-striped table-hover align-middle">
                         <thead>
@@ -75,10 +75,16 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for job in queued_jobs %}
+                            {% for job in waiting_jobs %}
                             <tr>
                                 <td>{{ job.name }}</td>
-                                <td><span class="badge bg-secondary">Queued</span></td>
+                                <td>
+                                    {% if job.status == 'Queued' %}
+                                        <span class="badge bg-secondary">Queued in Redis</span>
+                                    {% elif job.status == 'Reserved' %}
+                                        <span class="badge bg-info text-dark">Reserved by Worker</span>
+                                    {% endif %}
+                                </td>
                                 <td><small class="text-muted">{{ job.id }}</small></td>
                             </tr>
                             {% endfor %}
@@ -87,7 +93,7 @@
                 </div>
                 {% else %}
                 <div class="alert alert-info text-center mb-0">
-                    The job queue is empty.
+                    No jobs are currently waiting.
                 </div>
                 {% endif %}
             </div>
