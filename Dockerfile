@@ -29,6 +29,7 @@ RUN dnf -y install \
     gcc-c++ \
     python3-sentencepiece \
     python3-torch \
+    python3-requests \
     && dnf clean all
 
 # Prepare app environment
