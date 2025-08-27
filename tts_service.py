@@ -107,15 +107,63 @@ def expand_scripture_references(text: str) -> str:
     def replacer(match):
         book_abbr, chapter, verses = match.groups() if len(match.groups()) == 3 else (match.group(1), match.group(2), None)
         book_full = ABBREVIATIONS.get(book_abbr.replace('.', ''), ABBREVIATIONS.get(book_abbr, book_abbr))
-        chapter_words = _inflect.number_to_words(chapter)
+        chapter_words = _inflect.number_to_words(int(chapter))
         if not verses: return f"{book_full} chapter {chapter_words}"
         verse_prefix = "verses" if ',' in verses or '-' in verses or '–' in verses else "verse"
-        verses = verses.replace('-', ' to ').replace('–', ' to ')
-        verse_words = re.sub(r'\d+', lambda m: _inflect.number_to_words(m.group()), verses)
+        verses = verses.replace('–', '-').replace('-', ' through ')
+        verse_words = re.sub(r'\d+', lambda m: _inflect.number_to_words(int(m.group())), verses)
         return f"{book_full} chapter {chapter_words}, {verse_prefix} {verse_words}"
     text = AMBIGUOUS_PATTERN.sub(replacer, text)
     text = UNAMBIGUOUS_PATTERN.sub(replacer, text)
     return text
+
+def expand_complex_scripture_references(text: str) -> str:
+    """Handles complex, multi-part scripture references like (Ps. 14:1–3; 53:1–4)."""
+    pattern = re.compile(r'\(\s*([A-Za-z\s\d]+?)\.?\s+([\d:-–,;\s]+)\s*\)')
+
+    def replacer(match):
+        book_abbr = match.group(1).strip()
+        references_str = match.group(2).strip()
+        full_book_name = ABBREVIATIONS.get(book_abbr, book_abbr)
+        
+        reference_parts = [part.strip() for part in references_str.split(';')]
+        expanded_parts = []
+        
+        last_chapter = ""
+        for part in reference_parts:
+            # This check prevents an error if a part is an empty string
+            if not part:
+                continue
+            
+            current_book_name = full_book_name
+            
+            if ':' in part:
+                chapter, verses = part.split(':', 1)
+                last_chapter = chapter.strip()
+            else:
+                if_chapter = part.strip()
+                if '-' in if_chapter or '–' in if_chapter:
+                    chapter = last_chapter
+                    verses = if_chapter
+                else:
+                    chapter = if_chapter
+                    verses = None
+
+            chapter_words = _inflect.number_to_words(int(chapter))
+            
+            if verses:
+                verses = verses.replace('–', '-').strip()
+                if '-' in verses:
+                    start_verse, end_verse = verses.split('-', 1)
+                    verse_words = f"verses {_inflect.number_to_words(int(start_verse))} through {_inflect.number_to_words(int(end_verse))}"
+                else:
+                    verse_words = f"verse {_inflect.number_to_words(int(verses))}"
+                expanded_parts.append(f"{current_book_name} chapter {chapter_words}, {verse_words}")
+            else:
+                expanded_parts.append(f"{current_book_name} chapter {chapter_words}")
+
+        return ", and ".join(expanded_parts)
+    return pattern.sub(replacer, text)
 
 def normalize_parentheticals(text: str) -> str:
     def replacer(match):
@@ -129,22 +177,45 @@ def normalize_parentheticals(text: str) -> str:
 def expand_ambiguous_citations(text: str) -> str:
     def replacer(match):
         chapter, verses = match.groups()
-        chapter_words = _inflect.number_to_words(chapter)
+        chapter_words = _inflect.number_to_words(int(chapter))
         
         if '-' in verses or '–' in verses:
             verse_prefix = "verses"
         else:
             verse_prefix = "verse"
         
-        verses = verses.replace('-', ' to ').replace('–', ' to ')
-        verse_words = re.sub(r'\d+', lambda m: _inflect.number_to_words(m.group()), verses)
+        verses = verses.replace('–', '-').replace('-', ' through ')
+        verse_words = re.sub(r'\d+', lambda m: _inflect.number_to_words(int(m.group())), verses)
         
         return f", chapter {chapter_words}, {verse_prefix} {verse_words} ,"
     
     return re.sub(r'\((\d+):([\d,-]+)\)', replacer, text)
 
+def number_replacer(match):
+    """Converts a number to words, with special handling for years."""
+    num_str = match.group(0)
+    num_int = int(num_str)
+    
+    if len(num_str) == 4 and 1000 <= num_int <= 2099:
+        if 2000 <= num_int <= 2009:
+            return _inflect.number_to_words(num_int, andword="")
+        else:
+            return _inflect.number_to_words(num_int, group=2)
+    else:
+        return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
+    # First, run content expansion that depends on original text structure
+    text = expand_complex_scripture_references(text)
+    text = expand_scripture_references(text)
+
+    # Next, remove elements that could interfere with other rules
+    text = re.sub(r'\[\d+\]|\[fn\]|\b\d+\)|[¹²³⁴⁵⁶⁷⁸⁹⁰]+', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'([.?!])("?)\s*(\d{1,3})\b', r'\1\2 ', text)
+    text = re.sub(r'([;)])\s*(\d{1,3})\b', r'\1 ', text)
+    text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
+
+    # General normalization and cleanup
     text = re.sub(r'\s*,\s*\.', '.', text) 
     text = re.sub(r'\s*\.\s*,', ',', text)
     text = re.sub(r'(\s*[\.,]\s*){2,}', '. ', text)
@@ -155,12 +226,8 @@ def normalize_text(text: str) -> str:
         text = re.sub(rf'\b{re.escape(phrase)}\b', replacement, text, flags=re.IGNORECASE)
     
     text = expand_ambiguous_citations(text)
-    
     text = normalize_parentheticals(text)
-    
-    text = re.sub(r'\[\d+\]|\b\d+\)|[¹²³⁴⁵⁶⁷⁸⁹⁰]+', '', text)
     text = expand_roman_numerals(text)
-    text = expand_scripture_references(text)
 
     non_bible_abbrs = { k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS) }
     case_sensitive_set = {abbr.lower().replace('.', '') for abbr in CASE_SENSITIVE_ABBRS}
@@ -172,7 +239,7 @@ def normalize_text(text: str) -> str:
             text = re.sub(rf"\b{re.escape(abbr)}\b", expanded, text, flags=re.IGNORECASE)
 
     def bible_ff_repl(match):
-        book, verse = match.group(1), _inflect.number_to_words(match.group(2))
+        book, verse = match.group(1), _inflect.number_to_words(int(match.group(2)))
         suffix = BIBLE_REFS.get(match.group(3).lower(), "")
         return f"{book} verse {verse} {suffix}"
     text = re.sub(r"([A-Za-z]+\s?\d*):(\d+)(ff|f)\b", bible_ff_repl, text)
@@ -203,10 +270,10 @@ def normalize_text(text: str) -> str:
         if is_mostly_caps_heading or is_title_case_heading:
             processed_lines.append(". . . " + stripped_line + ". . . ")
         else:
-            processed_lines.append(line)
+            processed_lines.append(stripped_line)
     text = '\n'.join(processed_lines)
     
-    text = re.sub(r"\b\d+\b", lambda m: _inflect.number_to_words(m.group(), andword=""), text)
+    text = re.sub(r"\b\d+\b", number_replacer, text)
     text = re.sub(r"\s+", " ", text).strip()
     text = text.replace(":", ",")
     return text

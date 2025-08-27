@@ -175,6 +175,10 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 4, 'status': 'Extracting text...'})
         text_content, metadata = extract_text_and_metadata(input_filepath)
         if not text_content or not metadata: raise ValueError('Could not extract text.')
+        # For pasted text, the filename is the title. Override metadata title.
+        if Path(original_filename).suffix == '.txt' and 'title' in metadata:
+            metadata['title'] = Path(original_filename).stem.replace('_', ' ').title()
+
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 4, 'status': 'Synthesizing audio...'})
         unique_id = str(uuid.uuid4().hex[:8])
         base_name = Path(original_filename).stem
@@ -188,9 +192,14 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         text_filename = f"{base_name}_{unique_id}.txt"
         text_filepath = os.path.join(GENERATED_FOLDER, text_filename)
         Path(text_filepath).write_text(normalized_text, encoding="utf-8")
+        # Clean up the uploaded file, especially for pasted text
+        if os.path.exists(input_filepath):
+            os.remove(input_filepath)
         return {'status': 'Success', 'filename': output_filename, 'textfile': text_filename}
     except Exception as e:
         app.logger.error(f"TTS Conversion failed in task {self.request.id}: {e}")
+        if os.path.exists(input_filepath):
+            os.remove(input_filepath)
         self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
         raise e
 
@@ -264,19 +273,50 @@ def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, co
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
-        if 'file' not in request.files:
-            flash('No file part.', 'error')
-            return redirect(request.url)
-        file = request.files['file']
-        if file.filename == '' or not allowed_file(file.filename):
-            flash('Invalid file type.', 'error')
-            return redirect(request.url)
-        original_filename = secure_filename(file.filename)
-        input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
-        file.save(input_filepath)
         voice_name = request.form.get("voice")
-        task = convert_to_speech_task.delay(input_filepath, original_filename, voice_name)
-        return render_template('result.html', task_id=task.id)
+        text_input = request.form.get('text_input')
+
+        # --- Handle Text Input ---
+        if text_input and text_input.strip():
+            title = request.form.get('text_title')
+            if not title or not title.strip():
+                flash('Title is required for pasted text.', 'error')
+                return redirect(request.url)
+            
+            # Use the user's title to create the original filename for the task.
+            original_filename = f"{secure_filename(title.strip())}.txt"
+            # Create a unique internal filename to avoid server-side collisions.
+            unique_internal_filename = f"{uuid.uuid4().hex}.txt"
+            input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
+            
+            Path(input_filepath).write_text(text_input, encoding='utf-8')
+            
+            task = convert_to_speech_task.delay(input_filepath, original_filename, voice_name)
+            return render_template('result.html', task_id=task.id)
+
+        # --- Handle File Upload ---
+        if 'file' not in request.files:
+            flash('No file part submitted.', 'error')
+            return redirect(request.url)
+        
+        file = request.files['file']
+
+        if file.filename == '':
+            flash('No file selected.', 'error')
+            return redirect(request.url)
+
+        if file and allowed_file(file.filename):
+            original_filename = secure_filename(file.filename)
+            input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+            file.save(input_filepath)
+            
+            task = convert_to_speech_task.delay(input_filepath, original_filename, voice_name)
+            return render_template('result.html', task_id=task.id)
+        
+        flash(f'Invalid file type. Allowed types are: {", ".join(ALLOWED_EXTENSIONS)}.', 'error')
+        return redirect(request.url)
+
+    # --- Handle GET Request ---
     voices = list_available_voices()
     return render_template('index.html', voices=voices)
 
