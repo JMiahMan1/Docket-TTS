@@ -10,6 +10,7 @@ services:
     volumes:
       - generated_data:/app/generated
       - uploads_data:/app/uploads
+    command: gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 300 --reload app:app
     depends_on:
       - redis
     restart: always
