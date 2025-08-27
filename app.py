@@ -334,57 +334,52 @@ def merge_mp3s():
 @app.route('/jobs')
 def jobs_page():
     running_jobs = []
-    queued_jobs = []
+    waiting_jobs = [] # This will hold both queued and reserved jobs
 
     try:
-        # 1. Get running jobs from Celery worker inspection
         inspector = celery.control.inspect()
-        active_tasks = inspector.active()
-        if active_tasks:
-            for worker_name, tasks in active_tasks.items():
-                for task in tasks:
-                    original_filename = "N/A"
-                    task_args = task.get('args')
-                    if task_args and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
-                        original_filename = Path(task_args[1]).name
-                    
-                    running_jobs.append({
-                        'id': task['id'],
-                        'name': original_filename,
-                        'worker': worker_name
-                    })
+        
+        # 1. Get RUNNING jobs
+        active_tasks = inspector.active() or {}
+        for worker_name, tasks in active_tasks.items():
+            for task in tasks:
+                original_filename = "N/A"
+                task_args = task.get('args')
+                if task_args and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
+                    original_filename = Path(task_args[1]).name
+                running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker_name})
 
-        # 2. Get queued jobs by inspecting and decoding the Redis queue
+        # 2. Get RESERVED jobs (prefetched by worker)
+        reserved_tasks = inspector.reserved() or {}
+        for worker_name, tasks in reserved_tasks.items():
+            for task in tasks:
+                original_filename = "N/A"
+                task_args = task.get('args')
+                if task_args and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
+                    original_filename = Path(task_args[1]).name
+                waiting_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
+
+        # 3. Get QUEUED jobs (still in Redis)
         if redis_client:
             queued_task_messages = redis_client.lrange('celery', 0, -1)
             for message in queued_task_messages:
                 try:
-                    # First, decode the outer message
                     outer_message = json.loads(message.decode('utf-8'))
-                    
-                    # Then, decode the body from base64
                     encoded_body = outer_message.get('body')
                     decoded_body_bytes = base64.b64decode(encoded_body)
-                    
-                    # Finally, decode the inner message to get the arguments
                     inner_message = json.loads(decoded_body_bytes.decode('utf-8'))
-                    
                     task_id = outer_message.get('headers', {}).get('id')
-                    task_args = inner_message[0] # Arguments are the first element
+                    task_args = inner_message[0]
                     original_filename = Path(task_args[1]).name if len(task_args) > 1 else "N/A"
-                    
-                    queued_jobs.append({
-                        'id': task_id,
-                        'name': original_filename
-                    })
-                except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+                    waiting_jobs.append({'id': task_id, 'name': original_filename, 'status': 'Queued'})
+                except Exception as e:
                     app.logger.error(f"Could not parse queued task message: {e}")
         
     except Exception as e:
         app.logger.error(f"Could not inspect Celery workers or Redis queue: {e}")
-        flash("Could not connect to the Celery worker or Redis. One may be offline or starting up.", "error")
+        flash("Could not connect to the Celery worker or Redis.", "error")
         
-    return render_template('jobs.html', running_jobs=running_jobs, queued_jobs=queued_jobs)
+    return render_template('jobs.html', running_jobs=running_jobs, waiting_jobs=waiting_jobs)
 
 @app.route('/delete-bulk', methods=['POST'])
 def delete_bulk():

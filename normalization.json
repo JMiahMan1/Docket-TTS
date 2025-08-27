@@ -227,12 +227,14 @@
     "No.": "Number",
     "NovT": "Novum Testamentum",
     "NovT.": "Novum Testamentum",
+    "NT": "New Testament",
     "NTS": "New Testament Studies",
     "NTS.": "New Testament Studies",
     "Num": "Numbers",
     "Num.": "Numbers",
     "Obad": "Obadiah",
     "Obad.": "Obadiah",
+    "OT": "Old Testament",
     "PCB": "Peaks Commenatry on the Bible",
     "PCB.": "Peaks Commenatry on the Bible",
     "Philem": "Philemon",
@@ -348,9 +350,10 @@
     "e.g.": "for example",
     "et al.": "et all",
     "et al": "et all",
-    "cf.": "compare",
     "ad hoc": "ad hock",
-    "de facto": "dee facto"
+    "de facto": "dee facto",
+    "cf.": "compare",
+    "cf": "compare"
   },
   "greek_transliteration": {
     "α": "a", "Α": "A", "β": "b", "Β": "B", "γ": "g", "Γ": "G", "δ": "d", "Δ": "D",

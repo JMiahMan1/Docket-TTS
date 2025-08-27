@@ -5,7 +5,6 @@ import subprocess
 from pathlib import Path
 from argostranslate import translate
 
-# Load normalization rules from the JSON file
 NORMALIZATION_PATH = Path("normalization.json")
 if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
@@ -26,11 +25,9 @@ else:
 
 _inflect = inflect.engine()
 
-# Load the installed translation model once when the script starts
 HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
 
 def normalize_hebrew(text: str) -> str:
-    """Finds blocks of Hebrew, translates them, and formats for TTS."""
     def translate_match(match):
         hebrew_text = match.group(0)
         if HEBREW_TO_ENGLISH:
@@ -40,19 +37,17 @@ def normalize_hebrew(text: str) -> str:
     return re.sub(r'[\u0590-\u05FF]+', translate_match, text)
 
 def normalize_greek(text: str) -> str:
-    """Transliterates Greek characters to their English phonetic equivalents."""
     for char, replacement in GREEK_TRANSLITERATION.items():
         text = text.replace(char, replacement)
     return text
 
 def roman_to_int(s):
-    """Converts a Roman numeral string to an integer."""
     roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
     s = s.upper()
     i = 0
     num = 0
     while i < len(s):
-        if i + 1 < len(s) and s[i:i+2] in ["IV", "IX", "XL", "XC", "CD", "CM"]:
+        if i + 1 < len(s) and roman_map[s[i]] < roman_map[s[i+1]]:
             num += roman_map[s[i+1]] - roman_map[s[i]]
             i += 2
         else:
@@ -61,7 +56,6 @@ def roman_to_int(s):
     return num
 
 def int_to_roman(num):
-    """Converts an integer to its canonical Roman numeral string."""
     val_map = [
         (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
         (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
@@ -77,7 +71,6 @@ def int_to_roman(num):
     return roman_str
 
 def expand_roman_numerals(text: str) -> str:
-    """Finds and replaces Roman numerals with a spoken-word equivalent, ignoring exceptions."""
     pattern = re.compile(r'\b([IVXLCDMivxlcdm]+)\b')
     
     def replacer(match):
@@ -87,18 +80,14 @@ def expand_roman_numerals(text: str) -> str:
             return roman_str 
 
         try:
-            #Convert the found word (e.g., "did") to an integer (1001).
             integer_val = roman_to_int(roman_str)
-            #Convert the integer back to a proper Roman numeral ("MI").
             canonical_roman = int_to_roman(integer_val)
             
-            #If the proper form doesn't match the original word, it's a false positive.
             if canonical_roman.lower() != roman_str.lower():
-                return roman_str # Return the original word unchanged.
+                return roman_str
 
             return f"Roman Numeral {integer_val}"
         except (KeyError, IndexError):
-            # If any error occurs, it's not a valid numeral.
             return roman_str
             
     return pattern.sub(replacer, text)
@@ -128,8 +117,34 @@ def expand_scripture_references(text: str) -> str:
     text = UNAMBIGUOUS_PATTERN.sub(replacer, text)
     return text
 
+def normalize_parentheticals(text: str) -> str:
+    def replacer(match):
+        content = match.group(1)
+        cleaned_content = content.strip().strip('.,;')
+        return f" , {cleaned_content} , "
+    
+    text = re.sub(r'\((\d+|[IVXLCDMivxlcdm]+)\)', '', text)
+    return re.sub(r'\((.*?)\)', replacer, text)
+
+def expand_ambiguous_citations(text: str) -> str:
+    def replacer(match):
+        chapter, verses = match.groups()
+        chapter_words = _inflect.number_to_words(chapter)
+        
+        if '-' in verses or '–' in verses:
+            verse_prefix = "verses"
+        else:
+            verse_prefix = "verse"
+        
+        verses = verses.replace('-', ' to ').replace('–', ' to ')
+        verse_words = re.sub(r'\d+', lambda m: _inflect.number_to_words(m.group()), verses)
+        
+        return f", chapter {chapter_words}, {verse_prefix} {verse_words} ,"
+    
+    return re.sub(r'\((\d+):([\d,-]+)\)', replacer, text)
+
+
 def normalize_text(text: str) -> str:
-    """Cleans and normalizes text to be more TTS-friendly."""
     text = re.sub(r'\s*,\s*\.', '.', text) 
     text = re.sub(r'\s*\.\s*,', ',', text)
     text = re.sub(r'(\s*[\.,]\s*){2,}', '. ', text)
@@ -139,7 +154,11 @@ def normalize_text(text: str) -> str:
     for phrase, replacement in LATIN_PHRASES.items():
         text = re.sub(rf'\b{re.escape(phrase)}\b', replacement, text, flags=re.IGNORECASE)
     
-    text = re.sub(r'\[\d+\]|\(\d+\)|\b\d+\)|[¹²³⁴⁵⁶⁷⁸⁹⁰]+', '', text)
+    text = expand_ambiguous_citations(text)
+    
+    text = normalize_parentheticals(text)
+    
+    text = re.sub(r'\[\d+\]|\b\d+\)|[¹²³⁴⁵⁶⁷⁸⁹⁰]+', '', text)
     text = expand_roman_numerals(text)
     text = expand_scripture_references(text)
 
@@ -193,45 +212,35 @@ def normalize_text(text: str) -> str:
     return text
 
 class TTSService:
-    """A service to handle text-to-speech conversion using the Piper engine."""
     def __init__(self, voice: str = "en_US-hfc_male-medium.onnx"):
         self.voice_path = Path(f"/app/voices/{voice}")
         if not self.voice_path.exists():
             raise ValueError(f"Voice model not found at {self.voice_path}")
 
     def synthesize(self, text: str, output_path: str):
-        """
-        Generates audio by piping Piper's raw output to FFmpeg for proper MP3 encoding.
-        """
         normalized_text = normalize_text(text)
         
-        # Piper outputs raw audio (s16le, 22050Hz, mono) to standard output
         piper_command = ["piper", "--model", str(self.voice_path), "--output_file", "-"]
         
-        # FFmpeg reads the raw audio from its standard input and encodes it to MP3
         ffmpeg_command = [
             "ffmpeg",
-            "-f", "s16le",       # Format of the input audio
-            "-ar", "22050",      # Audio rate
-            "-ac", "1",          # Audio channels (mono)
-            "-i", "-",           # Read from standard input
-            "-acodec", "libmp3lame", # Encode using the LAME MP3 encoder
-            "-q:a", "2",         # Set VBR quality (0-9, lower is better)
+            "-f", "s16le",
+            "-ar", "22050",
+            "-ac", "1",
+            "-i", "-",
+            "-acodec", "libmp3lame",
+            "-q:a", "2",
             output_path
         ]
 
-        # Chain the processes together
         piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout)
 
-        # Send the text to Piper and close its input stream
         piper_process.stdin.write(normalized_text.encode('utf-8'))
         piper_process.stdin.close()
         
-        # Allow piper_process.stdout to be read by ffmpeg_process
         piper_process.stdout.close()
         
-        # Wait for FFmpeg to finish encoding
         ffmpeg_process.wait()
 
         if ffmpeg_process.returncode != 0:
