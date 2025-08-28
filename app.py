@@ -192,14 +192,14 @@ def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, co
     build_dir = Path(GENERATED_FOLDER) / f"audiobook_build_{timestamp}"
     os.makedirs(build_dir, exist_ok=True)
     try:
-        self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
+        self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters...'})
         safe_mp3_paths = [Path(GENERATED_FOLDER) / secure_filename(fname) for fname in file_list]
         merged_text_content = ""
         for mp3_path in safe_mp3_paths:
             txt_path = mp3_path.with_suffix('.txt')
             if txt_path.exists():
                 merged_text_content += txt_path.read_text(encoding='utf-8') + "\n\n"
-        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Downloading cover art...'})
+        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Downloading cover...'})
         cover_path = None
         if cover_url:
             try:
@@ -225,7 +225,7 @@ def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, co
         chapters_meta_path = build_dir / "chapters.meta"
         concat_list_path.write_text(concat_list_content)
         chapters_meta_path.write_text(chapters_meta_content, encoding='utf-8')
-        self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Merging and encoding audio...'})
+        self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Encoding audio...'})
         temp_audio_path = build_dir / "temp_audio.aac"
         concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-c:a', 'aac', '-b:a', '128k', str(temp_audio_path)]
         subprocess.run(concat_command, check=True, capture_output=True)
