@@ -13,11 +13,14 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    - name: Set up Docker Buildx and install Compose
+      uses: docker/setup-buildx-action@v3
+
     - name: Build the Docker services
-      run: docker-compose build
+      run: docker compose build
 
     - name: Start the services in the background
-      run: docker-compose up -d
+      run: docker compose up -d
 
     - name: Wait for the web service to be healthy
       run: |
@@ -27,7 +30,7 @@ jobs:
           timeout=$((timeout-5))
           if [ $timeout -le 0 ]; then
             echo "Service timed out."
-            docker-compose logs web
+            docker compose logs web
             exit 1
           fi
           sleep 5
@@ -42,12 +45,10 @@ jobs:
       
     - name: Stop services after tests
       if: always()
-      run: docker-compose down
+      run: docker compose down
 
   deploy:
-    # This job depends on the 'test' job and will only run if it succeeds
     needs: test
-    # It only runs on a push to the 'main' branch, not on pull requests
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
