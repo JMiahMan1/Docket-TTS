@@ -1,5 +1,5 @@
 # Stage 1: Builder for fetching Piper assets
-FROM fedora-minimal:42 AS builder
+FROM fedora:42 AS builder
 
 # Install build tools. microdnf is used in minimal images.
 RUN microdnf -y install wget && microdnf clean all
@@ -17,7 +17,7 @@ RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hf
 
 
 # Stage 2: Final Application Image
-FROM fedora-minimal:42
+FROM fedora:42
 
 # Prepare app environment
 WORKDIR /app
