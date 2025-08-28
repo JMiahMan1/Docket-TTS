@@ -5,8 +5,8 @@
 set -e
 
 echo "--- Installing test dependencies ---"
-# Removed "unittest-mock" as it's part of the Python standard library
-pip install --no-cache-dir pytest requests
+# Install app dependencies from requirements.txt and the pytest package
+pip install --no-cache-dir -r requirements.txt pytest
 
 # Check if a custom URL is provided, otherwise use the default
 if [ -z "$APP_BASE_URL" ]; then
