@@ -14,7 +14,7 @@ fi
 
 echo "--- Running tests against $APP_BASE_URL ---"
 
-# Run pytest, -v for verbose output
-pytest -v test_deployment.py test_functionality.py
+# Run pytest against the /tests directory
+pytest -v tests/
 
 echo "--- All tests passed successfully! ---"
