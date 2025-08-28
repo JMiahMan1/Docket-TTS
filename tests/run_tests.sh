@@ -5,7 +5,7 @@
 set -e
 
 echo "--- Installing test dependencies ---"
-pip install --no-cache-dir pytest requests
+pip install --no-cache-dir pytest requests "unittest-mock"
 
 # Check if a custom URL is provided, otherwise use the default
 if [ -z "$APP_BASE_URL" ]; then
@@ -14,7 +14,10 @@ fi
 
 echo "--- Running tests against $APP_BASE_URL ---"
 
-# Run pytest against the /tests directory
+# Add the project root to the Python path to allow tests to import app modules
+export PYTHONPATH=.
+
+# Run pytest against the /tests directory. It will find all test_*.py files.
 pytest -v tests/
 
 echo "--- All tests passed successfully! ---"
