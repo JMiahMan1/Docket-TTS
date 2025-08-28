@@ -37,7 +37,6 @@ RUN dnf -y install \
     python3-onnxruntime \
     python3-sentencepiece \
     python3-flask \
-    python3-gunicorn \
     python3-celery \
     python3-redis \
     python3-docx \
