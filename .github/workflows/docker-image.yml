@@ -1,11 +1,54 @@
-name: Docker Image CI
+name: Continuous Integration and Deployment
 
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
-  build_and_push:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Build the Docker services
+      run: docker-compose build
+
+    - name: Start the services in the background
+      run: docker-compose up -d
+
+    - name: Wait for the web service to be healthy
+      run: |
+        echo "Waiting for web service..."
+        timeout=60
+        while ! curl --silent --fail http://localhost:8000; do
+          timeout=$((timeout-5))
+          if [ $timeout -le 0 ]; then
+            echo "Service timed out."
+            docker-compose logs web
+            exit 1
+          fi
+          sleep 5
+        done
+        echo "Web service is up!"
+
+    - name: Make test script executable
+      run: chmod +x tests/run_tests.sh
+
+    - name: Run tests
+      run: ./tests/run_tests.sh
+      
+    - name: Stop services after tests
+      if: always()
+      run: docker-compose down
+
+  deploy:
+    # This job depends on the 'test' job and will only run if it succeeds
+    needs: test
+    # It only runs on a push to the 'main' branch, not on pull requests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
