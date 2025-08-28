@@ -488,6 +488,3 @@ def task_status(task_id):
 @app.route('/generated/<name>')
 def download_file(name):
     return send_from_directory(app.config["GENERATED_FOLDER"], name)
-
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0')
