@@ -32,6 +32,8 @@ RUN dnf -y install \
     poppler-utils \
     ffmpeg \
     espeak-ng \
+    cmake \
+    gcc-c++ \
     && dnf clean all \
     && python3 -m venv /opt/venv \
     && . /opt/venv/bin/activate \
