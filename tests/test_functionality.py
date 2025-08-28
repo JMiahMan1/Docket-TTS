@@ -1,4 +1,3 @@
-# tests/test_functionality.py
 import os
 import requests
 import time
@@ -103,9 +102,9 @@ def test_roman_numeral_expansion():
     
     normalized_text = submit_and_poll_task(title, text)
     
-    assert "Acts Roman Numeral 15" in normalized_text
-    assert "chapter Roman Numeral 6" in normalized_text
-    assert "section Roman Numeral 4" in normalized_text
+    assert "Acts Roman Numeral fifteen" in normalized_text
+    assert "chapter Roman Numeral six" in normalized_text
+    assert "section Roman Numeral four" in normalized_text
 
 def test_greek_transliteration():
     """
@@ -117,7 +116,6 @@ def test_greek_transliteration():
 
     normalized_text = submit_and_poll_task(title, text)
 
-    # Check that the Greek words are transliterated or handled gracefully
     assert "anomiai" in normalized_text
     assert "amartiai" in normalized_text
 
