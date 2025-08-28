@@ -10,6 +10,18 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+    - name: Free Disk Space on Runner
+      uses: jlumbroso/free-disk-space@main
+      with:
+        # These are the default options, but shown for clarity
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        swift: true
+        golang: true
+        docker-images: false # Do not remove docker images
+
     - name: Checkout repository
       uses: actions/checkout@v4
 
