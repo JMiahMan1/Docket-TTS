@@ -244,7 +244,8 @@ def normalize_text(text: str) -> str:
     
     # Run Latin phrase expansion before general punctuation cleanup
     for phrase, replacement in LATIN_PHRASES.items():
-        text = re.sub(rf'\b{re.escape(phrase)}\b(?!\w)', replacement, text, flags=re.IGNORECASE)
+        # Corrected regex to be more flexible with trailing punctuation
+        text = re.sub(rf'{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
 
     # General normalization and cleanup
     text = re.sub(r'\s*,\s*\.', '.', text) 
