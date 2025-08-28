@@ -25,13 +25,11 @@ import requests
 
 from tts_service import TTSService
 
-# --- Configuration ---
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'epub'}
 
-# --- Flask App Initialization ---
 app = Flask(__name__)
 app.config.from_mapping(
     UPLOAD_FOLDER=UPLOAD_FOLDER,
@@ -39,7 +37,6 @@ app.config.from_mapping(
     SECRET_KEY='a-secure-and-random-secret-key'
 )
 
-# --- Celery Configuration ---
 def celery_init_app(app: Flask) -> Celery:
     class FlaskTask(Task):
         def __call__(self, *args: object, **kwargs: object) -> object:
@@ -52,26 +49,19 @@ def celery_init_app(app: Flask) -> Celery:
 
 celery = celery_init_app(app)
 
-# --- Redis client for inspecting the queue ---
 try:
     redis_client = redis.from_url(celery.conf.broker_url)
 except Exception as e:
     app.logger.error(f"Could not create Redis client: {e}")
     redis_client = None
 
-
-# --- Ensure Directories Exist ---
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(GENERATED_FOLDER, exist_ok=True)
 
-
-# --- Helper Functions ---
 def allowed_file(filename):
-    """Check if the uploaded file has an allowed extension."""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def tag_mp3_file(filepath, metadata):
-    """Adds ID3 metadata tags to the generated MP3 file correctly."""
     try:
         audio = MP3(filepath)
         if audio.tags is None: audio.add_tags()
@@ -89,7 +79,6 @@ def tag_mp3_file(filepath, metadata):
         app.logger.error(f"Failed to tag {filepath}: {e}")
 
 def parse_metadata_from_text(text_content):
-    """Scans the beginning of text to find Title and Author as a fallback."""
     parsed_meta = {}
     search_area = text_content[:4000]
     lines = [line.strip() for line in search_area.split('\n') if line.strip()]
@@ -115,9 +104,6 @@ def parse_metadata_from_text(text_content):
     return parsed_meta
 
 def extract_text_and_metadata(filepath):
-    """
-    Extracts text and metadata from files, using text parsing as a fallback.
-    """
     p_filepath = Path(filepath)
     extension = p_filepath.suffix.lower()
     text = ""
@@ -175,10 +161,8 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 4, 'status': 'Extracting text...'})
         text_content, metadata = extract_text_and_metadata(input_filepath)
         if not text_content or not metadata: raise ValueError('Could not extract text.')
-        # For pasted text, the filename is the title. Override metadata title.
         if Path(original_filename).suffix == '.txt' and 'title' in metadata:
             metadata['title'] = Path(original_filename).stem.replace('_', ' ').title()
-
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 4, 'status': 'Synthesizing audio...'})
         unique_id = str(uuid.uuid4().hex[:8])
         base_name = Path(original_filename).stem
@@ -192,7 +176,6 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         text_filename = f"{base_name}_{unique_id}.txt"
         text_filepath = os.path.join(GENERATED_FOLDER, text_filename)
         Path(text_filepath).write_text(normalized_text, encoding="utf-8")
-        # Clean up the uploaded file, especially for pasted text
         if os.path.exists(input_filepath):
             os.remove(input_filepath)
         return {'status': 'Success', 'filename': output_filename, 'textfile': text_filename}
@@ -209,14 +192,14 @@ def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, co
     build_dir = Path(GENERATED_FOLDER) / f"audiobook_build_{timestamp}"
     os.makedirs(build_dir, exist_ok=True)
     try:
-        self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
+        self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters...'})
         safe_mp3_paths = [Path(GENERATED_FOLDER) / secure_filename(fname) for fname in file_list]
         merged_text_content = ""
         for mp3_path in safe_mp3_paths:
             txt_path = mp3_path.with_suffix('.txt')
             if txt_path.exists():
                 merged_text_content += txt_path.read_text(encoding='utf-8') + "\n\n"
-        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Downloading cover art...'})
+        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Downloading cover...'})
         cover_path = None
         if cover_url:
             try:
@@ -242,7 +225,7 @@ def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, co
         chapters_meta_path = build_dir / "chapters.meta"
         concat_list_path.write_text(concat_list_content)
         chapters_meta_path.write_text(chapters_meta_content, encoding='utf-8')
-        self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Merging and encoding audio...'})
+        self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Encoding audio...'})
         temp_audio_path = build_dir / "temp_audio.aac"
         concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-c:a', 'aac', '-b:a', '128k', str(temp_audio_path)]
         subprocess.run(concat_command, check=True, capture_output=True)
@@ -275,48 +258,35 @@ def upload_file():
     if request.method == 'POST':
         voice_name = request.form.get("voice")
         text_input = request.form.get('text_input')
-
-        # --- Handle Text Input ---
         if text_input and text_input.strip():
             title = request.form.get('text_title')
             if not title or not title.strip():
                 flash('Title is required for pasted text.', 'error')
                 return redirect(request.url)
-            
-            # Use the user's title to create the original filename for the task.
             original_filename = f"{secure_filename(title.strip())}.txt"
-            # Create a unique internal filename to avoid server-side collisions.
             unique_internal_filename = f"{uuid.uuid4().hex}.txt"
             input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
-            
             Path(input_filepath).write_text(text_input, encoding='utf-8')
-            
             task = convert_to_speech_task.delay(input_filepath, original_filename, voice_name)
             return render_template('result.html', task_id=task.id)
-
-        # --- Handle File Upload ---
-        if 'file' not in request.files:
-            flash('No file part submitted.', 'error')
+        uploaded_files = request.files.getlist('file')
+        if not uploaded_files or uploaded_files[0].filename == '':
+            flash('No files selected.', 'error')
             return redirect(request.url)
-        
-        file = request.files['file']
-
-        if file.filename == '':
-            flash('No file selected.', 'error')
+        job_count = 0
+        for file in uploaded_files:
+            if file and allowed_file(file.filename):
+                original_filename = secure_filename(file.filename)
+                input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
+                file.save(input_filepath)
+                convert_to_speech_task.delay(input_filepath, original_filename, voice_name)
+                job_count += 1
+        if job_count > 0:
+            flash(f'Successfully queued {job_count} file(s) for conversion.', 'success')
+            return redirect(url_for('jobs_page'))
+        else:
+            flash(f'No valid files were uploaded. Allowed types are: {", ".join(ALLOWED_EXTENSIONS)}.', 'error')
             return redirect(request.url)
-
-        if file and allowed_file(file.filename):
-            original_filename = secure_filename(file.filename)
-            input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
-            file.save(input_filepath)
-            
-            task = convert_to_speech_task.delay(input_filepath, original_filename, voice_name)
-            return render_template('result.html', task_id=task.id)
-        
-        flash(f'Invalid file type. Allowed types are: {", ".join(ALLOWED_EXTENSIONS)}.', 'error')
-        return redirect(request.url)
-
-    # --- Handle GET Request ---
     voices = list_available_voices()
     return render_template('index.html', voices=voices)
 
@@ -341,10 +311,15 @@ def get_book_metadata():
     filenames = request.json.get('filenames', [])
     if not filenames:
         return jsonify({'error': 'No filenames provided'}), 400
-    first_file_path = Path(UPLOAD_FOLDER) / Path(filenames[0]).stem.split('_')[0]
-    original_file = next(first_file_path.parent.glob(f"{first_file_path.name}.*"), None)
+    first_file_path_stem = Path(filenames[0]).stem.split('_')[0]
+    original_file = None
+    for ext in ALLOWED_EXTENSIONS:
+        potential_path = Path(UPLOAD_FOLDER) / f"{first_file_path_stem}.{ext}"
+        if potential_path.exists():
+            original_file = potential_path
+            break
     if not original_file:
-        return jsonify({'title': Path(filenames[0]).stem.split('_')[0], 'author': 'Unknown', 'cover_url': ''})
+        return jsonify({'title': first_file_path_stem.replace('-', ' ').title(), 'author': 'Unknown', 'cover_url': ''})
     _, metadata = extract_text_and_metadata(str(original_file))
     title = metadata.get('title', '')
     author = metadata.get('author', '')

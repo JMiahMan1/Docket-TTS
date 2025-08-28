@@ -31,8 +31,8 @@
                         <form method="post" enctype="multipart/form-data">
                             <div id="file-upload-section">
                                 <div class="mb-3">
-                                    <label for="file" class="form-label">Choose a text, DOCX, EPUB, or PDF file:</label>
-                                    <input class="form-control" type="file" id="file" name="file" required>
+                                    <label for="file" class="form-label">Choose file(s) to convert:</label>
+                                    <input class="form-control" type="file" id="file" name="file" multiple>
                                 </div>
                             </div>
 
@@ -85,7 +85,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-    // Existing script for voice sampling
     document.getElementById("speakSampleBtn").addEventListener("click", function() {
         const voiceId = document.getElementById("voice").value;
         const audio = document.getElementById("sampleAudio");
@@ -96,7 +95,6 @@
         audio.play();
     });
 
-    // New script to toggle between file upload and text input
     document.getElementById('toggle-input-method').addEventListener('click', function(e) {
         e.preventDefault();
         
@@ -107,21 +105,15 @@
         const titleInput = document.getElementById('text_title');
 
         if (fileSection.style.display !== 'none') {
-            // Switch to text input
             fileSection.style.display = 'none';
             textSection.style.display = 'block';
             this.textContent = 'Or upload a file instead';
             fileInput.removeAttribute('required');
-            textInput.setAttribute('required', 'required');
-            titleInput.setAttribute('required', 'required');
         } else {
-            // Switch back to file upload
             fileSection.style.display = 'block';
             textSection.style.display = 'none';
             this.textContent = 'Or paste text instead';
             fileInput.setAttribute('required', 'required');
-            textInput.removeAttribute('required');
-            titleInput.removeAttribute('required');
         }
     });
     </script>
