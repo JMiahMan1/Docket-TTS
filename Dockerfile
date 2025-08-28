@@ -1,8 +1,8 @@
 # Stage 1: Builder for fetching Piper assets
 FROM fedora:42 AS builder
 
-# Install build tools. microdnf is used in minimal images.
-RUN microdnf -y install wget && microdnf clean all
+# Install build tools
+RUN dnf -y install wget && dnf clean all
 
 # Prepare voice directory
 WORKDIR /voices
@@ -25,17 +25,29 @@ WORKDIR /app
 # Copy requirements file first to leverage Docker layer caching
 COPY requirements.txt .
 
-# Install all dependencies and clean up in a single layer to minimize size
+# Install system dependencies AND heavy Python binaries from DNF for speed and efficiency
 RUN dnf -y install \
     python3 \
     python3-pip \
     poppler-utils \
     ffmpeg \
     espeak-ng \
-    cmake \
-    gcc-c++ \
+    python3-requests \
+    python3-torch \
+    python3-onnxruntime \
+    python3-sentencepiece \
+    python3-flask \
+    python3-gunicorn \
+    python3-celery \
+    python3-redis \
+    python3-docx \
+    python3-ebooklib \
+    python3-PyMuPDF \
+    python3-beautifulsoup4 \
+    python3-inflect \
+    python3-mutagen \
     && dnf clean all \
-    && python3 -m venv /opt/venv \
+    && python3 -m venv --system-site-packages /opt/venv \
     && . /opt/venv/bin/activate \
     && pip install --no-cache-dir -r requirements.txt \
     && python -c "\

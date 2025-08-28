@@ -1,13 +1,2 @@
-Flask
-gunicorn
-celery
-redis
-python-docx
-EbookLib
-PyMuPDF
-beautifulsoup4
-inflect
 piper-tts
-mutagen
 argostranslate
-requests
