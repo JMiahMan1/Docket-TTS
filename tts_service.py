@@ -99,7 +99,6 @@ def build_scripture_patterns():
     ambiguous = [a for a in all_abbrs if a.lower().replace('\\.', '') in ambiguous_lower]
     
     verse_pattern = r"([\w\s,–-]*)"
-    # Removed the trailing \b to allow matching against punctuation.
     ambiguous_pattern = re.compile(r"\b(" + "|".join(sorted(ambiguous, key=len, reverse=True)) + r")" + r"\s+(\d+):" + verse_pattern, re.IGNORECASE)
     unambiguous_pattern = re.compile(r"\b(" + "|".join(sorted(unambiguous, key=len, reverse=True)) + r")" + r"\s+(\d+)(?::" + verse_pattern + r")?", re.IGNORECASE)
     return ambiguous_pattern, unambiguous_pattern
@@ -169,11 +168,19 @@ def expand_complex_scripture_references(text: str) -> str:
                 chapter_words = _inflect.number_to_words(int(chapter))
                 
                 if verses:
+                    suffix = ""
+                    if verses.lower().endswith('ff'):
+                        verses = verses[:-2].strip()
+                        suffix = f" {BIBLE_REFS.get('ff', 'and following')}"
+                    elif verses.lower().endswith('f'):
+                        verses = verses[:-1].strip()
+                        suffix = f" {BIBLE_REFS.get('f', 'and the following verse')}"
+
                     verse_prefix = "verses" if ',' in verses or '-' in verses or '–' in verses else "verse"
                     verses = re.sub(r'(\d)([a-z])', r'\1 \2', verses, flags=re.IGNORECASE)
                     verses = verses.replace('–', '-').replace('-', ' through ')
                     verse_words = re.sub(r'\d+', lambda m: _inflect.number_to_words(int(m.group())), verses)
-                    expanded_parts.append(f"{current_book_name} chapter {chapter_words}, {verse_prefix} {verse_words}")
+                    expanded_parts.append(f"{current_book_name} chapter {chapter_words}, {verse_prefix} {verse_words}{suffix}")
                 else:
                     expanded_parts.append(f"{current_book_name} chapter {chapter_words}")
 
@@ -217,7 +224,6 @@ def number_replacer(match):
         if 2000 <= num_int <= 2009:
             return _inflect.number_to_words(num_int, andword="")
         else:
-            # Prevent commas in grouped years like "nineteen eighty-four".
             return _inflect.number_to_words(num_int, group=2).replace(",", "")
     else:
         return _inflect.number_to_words(num_int, andword="")
@@ -235,11 +241,11 @@ def normalize_text(text: str) -> str:
     text = re.sub(rf'\b([a-z])({prefix_words})\b', r'\1 \2', text, flags=re.IGNORECASE)
     text = re.sub(r'([a-z])(“|")', r'\1 \2', text)
     text = re.sub(r'\[\d+\]|\[fn\]|[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)', '', text)
-    text = re.sub(r'(?i)(?<!chapter\s)\b\d{1,3}\b', '', text)
-    # This rule is now more specific to avoid removing partial verse letters.
-    text = re.sub(r'\s\b([b-hB-HJ-Zj-zJ-Z])\b\s', ' ', text)
-    text = re.sub(r'^\s*[b-hB-HJ-Zj-zJ-Z]\b\s*', '', text, flags=re.M)
     
+    # Run Latin phrase expansion before general punctuation cleanup
+    for phrase, replacement in LATIN_PHRASES.items():
+        text = re.sub(rf'\b{re.escape(phrase)}\b(?!\w)', replacement, text, flags=re.IGNORECASE)
+
     # General normalization and cleanup
     text = re.sub(r'\s*,\s*\.', '.', text) 
     text = re.sub(r'\s*\.\s*,', ',', text)
@@ -247,9 +253,6 @@ def normalize_text(text: str) -> str:
     
     text = normalize_hebrew(text)
     text = normalize_greek(text)
-    for phrase, replacement in LATIN_PHRASES.items():
-        # Use a negative lookahead to correctly match phrases followed by punctuation.
-        text = re.sub(rf'\b{re.escape(phrase)}\b(?!\w)', replacement, text, flags=re.IGNORECASE)
     
     text = expand_ambiguous_citations(text)
     text = normalize_parentheticals(text)
@@ -267,6 +270,12 @@ def normalize_text(text: str) -> str:
     for contr, expanded in CONTRACTIONS.items(): text = text.replace(contr, expanded)
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
+
+    # Safer verse number and footnote cleanup runs after major expansions
+    text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
+    text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
+    text = re.sub(r'\s\b([b-hB-HJ-Zj-zJ-Z])\b\s', ' ', text)
+    text = re.sub(r'^\s*[b-hB-HJ-Zj-zJ-Z]\b\s*', '', text, flags=re.M)
 
     lines = text.split('\n')
     processed_lines = []
