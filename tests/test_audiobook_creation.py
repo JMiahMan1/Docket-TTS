@@ -19,6 +19,7 @@ def setup_test_files(tmp_path, monkeypatch):
         (temp_generated_dir / fname).touch()
         (temp_generated_dir / fname.replace('.mp3', '.txt')).touch()
 
+    # Use monkeypatch to correctly override the constant inside the app module
     monkeypatch.setattr(main_app, 'GENERATED_FOLDER', str(temp_generated_dir))
     
     yield temp_generated_dir
