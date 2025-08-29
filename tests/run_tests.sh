@@ -6,7 +6,7 @@ set -e
 
 echo "--- Installing test dependencies ---"
 # Install app dependencies from requirements.txt and the pytest package
-pip install --no-cache-dir -r requirements.txt pytest
+pip install --no-cache-dir -r requirements.txt pytest Flask gunicorn celery redis python-docx EbookLib PyMuPDF beautifulsoup4 inflect mutagen argostranslate requests
 
 # Check if a custom URL is provided, otherwise use the default
 if [ -z "$APP_BASE_URL" ]; then
