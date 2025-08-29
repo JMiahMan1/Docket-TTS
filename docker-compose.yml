@@ -10,15 +10,16 @@ services:
     volumes:
       - generated_data:/app/generated
       - uploads_data:/app/uploads
-    command: gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 300 --reload app:app
+    # This command now explicitly uses the venv's python to run gunicorn
+    command: /opt/venv/bin/python -m gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 300 app:app
     depends_on:
       - redis
     restart: always
 
   worker:
     build: .
-    # The worker runs a different command: it starts Celery
-    command: celery -A app.celery worker --loglevel=info
+    # This command now explicitly uses the venv's python to run celery
+    command: /opt/venv/bin/python -m celery -A app.celery worker --loglevel=info
     volumes:
       - generated_data:/app/generated
       - uploads_data:/app/uploads

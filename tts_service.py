@@ -86,7 +86,7 @@ def expand_roman_numerals(text: str) -> str:
             if canonical_roman.lower() != roman_str.lower():
                 return roman_str
 
-            return f"Roman Numeral {integer_val}"
+            return f"Roman Numeral {_inflect.number_to_words(integer_val)}"
         except (KeyError, IndexError):
             return roman_str
             
@@ -97,10 +97,10 @@ def build_scripture_patterns():
     ambiguous_lower = [a.lower() for a in AMBIGUOUS_BIBLE_ABBRS]
     unambiguous = [a for a in all_abbrs if a.lower().replace('\\.', '') not in ambiguous_lower]
     ambiguous = [a for a in all_abbrs if a.lower().replace('\\.', '') in ambiguous_lower]
-    # Use \w to capture letters, numbers, and underscore, which covers verses like '19a' and '20ff'.
+    
     verse_pattern = r"([\w\s,–-]*)"
-    ambiguous_pattern = re.compile(r"\b(" + "|".join(sorted(ambiguous, key=len, reverse=True)) + r")" + r"\s+(\d+):" + verse_pattern + r"\b", re.IGNORECASE)
-    unambiguous_pattern = re.compile(r"\b(" + "|".join(sorted(unambiguous, key=len, reverse=True)) + r")" + r"\s+(\d+)(?::" + verse_pattern + r")?\b", re.IGNORECASE)
+    ambiguous_pattern = re.compile(r"\b(" + "|".join(sorted(ambiguous, key=len, reverse=True)) + r")" + r"\s+(\d+):" + verse_pattern, re.IGNORECASE)
+    unambiguous_pattern = re.compile(r"\b(" + "|".join(sorted(unambiguous, key=len, reverse=True)) + r")" + r"\s+(\d+)(?::" + verse_pattern + r")?", re.IGNORECASE)
     return ambiguous_pattern, unambiguous_pattern
 
 AMBIGUOUS_PATTERN, UNAMBIGUOUS_PATTERN = build_scripture_patterns()
@@ -112,7 +112,6 @@ def expand_scripture_references(text: str) -> str:
         chapter_words = _inflect.number_to_words(int(chapter))
         if not verses: return f"{book_full} chapter {chapter_words}"
 
-        # Handle 'ff' and 'f' suffixes within this main function.
         suffix = ""
         verses = verses.strip()
         if verses.lower().endswith('ff'):
@@ -134,7 +133,6 @@ def expand_scripture_references(text: str) -> str:
     return text
 
 def expand_complex_scripture_references(text: str) -> str:
-    """Handles complex, multi-part scripture references like (Ps. 14:1–3; 53:1–4)."""
     pattern = re.compile(r'\(\s*([A-Za-z\s]+?)\.?\s+(\d+[:\d,;\s–a-z-]+)\s*\)')
 
     def replacer(match):
@@ -170,11 +168,19 @@ def expand_complex_scripture_references(text: str) -> str:
                 chapter_words = _inflect.number_to_words(int(chapter))
                 
                 if verses:
+                    suffix = ""
+                    if verses.lower().endswith('ff'):
+                        verses = verses[:-2].strip()
+                        suffix = f" {BIBLE_REFS.get('ff', 'and following')}"
+                    elif verses.lower().endswith('f'):
+                        verses = verses[:-1].strip()
+                        suffix = f" {BIBLE_REFS.get('f', 'and the following verse')}"
+
                     verse_prefix = "verses" if ',' in verses or '-' in verses or '–' in verses else "verse"
                     verses = re.sub(r'(\d)([a-z])', r'\1 \2', verses, flags=re.IGNORECASE)
                     verses = verses.replace('–', '-').replace('-', ' through ')
                     verse_words = re.sub(r'\d+', lambda m: _inflect.number_to_words(int(m.group())), verses)
-                    expanded_parts.append(f"{current_book_name} chapter {chapter_words}, {verse_prefix} {verse_words}")
+                    expanded_parts.append(f"{current_book_name} chapter {chapter_words}, {verse_prefix} {verse_words}{suffix}")
                 else:
                     expanded_parts.append(f"{current_book_name} chapter {chapter_words}")
 
@@ -211,7 +217,6 @@ def expand_ambiguous_citations(text: str) -> str:
     return re.sub(r'\((\d+):([\d,-]+)\)', replacer, text)
 
 def number_replacer(match):
-    """Converts a number to words, with special handling for years."""
     num_str = match.group(0)
     num_int = int(num_str)
     
@@ -219,7 +224,7 @@ def number_replacer(match):
         if 2000 <= num_int <= 2009:
             return _inflect.number_to_words(num_int, andword="")
         else:
-            return _inflect.number_to_words(num_int, group=2)
+            return _inflect.number_to_words(num_int, group=2).replace(",", "")
     else:
         return _inflect.number_to_words(num_int, andword="")
 
@@ -236,10 +241,12 @@ def normalize_text(text: str) -> str:
     text = re.sub(rf'\b([a-z])({prefix_words})\b', r'\1 \2', text, flags=re.IGNORECASE)
     text = re.sub(r'([a-z])(“|")', r'\1 \2', text)
     text = re.sub(r'\[\d+\]|\[fn\]|[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)', '', text)
-    text = re.sub(r'(?i)(?<!chapter\s)\b\d{1,3}\b', '', text)
-    text = re.sub(r'\s\b([b-hB-HJ-Zj-zJ-Z])\b', ' ', text)
-    text = re.sub(r'^\s*[b-hB-HJ-Zj-zJ-Z]\b\s*', '', text, flags=re.M)
     
+    # Run Latin phrase expansion before general punctuation cleanup
+    for phrase, replacement in LATIN_PHRASES.items():
+        # Corrected regex to be more flexible with trailing punctuation
+        text = re.sub(rf'{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
+
     # General normalization and cleanup
     text = re.sub(r'\s*,\s*\.', '.', text) 
     text = re.sub(r'\s*\.\s*,', ',', text)
@@ -247,8 +254,6 @@ def normalize_text(text: str) -> str:
     
     text = normalize_hebrew(text)
     text = normalize_greek(text)
-    for phrase, replacement in LATIN_PHRASES.items():
-        text = re.sub(rf'\b{re.escape(phrase)}\b', replacement, text, flags=re.IGNORECASE)
     
     text = expand_ambiguous_citations(text)
     text = normalize_parentheticals(text)
@@ -263,10 +268,15 @@ def normalize_text(text: str) -> str:
         if abbr.lower().replace('.', '') not in case_sensitive_set:
             text = re.sub(rf"\b{re.escape(abbr)}\b", expanded, text, flags=re.IGNORECASE)
     
-    # The redundant 'bible_ff_repl' logic has been removed from here.
     for contr, expanded in CONTRACTIONS.items(): text = text.replace(contr, expanded)
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
+
+    # Safer verse number and footnote cleanup runs after major expansions
+    text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
+    text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
+    text = re.sub(r'\s\b([b-hB-HJ-Zj-zJ-Z])\b\s', ' ', text)
+    text = re.sub(r'^\s*[b-hB-HJ-Zj-zJ-Z]\b\s*', '', text, flags=re.M)
 
     lines = text.split('\n')
     processed_lines = []

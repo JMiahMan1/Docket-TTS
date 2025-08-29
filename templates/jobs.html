@@ -67,36 +67,41 @@
                 <h4 class="mb-0">Waiting Jobs</h4>
             </div>
             <div class="card-body">
-                {% if waiting_jobs %}
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover align-middle">
-                        <thead>
-                            <tr>
-                                <th>Original Filename</th>
-                                <th>Status</th>
-                                <th>Task ID</th>
-                                <th>Action</th> </tr>
-                        </thead>
-                        <tbody>
-                            {% for job in waiting_jobs %}
-                            <tr>
-                                <td>{{ job.name }}</td>
-                                <td>
-                                    {% if job.status == 'Queued' %}<span class="badge bg-secondary">Queued</span>
-                                    {% elif job.status == 'Reserved' %}<span class="badge bg-info text-dark">Reserved</span>
-                                    {% endif %}
-                                </td>
-                                <td><small class="text-muted">{{ job.id }}</small></td>
-                                <td>
-                                    <form action="{{ url_for('cancel_job', task_id=job.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to cancel this queued job?');">
-                                        <button type="submit" class="btn btn-danger btn-sm" title="Cancel Job">❌</button>
-                                    </form>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
+                {% if waiting_jobs or unassigned_job_count > 0 %}
+                    {% if unassigned_job_count > 0 %}
+                    <div class="alert alert-info">
+                        <strong>{{ unassigned_job_count }}</strong> more job(s) are in the main queue waiting to be assigned to a worker.
+                    </div>
+                    {% endif %}
+                    {% if waiting_jobs %}
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Original Filename</th>
+                                    <th>Status</th>
+                                    <th>Task ID</th>
+                                    <th>Action</th> </tr>
+                            </thead>
+                            <tbody>
+                                {% for job in waiting_jobs %}
+                                <tr>
+                                    <td>{{ job.name }}</td>
+                                    <td>
+                                        <span class="badge bg-info text-dark">Reserved by Worker</span>
+                                    </td>
+                                    <td><small class="text-muted">{{ job.id }}</small></td>
+                                    <td>
+                                        <form action="{{ url_for('cancel_job', task_id=job.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to cancel this queued job?');">
+                                            <button type="submit" class="btn btn-danger btn-sm" title="Cancel Job">❌</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
                 {% else %}
                 <div class="alert alert-info text-center mb-0">No jobs are currently waiting.</div>
                 {% endif %}
