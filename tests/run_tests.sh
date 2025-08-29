@@ -29,6 +29,13 @@ echo "--- Running tests against $APP_BASE_URL ---"
 export PYTHONPATH=.
 
 # Run pytest against the /tests directory. It will find all test_*.py files.
+# Run pytest against the files in a specific order: fastest to slowest.
+pytest -v \
+  tests/test_deployment.py \
+  tests/test_normalization.py \
+  tests/test_functionality.py \
+  tests/test_audiobook_creation.py
+
 pytest -v tests/
 
 echo "--- All tests passed successfully! ---"

@@ -52,45 +52,17 @@ def submit_and_poll_task(title, text_content):
     
     pytest.fail(f"Task {task_id} timed out after {TIMEOUT} seconds.")
 
-def test_multi_book_references():
-    """
-    Tests normalization of a string with multiple book, chapter, and verse references.
-    """
-    title = "Multi-Book Test"
-    text = "many scholars believe both the Genesis narratives of the birth of Isaac (Gen 17:17; 18:1-15; 21:1-7) and the offering of Isaac as a sacrifice (Gen 22:15-17) show additional occasions"
-    normalized_text = submit_and_poll_task(title, text).lower()
-    assert "genesis chapter seventeen, verse seventeen" in normalized_text
-    assert "genesis chapter eighteen, verses one through fifteen" in normalized_text
+# --- Lightest Tests First ---
 
-def test_f_and_ff_suffixes():
+def test_year_pronunciation():
     """
-    Tests normalization of verse references with 'f' and 'ff' suffixes.
+    Tests the special normalization logic for pronouncing years.
     """
-    title = "F and FF Suffix Test"
-    text = "Paul discusses the sacrifice of Jesus (Rom 3:21ff) and also the Passover (1 Cor 5:7f)."
+    title = "Year Pronunciation Test"
+    text = "The text was published in 1984. A revision was made in the year 2005. The original manuscript from 999 AD is lost."
     normalized_text = submit_and_poll_task(title, text).lower()
-    assert "romans chapter three, verse twenty-one and following" in normalized_text
-    assert "first corinthians chapter five, verse seven and the following verse" in normalized_text
-
-def test_partial_verses():
-    """
-    Tests normalization of partial verses like '19a' and '19b'.
-    """
-    title = "Partial Verse Test"
-    text = "This term speaks of lawlessness [Rom 6:19a; 1 John 3:4], producing lawless deeds [Matt 13:41; Rom 6:19b; Heb 10:17]."
-    normalized_text = submit_and_poll_task(title, text).lower()
-    assert "romans chapter six, verse nineteen a" in normalized_text
-    assert "romans chapter six, verse nineteen b" in normalized_text
-
-def test_roman_numeral_expansion():
-    """
-    Tests the expansion of Roman numerals.
-    """
-    title = "Roman Numeral Test"
-    text = "The council in Acts XV was a pivotal moment. The events of chapter VI are also important, see section IV."
-    normalized_text = submit_and_poll_task(title, text)
-    assert "Acts Roman Numeral fifteen" in normalized_text
-    assert "chapter Roman Numeral six" in normalized_text
+    assert "nineteen eighty-four" in normalized_text
+    assert "two thousand five" in normalized_text
 
 def test_greek_transliteration():
     """
@@ -112,12 +84,44 @@ def test_latin_phrase_expansion():
     assert "for example" in normalized_text
     assert "that is" in normalized_text
 
-def test_year_pronunciation():
+def test_roman_numeral_expansion():
     """
-    Tests the special normalization logic for pronouncing years.
+    Tests the expansion of Roman numerals.
     """
-    title = "Year Pronunciation Test"
-    text = "The text was published in 1984. A revision was made in the year 2005. The original manuscript from 999 AD is lost."
+    title = "Roman Numeral Test"
+    text = "The council in Acts XV was a pivotal moment. The events of chapter VI are also important, see section IV."
+    normalized_text = submit_and_poll_task(title, text)
+    assert "Acts Roman Numeral fifteen" in normalized_text
+    assert "chapter Roman Numeral six" in normalized_text
+
+# --- Heavier Tests Last ---
+
+def test_f_and_ff_suffixes():
+    """
+    Tests normalization of verse references with 'f' and 'ff' suffixes.
+    """
+    title = "F and FF Suffix Test"
+    text = "Paul discusses the sacrifice of Jesus (Rom 3:21ff) and also the Passover (1 Cor 5:7f)."
     normalized_text = submit_and_poll_task(title, text).lower()
-    assert "nineteen eighty-four" in normalized_text
-    assert "two thousand five" in normalized_text
+    assert "romans chapter three, verse twenty-one and following" in normalized_text
+    assert "first corinthians chapter five, verse seven and the following verse" in normalized_text
+
+def test_partial_verses():
+    """
+    Tests normalization of partial verses like '19a' and '19b'.
+    """
+    title = "Partial Verse Test"
+    text = "This term speaks of lawlessness [Rom 6:19a; 1 John 3:4], producing lawless deeds [Matt 13:41; Rom 6:19b; Heb 10:17]."
+    normalized_text = submit_and_poll_task(title, text).lower()
+    assert "romans chapter six, verse nineteen a" in normalized_text
+    assert "romans chapter six, verse nineteen b" in normalized_text
+
+def test_multi_book_references():
+    """
+    Tests normalization of a string with multiple book, chapter, and verse references.
+    """
+    title = "Multi-Book Test"
+    text = "many scholars believe both the Genesis narratives of the birth of Isaac (Gen 17:17; 18:1-15; 21:1-7) and the offering of Isaac as a sacrifice (Gen 22:15-17) show additional occasions"
+    normalized_text = submit_and_poll_task(title, text).lower()
+    assert "genesis chapter seventeen, verse seventeen" in normalized_text
+    assert "genesis chapter eighteen, verses one through fifteen" in normalized_text

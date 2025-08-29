@@ -48,6 +48,7 @@ RUN dnf -y install \
     && dnf clean all \
     && python3 -m venv --system-site-packages /opt/venv \
     && . /opt/venv/bin/activate \
+    && pip install --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt \
     && python -c "\
 from argostranslate import package;\
