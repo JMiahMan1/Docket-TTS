@@ -13,14 +13,13 @@ jobs:
     - name: Free Disk Space on Runner
       uses: jlumbroso/free-disk-space@main
       with:
-        # These are the default options, but shown for clarity
         tool-cache: false
         android: true
         dotnet: true
         haskell: true
         swift: true
         golang: true
-        docker-images: false # Do not remove docker images
+        docker-images: false
 
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -42,7 +41,8 @@ jobs:
           timeout=$((timeout-5))
           if [ $timeout -le 0 ]; then
             echo "Service timed out."
-            docker compose logs web
+            # Print logs from all services for debugging
+            docker compose logs
             exit 1
           fi
           sleep 5
@@ -55,9 +55,14 @@ jobs:
     - name: Run tests
       run: ./tests/run_tests.sh
       
-    - name: Stop services after tests
+    - name: Stop services and show logs on failure
       if: always()
-      run: docker compose down
+      run: |
+        if [[ ${{ job.status }} == 'failure' ]]; then
+          echo "Tests failed. Displaying container logs..."
+          docker compose logs
+        fi
+        docker compose down
 
   deploy:
     needs: test
