@@ -48,12 +48,12 @@ def test_audiobook_merging_handles_duplicates(mock_mp3, mock_subprocess, setup_t
     
     input_files = ["chapter1_123.mp3", "chapter2_456.mp3", "chapter1_123.mp3", "chapter3_789.mp3"]
     
-    # Create a mock for the 'self' task instance
+    # Create a comprehensive mock for the 'self' task instance
     mock_self = MagicMock()
-    # Provide the required task_id attribute
     mock_self.request.id = "test-task-id-123"
-    # Also mock the update_state method itself to prevent it from running
     mock_self.update_state = MagicMock()
+    # Also mock the backend to prevent real backend calls
+    mock_self.backend = MagicMock()
 
     # Call the task's 'run' method with the fully configured mock
     create_audiobook_task.run(
