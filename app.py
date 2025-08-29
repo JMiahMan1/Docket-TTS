@@ -55,8 +55,10 @@ except Exception as e:
     app.logger.error(f"Could not create Redis client: {e}")
     redis_client = None
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(GENERATED_FOLDER, exist_ok=True)
+# Only create directories when running in the intended container environment
+if os.environ.get('RUNNING_IN_DOCKER'):
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    os.makedirs(GENERATED_FOLDER, exist_ok=True)
 
 def human_readable_size(size, decimal_places=2):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
