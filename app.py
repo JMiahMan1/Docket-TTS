@@ -55,7 +55,6 @@ except Exception as e:
     app.logger.error(f"Could not create Redis client: {e}")
     redis_client = None
 
-# Only create directories when running in the intended container environment
 if os.environ.get('RUNNING_IN_DOCKER'):
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     os.makedirs(GENERATED_FOLDER, exist_ok=True)
@@ -195,17 +194,13 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
         raise e
 
-def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, task_self=None):
+def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, build_dir, task_self=None):
     """Contains the core logic for creating an audiobook, decoupled from Celery."""
     def update_state(state, meta):
         if task_self:
             task_self.update_state(state=state, meta=meta)
 
-    # De-duplicate and sort the file list to prevent processing the same chapter twice
     unique_file_list = sorted(list(set(file_list)))
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    build_dir = Path(GENERATED_FOLDER) / f"audiobook_build_{timestamp}"
-    os.makedirs(build_dir, exist_ok=True)
     
     update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
     safe_mp3_paths = [Path(GENERATED_FOLDER) / secure_filename(fname) for fname in unique_file_list]
@@ -245,6 +240,7 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
     concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-c:a', 'aac', '-b:a', '128k', str(temp_audio_path)]
     subprocess.run(concat_command, check=True, capture_output=True)
     update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Assembling audiobook...'})
+    timestamp = build_dir.name.replace('audiobook_build_', '')
     output_filename = f"{secure_filename(audiobook_title)}_{timestamp}.m4b"
     output_filepath = Path(GENERATED_FOLDER) / output_filename
     mux_command = ['ffmpeg']
@@ -258,23 +254,26 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
         mux_command.extend(['-disposition:v', 'attached_pic'])
     mux_command.extend(['-c:a', 'copy', '-c:v', 'copy', str(output_filepath)])
     subprocess.run(mux_command, check=True, capture_output=True)
-    
-    if build_dir.exists():
-        shutil.rmtree(build_dir)
         
     return {'status': 'Success', 'filename': output_filename}
 
 @celery.task(bind=True)
 def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, cover_url=None):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    build_dir = Path(GENERATED_FOLDER) / f"audiobook_build_{timestamp}"
+    os.makedirs(build_dir, exist_ok=True)
     try:
-        # The Celery task is now just a thin wrapper around the main logic
-        return _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, task_self=self)
+        return _create_audiobook_logic(
+            file_list, audiobook_title, audiobook_author, cover_url, build_dir, task_self=self
+        )
     except Exception as e:
         app.logger.error(f"Audiobook creation failed: {e}")
         if isinstance(e, subprocess.CalledProcessError):
             app.logger.error(f"FFMPEG stderr: {e.stderr.decode()}")
-        # Reraise the exception so Celery marks the task as FAILED
         raise e
+    finally:
+        if build_dir.exists():
+            shutil.rmtree(build_dir)
 
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
