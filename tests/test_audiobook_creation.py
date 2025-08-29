@@ -48,9 +48,13 @@ def test_audiobook_merging_handles_duplicates(mock_mp3, mock_subprocess, setup_t
     
     input_files = ["chapter1_123.mp3", "chapter2_456.mp3", "chapter1_123.mp3", "chapter3_789.mp3"]
     
-    # Call the task's 'run' method with positional arguments to resolve the TypeError
+    # Create a mock for the 'self' task instance with a request.id
+    mock_self = MagicMock()
+    mock_self.request.id = "test-task-id-123"
+
+    # Call the task's 'run' method with the configured mock
     create_audiobook_task.run(
-        MagicMock(), # mock 'self'
+        mock_self,
         input_files,
         "Test Audiobook",
         "Test Author"
