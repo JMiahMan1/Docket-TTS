@@ -8,7 +8,7 @@ import app as main_app
 # Mock the celery task decorator for unit testing
 def mock_task(bind=True):
     def decorator(func):
-        # Attach the original function to the mock for direct calling in tests
+        # Attach the original function to the mock's 'run' attribute for direct calling
         wrapper = MagicMock()
         wrapper.run = func
         return wrapper
@@ -40,7 +40,6 @@ def test_audiobook_merging_handles_duplicates(mock_mp3, mock_subprocess, setup_t
     """
     Ensures the audiobook task de-duplicates the input file list and uses a temporary directory.
     """
-    # Mock os.makedirs to prevent it from trying to write to '/app'
     monkeypatch.setattr(os, 'makedirs', lambda path, exist_ok=False: None)
 
     mock_audio_info = MagicMock()
@@ -49,12 +48,12 @@ def test_audiobook_merging_handles_duplicates(mock_mp3, mock_subprocess, setup_t
     
     input_files = ["chapter1_123.mp3", "chapter2_456.mp3", "chapter1_123.mp3", "chapter3_789.mp3"]
     
-    # Call the task's 'run' method directly for unit testing
+    # Call the task's 'run' method with positional arguments to resolve the TypeError
     create_audiobook_task.run(
         MagicMock(), # mock 'self'
-        file_list=input_files,
-        audiobook_title="Test Audiobook",
-        audiobook_author="Test Author"
+        input_files,
+        "Test Audiobook",
+        "Test Author"
     )
 
     build_dir = next(setup_test_files.glob("audiobook_build_*"))
