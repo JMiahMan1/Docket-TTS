@@ -6,7 +6,7 @@ set -e
 
 echo "--- Installing test dependencies ---"
 # Install app dependencies from requirements.txt and the pytest package
-pip install --no-cache-dir -r requirements.txt pytest Flask gunicorn celery redis python-docx EbookLib PyMuPDF beautifulsoup4 inflect mutagen argostranslate requests
+pip install --no-cache-dir -r requirements.txt pytest Flask gunicorn celery redis python-docx EbookLib PyMuPDF beautifulsoup4 inflect mutagen argostranslate requests pytest-xdist
 
 echo "--- Downloading Argos Translate model for testing ---"
 # This step is crucial to ensure the test environment has the required model
@@ -30,7 +30,7 @@ export PYTHONPATH=.
 
 # Run pytest against the /tests directory. It will find all test_*.py files.
 # Run pytest against the files in a specific order: fastest to slowest.
-pytest -v \
+pytest -v -n auto \
   tests/test_deployment.py \
   tests/test_normalization.py \
   tests/test_functionality.py \
