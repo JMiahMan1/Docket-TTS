@@ -18,7 +18,7 @@ services:
   worker:
     build: .
     # The worker runs a different command: it starts Celery
-    command: celery -A app.celery worker --loglevel=info
+    command: /opt/venv/bin/celery -A app.celery worker --loglevel=info
     volumes:
       - generated_data:/app/generated
       - uploads_data:/app/uploads

@@ -8,20 +8,9 @@ import app as main_app
 # Mock the celery task decorator for unit testing
 def mock_task(bind=True):
     def decorator(func):
-        # We need to access the original unbound function for testing
-        if hasattr(func, 'run'):
-             unbound_func = func.run
-        else:
-             unbound_func = func
-        
-        def wrapper(*args, **kwargs):
-            mock_self = MagicMock()
-            mock_self.request.id = "mock_task_id"
-            mock_self.update_state = MagicMock()
-            return unbound_func(mock_self, *args, **kwargs)
-        
-        # Store original function for direct access
-        wrapper.unbound_func = unbound_func
+        # Attach the original function to the mock for direct calling in tests
+        wrapper = MagicMock()
+        wrapper.run = func
         return wrapper
     return decorator
 
@@ -60,8 +49,8 @@ def test_audiobook_merging_handles_duplicates(mock_mp3, mock_subprocess, setup_t
     
     input_files = ["chapter1_123.mp3", "chapter2_456.mp3", "chapter1_123.mp3", "chapter3_789.mp3"]
     
-    # We call the original, unbound function directly for unit testing
-    create_audiobook_task.unbound_func(
+    # Call the task's 'run' method directly for unit testing
+    create_audiobook_task.run(
         MagicMock(), # mock 'self'
         file_list=input_files,
         audiobook_title="Test Audiobook",
