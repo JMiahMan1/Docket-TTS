@@ -5,18 +5,8 @@ import os
 import shutil
 import app as main_app
 
-# Mock the celery task decorator for unit testing
-def mock_task(bind=True):
-    def decorator(func):
-        # Attach the original function to the mock's 'run' attribute for direct calling
-        wrapper = MagicMock()
-        wrapper.run = func
-        return wrapper
-    return decorator
-
-# Apply the mock to the celery object before importing the task
-patch('app.celery.task', mock_task).start()
-from app import create_audiobook_task
+# Import the logic function directly, not the Celery task
+from app import _create_audiobook_logic
 
 @pytest.fixture
 def setup_test_files(tmp_path, monkeypatch):
@@ -29,40 +19,31 @@ def setup_test_files(tmp_path, monkeypatch):
         (temp_generated_dir / fname).touch()
         (temp_generated_dir / fname.replace('.mp3', '.txt')).touch()
 
-    # Use monkeypatch to correctly override the constant inside the app module
     monkeypatch.setattr(main_app, 'GENERATED_FOLDER', str(temp_generated_dir))
     
     yield temp_generated_dir
 
 @patch('app.subprocess.run')
 @patch('app.MP3')
-def test_audiobook_merging_handles_duplicates(mock_mp3, mock_subprocess, setup_test_files, monkeypatch):
+def test_audiobook_merging_handles_duplicates(mock_mp3, mock_subprocess, setup_test_files):
     """
-    Ensures the audiobook task de-duplicates the input file list and uses a temporary directory.
+    Ensures the audiobook logic de-duplicates the input file list.
     """
-    monkeypatch.setattr(os, 'makedirs', lambda path, exist_ok=False: None)
-
     mock_audio_info = MagicMock()
     mock_audio_info.info.length = 10.0
     mock_mp3.return_value = mock_audio_info
     
     input_files = ["chapter1_123.mp3", "chapter2_456.mp3", "chapter1_123.mp3", "chapter3_789.mp3"]
     
-    # Create a comprehensive mock for the 'self' task instance
-    mock_self = MagicMock()
-    mock_self.request.id = "test-task-id-123"
-    mock_self.update_state = MagicMock()
-    # Also mock the backend to prevent real backend calls
-    mock_self.backend = MagicMock()
-
-    # Call the task's 'run' method with the fully configured mock
-    create_audiobook_task.run(
-        mock_self,
-        input_files,
-        "Test Audiobook",
-        "Test Author"
+    # Call the logic function directly, no Celery mocking needed
+    _create_audiobook_logic(
+        file_list=input_files,
+        audiobook_title="Test Audiobook",
+        audiobook_author="Test Author",
+        cover_url=None
     )
 
+    # Find the concat file in the temporary directory
     build_dir = next(setup_test_files.glob("audiobook_build_*"))
     concat_file_path = build_dir / "concat_list.txt"
     

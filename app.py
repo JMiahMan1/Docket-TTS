@@ -195,74 +195,86 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
         raise e
 
-@celery.task(bind=True)
-def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, cover_url=None):
-    unique_file_list = sorted(list(set(file_list)))
+def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, task_self=None):
+    """Contains the core logic for creating an audiobook, decoupled from Celery."""
+    def update_state(state, meta):
+        if task_self:
+            task_self.update_state(state=state, meta=meta)
 
+    # De-duplicate and sort the file list to prevent processing the same chapter twice
+    unique_file_list = sorted(list(set(file_list)))
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     build_dir = Path(GENERATED_FOLDER) / f"audiobook_build_{timestamp}"
     os.makedirs(build_dir, exist_ok=True)
+    
+    update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
+    safe_mp3_paths = [Path(GENERATED_FOLDER) / secure_filename(fname) for fname in unique_file_list]
+    merged_text_content = ""
+    for mp3_path in safe_mp3_paths:
+        txt_path = mp3_path.with_suffix('.txt')
+        if txt_path.exists():
+            merged_text_content += txt_path.read_text(encoding='utf-8') + "\n\n"
+    update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Downloading cover art...'})
+    cover_path = None
+    if cover_url:
+        try:
+            response = requests.get(cover_url, stream=True)
+            response.raise_for_status()
+            cover_path = build_dir / "cover.jpg"
+            with open(cover_path, 'wb') as f:
+                shutil.copyfileobj(response.raw, f)
+        except requests.RequestException as e:
+            app.logger.error(f"Failed to download cover art: {e}")
+            cover_path = None
+    update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Analyzing chapters...'})
+    chapters_meta_content = f";FFMETADATA1\ntitle={audiobook_title}\nartist={audiobook_author}\ncomment={merged_text_content.replace(';', ';;').replace('=', r'=')}\n\n"
+    concat_list_content = ""
+    current_duration_ms = 0
+    for i, path in enumerate(safe_mp3_paths):
+        duration_s = MP3(path).info.length
+        duration_ms = int(duration_s * 1000)
+        concat_list_content += f"file '{path.resolve()}'\n"
+        chapters_meta_content += f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={current_duration_ms}\nEND={current_duration_ms + duration_ms}\ntitle=Chapter {i + 1}\n\n"
+        current_duration_ms += duration_ms
+    concat_list_path = build_dir / "concat_list.txt"
+    chapters_meta_path = build_dir / "chapters.meta"
+    concat_list_path.write_text(concat_list_content)
+    chapters_meta_path.write_text(chapters_meta_content, encoding='utf-8')
+    update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Merging and encoding audio...'})
+    temp_audio_path = build_dir / "temp_audio.aac"
+    concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-c:a', 'aac', '-b:a', '128k', str(temp_audio_path)]
+    subprocess.run(concat_command, check=True, capture_output=True)
+    update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Assembling audiobook...'})
+    output_filename = f"{secure_filename(audiobook_title)}_{timestamp}.m4b"
+    output_filepath = Path(GENERATED_FOLDER) / output_filename
+    mux_command = ['ffmpeg']
+    if cover_path:
+        mux_command.extend(['-i', str(cover_path)])
+    mux_command.extend(['-i', str(temp_audio_path), '-i', str(chapters_meta_path)])
+    map_offset = 1 if cover_path else 0
+    mux_command.extend(['-map', f'{map_offset}:a', '-map_metadata', f'{map_offset + 1}'])
+    if cover_path:
+        mux_command.extend(['-map', '0:v'])
+        mux_command.extend(['-disposition:v', 'attached_pic'])
+    mux_command.extend(['-c:a', 'copy', '-c:v', 'copy', str(output_filepath)])
+    subprocess.run(mux_command, check=True, capture_output=True)
+    
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+        
+    return {'status': 'Success', 'filename': output_filename}
+
+@celery.task(bind=True)
+def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, cover_url=None):
     try:
-        self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
-        safe_mp3_paths = [Path(GENERATED_FOLDER) / secure_filename(fname) for fname in unique_file_list]
-        merged_text_content = ""
-        for mp3_path in safe_mp3_paths:
-            txt_path = mp3_path.with_suffix('.txt')
-            if txt_path.exists():
-                merged_text_content += txt_path.read_text(encoding='utf-8') + "\n\n"
-        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Downloading cover art...'})
-        cover_path = None
-        if cover_url:
-            try:
-                response = requests.get(cover_url, stream=True)
-                response.raise_for_status()
-                cover_path = build_dir / "cover.jpg"
-                with open(cover_path, 'wb') as f:
-                    shutil.copyfileobj(response.raw, f)
-            except requests.RequestException as e:
-                app.logger.error(f"Failed to download cover art: {e}")
-                cover_path = None
-        self.update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Analyzing chapters...'})
-        chapters_meta_content = f";FFMETADATA1\ntitle={audiobook_title}\nartist={audiobook_author}\ncomment={merged_text_content.replace(';', ';;').replace('=', r'=')}\n\n"
-        concat_list_content = ""
-        current_duration_ms = 0
-        for i, path in enumerate(safe_mp3_paths):
-            duration_s = MP3(path).info.length
-            duration_ms = int(duration_s * 1000)
-            concat_list_content += f"file '{path.resolve()}'\n"
-            chapters_meta_content += f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={current_duration_ms}\nEND={current_duration_ms + duration_ms}\ntitle=Chapter {i + 1}\n\n"
-            current_duration_ms += duration_ms
-        concat_list_path = build_dir / "concat_list.txt"
-        chapters_meta_path = build_dir / "chapters.meta"
-        concat_list_path.write_text(concat_list_content)
-        chapters_meta_path.write_text(chapters_meta_content, encoding='utf-8')
-        self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Merging and encoding audio...'})
-        temp_audio_path = build_dir / "temp_audio.aac"
-        concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-c:a', 'aac', '-b:a', '128k', str(temp_audio_path)]
-        subprocess.run(concat_command, check=True, capture_output=True)
-        self.update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Assembling audiobook...'})
-        output_filename = f"{secure_filename(audiobook_title)}_{timestamp}.m4b"
-        output_filepath = Path(GENERATED_FOLDER) / output_filename
-        mux_command = ['ffmpeg']
-        if cover_path:
-            mux_command.extend(['-i', str(cover_path)])
-        mux_command.extend(['-i', str(temp_audio_path), '-i', str(chapters_meta_path)])
-        map_offset = 1 if cover_path else 0
-        mux_command.extend(['-map', f'{map_offset}:a', '-map_metadata', f'{map_offset + 1}'])
-        if cover_path:
-            mux_command.extend(['-map', '0:v'])
-            mux_command.extend(['-disposition:v', 'attached_pic'])
-        mux_command.extend(['-c:a', 'copy', '-c:v', 'copy', str(output_filepath)])
-        subprocess.run(mux_command, check=True, capture_output=True)
-        return {'status': 'Success', 'filename': output_filename}
+        # The Celery task is now just a thin wrapper around the main logic
+        return _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, task_self=self)
     except Exception as e:
         app.logger.error(f"Audiobook creation failed: {e}")
         if isinstance(e, subprocess.CalledProcessError):
             app.logger.error(f"FFMPEG stderr: {e.stderr.decode()}")
+        # Reraise the exception so Celery marks the task as FAILED
         raise e
-    finally:
-        if build_dir.exists():
-            shutil.rmtree(build_dir)
 
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
@@ -410,10 +422,8 @@ def jobs_page():
                     original_filename = Path(task_args[1]).name
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
         
-        # Safely get a COUNT of tasks in the main queue without trying to parse them.
         if redis_client:
             try:
-                # 'celery' is the default queue name
                 unassigned_job_count = redis_client.llen('celery')
             except Exception as e:
                 app.logger.error(f"Could not get queue length from Redis: {e}")
