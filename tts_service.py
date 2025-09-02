@@ -105,90 +105,52 @@ def build_scripture_patterns():
 
 AMBIGUOUS_PATTERN, UNAMBIGUOUS_PATTERN = build_scripture_patterns()
 
+def _scripture_replacer(match):
+    """Helper function to expand a single matched scripture reference."""
+    book_abbr, chapter, verses = match.groups() if len(match.groups()) == 3 else (match.group(1), match.group(2), None)
+    book_full = ABBREVIATIONS.get(book_abbr.replace('.', ''), ABBREVIATIONS.get(book_abbr, book_abbr))
+    chapter_words = _inflect.number_to_words(int(chapter))
+    if not verses: return f"{book_full} chapter {chapter_words}"
+
+    suffix = ""
+    verses = verses.strip()
+    if verses.lower().endswith('ff'):
+        verses = verses[:-2].strip()
+        suffix = f" {BIBLE_REFS.get('ff', 'and following')}"
+    elif verses.lower().endswith('f'):
+        verses = verses[:-1].strip()
+        suffix = f" {BIBLE_REFS.get('f', 'and the following verse')}"
+
+    verse_prefix = "verses" if ',' in verses or '-' in verses or '–' in verses else "verse"
+    verses = re.sub(r'(\d)([a-z])', r'\1 \2', verses, flags=re.IGNORECASE)
+    verses = verses.replace('–', '-').replace('-', ' through ')
+    verse_words = re.sub(r'\d+', lambda m: _inflect.number_to_words(int(m.group())), verses)
+    
+    return f"{book_full} chapter {chapter_words}, {verse_prefix} {verse_words}{suffix}"
+
 def expand_scripture_references(text: str) -> str:
-    def replacer(match):
-        book_abbr, chapter, verses = match.groups() if len(match.groups()) == 3 else (match.group(1), match.group(2), None)
-        book_full = ABBREVIATIONS.get(book_abbr.replace('.', ''), ABBREVIATIONS.get(book_abbr, book_abbr))
-        chapter_words = _inflect.number_to_words(int(chapter))
-        if not verses: return f"{book_full} chapter {chapter_words}"
-
-        suffix = ""
-        verses = verses.strip()
-        if verses.lower().endswith('ff'):
-            verses = verses[:-2].strip()
-            suffix = f" {BIBLE_REFS.get('ff', 'and following')}"
-        elif verses.lower().endswith('f'):
-            verses = verses[:-1].strip()
-            suffix = f" {BIBLE_REFS.get('f', 'and the following verse')}"
-
-        verse_prefix = "verses" if ',' in verses or '-' in verses or '–' in verses else "verse"
-        verses = re.sub(r'(\d)([a-z])', r'\1 \2', verses, flags=re.IGNORECASE)
-        verses = verses.replace('–', '-').replace('-', ' through ')
-        verse_words = re.sub(r'\d+', lambda m: _inflect.number_to_words(int(m.group())), verses)
-        
-        return f"{book_full} chapter {chapter_words}, {verse_prefix} {verse_words}{suffix}"
-
-    text = AMBIGUOUS_PATTERN.sub(replacer, text)
-    text = UNAMBIGUOUS_PATTERN.sub(replacer, text)
+    """Finds and replaces simple scripture references."""
+    text = AMBIGUOUS_PATTERN.sub(_scripture_replacer, text)
+    text = UNAMBIGUOUS_PATTERN.sub(_scripture_replacer, text)
     return text
 
 def expand_complex_scripture_references(text: str) -> str:
-    pattern = re.compile(r'\(\s*([A-Za-z\s]+?)\.?\s+(\d+[:\d,;\s–a-z-]+)\s*\)')
+    """Finds parenthesized text and attempts to expand scripture references within it."""
+    pattern = re.compile(r'\(([^)]+)\)')
+    
+    def complex_replacer(match):
+        inner_text = match.group(1)
+        
+        # Heuristic: only process if it contains a known book abbreviation and a digit
+        book_pattern = r'\b(' + '|'.join(re.escape(k) for k in ABBREVIATIONS.keys() if any(book in ABBREVIATIONS[k] for book in BIBLE_BOOKS)) + r')'
+        if not (re.search(book_pattern, inner_text, re.IGNORECASE) and re.search(r'\d', inner_text)):
+            return match.group(0) # Not a scripture reference, return original with parens
 
-    def replacer(match):
-        try:
-            book_abbr = match.group(1).strip()
-            references_str = match.group(2).strip()
-            full_book_name = ABBREVIATIONS.get(book_abbr, book_abbr)
-            
-            reference_parts = [part.strip() for part in references_str.split(';')]
-            expanded_parts = []
-            
-            last_chapter = ""
-            for part in reference_parts:
-                if not part:
-                    continue
-                
-                current_book_name = full_book_name
-                
-                if ':' in part:
-                    chapter, verses = part.split(':', 1)
-                    chapter = chapter.strip()
-                    verses = verses.strip()
-                    last_chapter = chapter
-                else:
-                    verses_part = part.strip()
-                    if verses_part.replace('-', '').replace('–', '').replace(' ', '').isalnum():
-                        chapter = last_chapter
-                        verses = verses_part
-                    else:
-                        chapter = verses_part
-                        verses = None
-                
-                chapter_words = _inflect.number_to_words(int(chapter))
-                
-                if verses:
-                    suffix = ""
-                    if verses.lower().endswith('ff'):
-                        verses = verses[:-2].strip()
-                        suffix = f" {BIBLE_REFS.get('ff', 'and following')}"
-                    elif verses.lower().endswith('f'):
-                        verses = verses[:-1].strip()
-                        suffix = f" {BIBLE_REFS.get('f', 'and the following verse')}"
+        # It looks like a scripture reference, so expand it
+        expanded_text = expand_scripture_references(inner_text)
+        return expanded_text
 
-                    verse_prefix = "verses" if ',' in verses or '-' in verses or '–' in verses else "verse"
-                    verses = re.sub(r'(\d)([a-z])', r'\1 \2', verses, flags=re.IGNORECASE)
-                    verses = verses.replace('–', '-').replace('-', ' through ')
-                    verse_words = re.sub(r'\d+', lambda m: _inflect.number_to_words(int(m.group())), verses)
-                    expanded_parts.append(f"{current_book_name} chapter {chapter_words}, {verse_prefix} {verse_words}{suffix}")
-                else:
-                    expanded_parts.append(f"{current_book_name} chapter {chapter_words}")
-
-            return ", and ".join(expanded_parts)
-        except (ValueError, IndexError):
-            return match.group(0)
-
-    return pattern.sub(replacer, text)
+    return pattern.sub(complex_replacer, text)
 
 def normalize_parentheticals(text: str) -> str:
     def replacer(match):
@@ -244,7 +206,6 @@ def normalize_text(text: str) -> str:
     
     # Run Latin phrase expansion before general punctuation cleanup
     for phrase, replacement in LATIN_PHRASES.items():
-        # Corrected regex to be more flexible with trailing punctuation
         text = re.sub(rf'{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
 
     # General normalization and cleanup
