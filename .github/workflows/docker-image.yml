@@ -1,11 +1,72 @@
-name: Docker Image CI
+name: Continuous Integration and Deployment
 
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
-  build_and_push:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Free Disk Space on Runner
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        swift: true
+        golang: true
+        docker-images: false
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx and install Compose
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build the Docker services
+      run: docker compose build
+
+    - name: Start the services in the background
+      run: docker compose up -d
+
+    - name: Wait for the web service to be healthy
+      run: |
+        echo "Waiting for web service..."
+        timeout=60
+        while ! curl --silent --fail http://localhost:8000; do
+          timeout=$((timeout-5))
+          if [ $timeout -le 0 ]; then
+            echo "Service timed out."
+            # Print logs from all services for debugging
+            docker compose logs
+            exit 1
+          fi
+          sleep 5
+        done
+        echo "Web service is up!"
+
+    - name: Make test script executable
+      run: chmod +x tests/run_tests.sh
+
+    - name: Run tests
+      run: ./tests/run_tests.sh
+      
+    - name: Stop services and show logs on failure
+      if: always()
+      run: |
+        if [[ ${{ job.status }} == 'failure' ]]; then
+          echo "Tests failed. Displaying container logs..."
+          docker compose logs
+        fi
+        docker compose down
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
