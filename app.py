@@ -195,7 +195,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         raise e
 
 def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, build_dir, task_self=None):
-    """Contains the core logic for creating an audiobook, decoupled from Celery."""
+    """Contains the core logic for creating an audiobook, using the passed build_dir."""
     def update_state(state, meta):
         if task_self:
             task_self.update_state(state=state, meta=meta)

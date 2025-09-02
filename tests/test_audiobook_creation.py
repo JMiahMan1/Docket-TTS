@@ -36,16 +36,20 @@ def test_audiobook_merging_handles_duplicates(mock_mp3, mock_subprocess, setup_t
     
     input_files = ["chapter1_123.mp3", "chapter2_456.mp3", "chapter1_123.mp3", "chapter3_789.mp3"]
     
-    # Call the logic function directly, no Celery mocking needed
+    # Create a path for the temporary build directory inside the test's sandboxed folder
+    build_dir = setup_test_files / "audiobook_build_test"
+    build_dir.mkdir()
+
+    # Call the logic function directly, passing the required build_dir argument
     _create_audiobook_logic(
         file_list=input_files,
         audiobook_title="Test Audiobook",
         audiobook_author="Test Author",
-        cover_url=None
+        cover_url=None,
+        build_dir=build_dir
     )
 
     # Find the concat file in the temporary directory
-    build_dir = next(setup_test_files.glob("audiobook_build_*"))
     concat_file_path = build_dir / "concat_list.txt"
     
     assert concat_file_path.exists()
