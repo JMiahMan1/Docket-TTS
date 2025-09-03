@@ -11,7 +11,6 @@ if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
     ABBREVIATIONS = NORMALIZATION.get("abbreviations", {})
     BIBLE_BOOKS = NORMALIZATION.get("bible_books", [])
-    AMBIGUOUS_BIBLE_ABBRS = NORMALIZATION.get("ambiguous_bible_abbrs", [])
     CASE_SENSITIVE_ABBRS = NORMALIZATION.get("case_sensitive_abbrs", [])
     ROMAN_EXCEPTIONS = set(NORMALIZATION.get("roman_numeral_exceptions", []))
     BIBLE_REFS = NORMALIZATION.get("bible_refs", {})
@@ -21,8 +20,7 @@ if NORMALIZATION_PATH.exists():
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
 else:
-    ABBREVIATIONS, BIBLE_BOOKS, AMBIGUOUS_BIBLE_ABBRS, CASE_SENSITIVE_ABBRS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], [], {}, {}, {}, {}, {}, {}
-    ROMAN_EXCEPTIONS = set()
+    ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSitive_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], set(), {}, {}, {}, {}, {}, {}
 
 _inflect = inflect.engine()
 
@@ -32,7 +30,6 @@ except Exception:
     HEBREW_TO_ENGLISH = None
 
 def _strip_diacritics(text: str) -> str:
-    """Strips diacritics from characters (e.g., 'ά' -> 'α')."""
     normalized = unicodedata.normalize('NFD', text)
     return "".join(c for c in normalized if unicodedata.category(c) != 'Mn')
 
@@ -46,15 +43,11 @@ def normalize_hebrew(text: str) -> str:
     return re.sub(r'[\u0590-\u05FF]+', translate_match, text)
 
 def normalize_greek(text: str) -> str:
-    for char, replacement in GREEK_TRANSLITERATION.items():
-        text = text.replace(char, replacement)
-    return text
+    return text.translate(str.maketrans(GREEK_TRANSLITERATION))
 
 def roman_to_int(s):
     roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
-    s = s.upper()
-    i = 0
-    num = 0
+    s, i, num = s.upper(), 0, 0
     while i < len(s):
         if i + 1 < len(s) and roman_map[s[i]] < roman_map[s[i+1]]:
             num += roman_map[s[i+1]] - roman_map[s[i]]
@@ -65,12 +58,7 @@ def roman_to_int(s):
     return num
 
 def int_to_roman(num):
-    val_map = [
-        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
-        (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
-        (10, "X"), (9, "IX"), (5, "V"), (4, "IV"),
-        (1, "I")
-    ]
+    val_map = [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"), (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")]
     roman_str = ""
     while num > 0:
         for i, r in val_map:
@@ -81,45 +69,25 @@ def int_to_roman(num):
 
 def expand_roman_numerals(text: str) -> str:
     pattern = re.compile(r'\b([IVXLCDMivxlcdm]+)\b')
-    
     def replacer(match):
         roman_str = match.group(1)
-        
-        if roman_str.upper() in ROMAN_EXCEPTIONS:
-            return roman_str 
-
+        if roman_str.upper() in ROMAN_EXCEPTIONS: return roman_str
         try:
             integer_val = roman_to_int(roman_str)
-            canonical_roman = int_to_roman(integer_val)
-            
-            if canonical_roman.lower() != roman_str.lower():
-                return roman_str
-
+            if int_to_roman(integer_val).lower() != roman_str.lower(): return roman_str
             return f"Roman Numeral {_inflect.number_to_words(integer_val)}"
         except (KeyError, IndexError):
             return roman_str
-            
     return pattern.sub(replacer, text)
 
-def build_scripture_patterns():
-    all_abbrs = [re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)]
-    
-    # *** THE FIX IS HERE ***
-    # This pattern is now correctly greedy (*), ensuring it captures the full verse.
-    verse_pattern = r"([^;]*)"
-    
-    unambiguous_pattern = re.compile(r"\b(" + "|".join(sorted(all_abbrs, key=len, reverse=True)) + r")" + r"\s+(\d+)(?::" + verse_pattern + r")?", re.IGNORECASE)
-    return unambiguous_pattern
+# --- NEW, ROBUST SCRIPTURE PARSER ---
 
-UNAMBIGUOUS_PATTERN = build_scripture_patterns()
-
-def _format_single_ref(book_full, chapter, verses_str):
+def _format_ref_segment(book_full, chapter, verses_str):
+    """Helper to format one chapter:verse segment."""
     chapter_words = _inflect.number_to_words(int(chapter))
-    if not verses_str:
-        return f"{book_full} chapter {chapter_words}"
-
+    if not verses_str: return f"{book_full} chapter {chapter_words}"
     suffix = ""
-    verses_str = verses_str.strip().rstrip(".;")
+    verses_str = verses_str.strip().rstrip(".;,")
     
     if verses_str.lower().endswith("ff"):
         verses_str, suffix = verses_str[:-2].strip(), f" {BIBLE_REFS.get('ff', 'and following')}"
@@ -130,54 +98,75 @@ def _format_single_ref(book_full, chapter, verses_str):
     verses_str = re.sub(r"(\d)([a-z])", r"\1 \2", verses_str, flags=re.IGNORECASE)
     verses_str = verses_str.replace("–", "-").replace("-", " through ")
     verse_words = re.sub(r"\d+", lambda m: _inflect.number_to_words(int(m.group())), verses_str)
-
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
-
-def _scripture_replacer(match):
-    book_abbr, chapter, verses = match.groups() if len(match.groups()) == 3 else (match.group(1), match.group(2), None)
-    book_full = ABBREVIATIONS.get(book_abbr.replace('.', ''), ABBREVIATIONS.get(book_abbr, book_abbr))
-    return _format_single_ref(book_full, chapter, verses or "")
-
-def expand_scripture_references(text: str) -> str:
-    """Finds and replaces scripture references throughout the text."""
-    return UNAMBIGUOUS_PATTERN.sub(_scripture_replacer, text)
-
-def expand_complex_scripture_references(text: str) -> str:
-    """Finds parenthesized/bracketed text and expands scripture references within it."""
-    pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
+def normalize_scripture(text: str) -> str:
+    """A stateful parser to handle all scripture references, including complex chains."""
+    book_keys = [re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)]
+    book_pattern_str = '|'.join(sorted(book_keys, key=len, reverse=True))
     
+    # This pattern finds either a full "Book C:V" ref or a chained "C:V" or "V" ref
+    ref_pattern = re.compile(
+        r'\b(' + book_pattern_str + r')?' +  # Optional Book (Group 1)
+        r'\s*' +
+        r'(\d+)(?::([\d\w\s,–-]+(?:ff|f)?))?', # Chapter (Group 2) and optional Verse (Group 3)
+        re.IGNORECASE
+    )
+
+    last_book_abbr = None
+    last_chapter = None
+
+    def replacer(match):
+        nonlocal last_book_abbr, last_chapter
+        book_abbr, chapter, verses = match.groups()
+
+        if book_abbr:
+            last_book_abbr = book_abbr
+        
+        last_chapter = chapter
+        
+        book_full = ABBREVIATIONS.get(last_book_abbr.replace('.',''), last_book_abbr)
+        return _format_ref_segment(book_full, chapter, verses or "")
+
+    # Main replacement logic
+    # First, handle complex, chained references which are typically in parentheses/brackets
     def complex_replacer(match):
-        opener, inner_text, closer = match.groups()
+        nonlocal last_book_abbr, last_chapter
+        last_book_abbr = None # Reset context for each parenthetical block
+        last_chapter = None
         
-        book_pattern_str = '|'.join([re.escape(k) for k in ABBREVIATIONS.keys() if any(book in ABBREVIATIONS[k] for book in BIBLE_BOOKS)])
-        book_pattern = r'\b(' + book_pattern_str + r')'
+        # Split by semicolon and process, maintaining context within the block
+        segments = match.group(2).split(';')
+        expanded = []
+        for segment in segments:
+            # `re.sub` is used here to process each part of the chain
+            expanded_segment = ref_pattern.sub(replacer, segment.strip())
+            expanded.append(expanded_segment)
+        return " ".join(expanded)
 
-        if not (re.search(book_pattern, inner_text, re.IGNORECASE) and re.search(r'\d', inner_text)):
-            return match.group(0)
+    # Pass 1: Handle complex references in parentheses/brackets
+    text = re.sub(r'([(\[])([^)\]]+)([)\]])', complex_replacer, text)
 
-        segments = inner_text.split(';')
-        expanded_segments = [expand_scripture_references(segment) for segment in segments]
-        
-        return " ".join(expanded_segments)
+    # Pass 2: Handle simple references in the main prose
+    last_book_abbr = None
+    last_chapter = None
+    text = ref_pattern.sub(replacer, text)
 
-    return pattern.sub(complex_replacer, text)
+    return text
+
+# --- END OF SCRIPTURE PARSER ---
 
 def number_replacer(match):
     num_str = match.group(0)
     num_int = int(num_str)
-    
     if len(num_str) == 4 and 1000 <= num_int <= 2099:
-        if 2000 <= num_int <= 2009:
-            return _inflect.number_to_words(num_int, andword="")
-        else:
-            return _inflect.number_to_words(num_int, group=2).replace(",", "")
+        if 2000 <= num_int <= 2009: return _inflect.number_to_words(num_int, andword="")
+        else: return _inflect.number_to_words(num_int, group=2).replace(",", "")
     else:
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
-    text = expand_complex_scripture_references(text)
-    text = expand_scripture_references(text)
+    text = normalize_scripture(text)
 
     for phrase, replacement in LATIN_PHRASES.items():
         text = re.sub(rf'{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
