@@ -100,16 +100,20 @@ def _format_ref_segment(book_full, chapter, verses_str):
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
 def normalize_scripture(text: str) -> str:
-    book_keys = sorted([re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)], key=len, reverse=True)
+    # Combine abbreviation keys and full book names for a comprehensive pattern
+    bible_abbr_keys = {re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)}
+    full_book_names = {re.escape(book) for book in BIBLE_BOOKS}
+    book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
     
     # This comprehensive pattern finds a reference, which may or may not start with a book name.
+    # The verse group now accepts trailing punctuation like ';' and '.' to handle them gracefully.
     ref_pattern = re.compile(
         r'\b(' + book_pattern_str + r')?' +  # Group 1: Book (optional)
         r'\s*' +
         r'(\d+)' +  # Group 2: Chapter (required)
         r'[:\s]' + # Separator
-        r'([\d\w\s,–-]+(?:ff|f)?)',  # Group 3: Verses
+        r'([\d\w\s,;.–-]+(?:ff|f)?)',  # Group 3: Verses (now includes . and ;)
         re.IGNORECASE
     )
 
@@ -125,8 +129,9 @@ def normalize_scripture(text: str) -> str:
         if not last_book_abbr:
             return match.group(0)
 
-        book_full = ABBREVIATIONS.get(last_book_abbr.replace('.',''), last_book_abbr)
-        return _format_ref_segment(book_full, chapter, verses or "")
+        # Find the full book name from abbreviations, falling back to the matched string
+        book_full_name = next((v for k, v in ABBREVIATIONS.items() if k.lower() == last_book_abbr.lower().replace('.', '')), last_book_abbr)
+        return _format_ref_segment(book_full_name, chapter, verses or "")
 
     def replacer_simple(match):
         book_abbr, chapter, verses = match.groups()
@@ -135,7 +140,8 @@ def normalize_scripture(text: str) -> str:
 
 
     # A simpler pattern for unambiguous prose references like "Genesis 17:17"
-    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,-]+(?:ff|f)?)', re.IGNORECASE)
+    # The verse group now accepts trailing punctuation like ';' and '.'
+    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,;.-]+(?:ff|f)?)', re.IGNORECASE)
 
     # A pattern to find content inside brackets/parentheses to parse with context
     enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
