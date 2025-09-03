@@ -80,8 +80,6 @@ def expand_roman_numerals(text: str) -> str:
             return roman_str
     return pattern.sub(replacer, text)
 
-# --- NEW, ROBUST SCRIPTURE PARSER ---
-
 def _format_ref_segment(book_full, chapter, verses_str):
     chapter_words = _inflect.number_to_words(int(chapter))
     if not verses_str: return f"{book_full} chapter {chapter_words}"
@@ -124,27 +122,25 @@ def normalize_scripture(text: str) -> str:
         book_abbr, chapter, verses = match.groups()
 
         if book_abbr:
-            last_book_abbr = book_abbr
+            last_book_abbr = book_abbr.strip()
         
         if not last_book_abbr:
             return match.group(0)
 
-        # Find the full book name from abbreviations, falling back to the matched string
-        book_full_name = next((v for k, v in ABBREVIATIONS.items() if k.lower() == last_book_abbr.lower().replace('.', '')), last_book_abbr)
-        return _format_ref_segment(book_full_name, chapter, verses or "")
+        book_full = ABBREVIATIONS.get(last_book_abbr.replace('.',''), last_book_abbr) #
+        return _format_ref_segment(book_full, chapter, verses or "") #
 
     def replacer_simple(match):
         book_abbr, chapter, verses = match.groups()
-        book_full = ABBREVIATIONS.get(book_abbr.replace('.',''), book_abbr)
-        return _format_ref_segment(book_full, chapter, verses or "")
-
+        book_full = ABBREVIATIONS.get(book_abbr.replace('.',''), book_abbr) #
+        return _format_ref_segment(book_full, chapter, verses or "") #
 
     # A simpler pattern for unambiguous prose references like "Genesis 17:17"
     # The verse group now accepts trailing punctuation like ';' and '.'
-    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,;.-]+(?:ff|f)?)', re.IGNORECASE)
+    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,;.-]+(?:ff|f)?)', re.IGNORECASE) #
 
     # A pattern to find content inside brackets/parentheses to parse with context
-    enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
+    enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])') #
 
     def enclosed_replacer(match):
         nonlocal last_book_abbr
@@ -152,15 +148,21 @@ def normalize_scripture(text: str) -> str:
         
         opener, inner_text, closer = match.groups()
         
-        # Use re.sub with our stateful replacer on the inner text
-        return ref_pattern.sub(replacer, inner_text)
+        # Use a finditer loop for robust stateful parsing of multiple references
+        last_end = 0
+        new_parts = []
+        for m in ref_pattern.finditer(inner_text):
+            new_parts.append(inner_text[last_end:m.start()])
+            new_parts.append(replacer(m))
+            last_end = m.end()
+        new_parts.append(inner_text[last_end:])
+        
+        return "".join(new_parts)
 
     text = enclosed_pattern.sub(enclosed_replacer, text)
-    text = prose_pattern.sub(replacer_simple, text) # Handle remaining simple cases
+    text = prose_pattern.sub(replacer_simple, text)
 
     return text
-
-# --- END OF SCRIPTURE PARSER ---
 
 def number_replacer(match):
     num_str = match.group(0)
