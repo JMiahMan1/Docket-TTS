@@ -11,7 +11,6 @@ if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
     ABBREVIATIONS = NORMALIZATION.get("abbreviations", {})
     BIBLE_BOOKS = NORMALIZATION.get("bible_books", [])
-    AMBIGUOUS_BIBLE_ABBRS = NORMALIZATION.get("ambiguous_bible_abbrs", [])
     CASE_SENSITIVE_ABBRS = NORMALIZATION.get("case_sensitive_abbrs", [])
     ROMAN_EXCEPTIONS = set(NORMALIZATION.get("roman_numeral_exceptions", []))
     BIBLE_REFS = NORMALIZATION.get("bible_refs", {})
@@ -21,8 +20,7 @@ if NORMALIZATION_PATH.exists():
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
 else:
-    ABBREVIATIONS, BIBLE_BOOKS, AMBIGUOUS_BIBLE_ABBRS, CASE_SENSITIVE_ABBRS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], [], {}, {}, {}, {}, {}, {}
-    ROMAN_EXCEPTIONS = set()
+    ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], set(), {}, {}, {}, {}, {}, {}
 
 _inflect = inflect.engine()
 
@@ -39,20 +37,16 @@ def normalize_hebrew(text: str) -> str:
     def translate_match(match):
         hebrew_text = match.group(0)
         if HEBREW_TO_ENGLISH:
-            translated_text = HEBREW_TO_ENGLISH.translate(hebrew_text)
-            return f" , translation from Hebrew: {translated_text} , "
+            return f" , translation from Hebrew: {HEBREW_TO_ENGLISH.translate(hebrew_text)} , "
         return " [Hebrew text] "
     return re.sub(r'[\u0590-\u05FF]+', translate_match, text)
 
 def normalize_greek(text: str) -> str:
-    for char, replacement in GREEK_TRANSLITERATION.items():
-        text = text.replace(char, replacement)
-    return text
+    return text.translate(str.maketrans(GREEK_TRANSLITERATION))
 
 def roman_to_int(s):
     roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
-    s = s.upper()
-    i, num = 0, 0
+    s, i, num = s.upper(), 0, 0
     while i < len(s):
         if i + 1 < len(s) and roman_map[s[i]] < roman_map[s[i+1]]:
             num += roman_map[s[i+1]] - roman_map[s[i]]
@@ -85,16 +79,10 @@ def expand_roman_numerals(text: str) -> str:
             return roman_str
     return pattern.sub(replacer, text)
 
-# --- UNIFIED SCRIPTURE PARSING LOGIC ---
-
-# Pattern to find a book name (e.g., "Gen" or "1 Cor.")
-BOOK_PATTERN_STRING = '|'.join(sorted([re.escape(k) for k in ABBREVIATIONS.keys() if any(book in ABBREVIATIONS[k] for book in BIBLE_BOOKS)], key=len, reverse=True))
-BOOK_REGEX = re.compile(r'\b(' + BOOK_PATTERN_STRING + r')', re.IGNORECASE)
-
-# Pattern to find a verse segment (e.g., "17:1-15a", "18:1ff", or just "19b")
-VERSE_REGEX = re.compile(r'(\d+)(?::([\d\w\s,–-]*))?')
+# --- UNIFIED SCRIPTURE PARSING LOGIC (REWRITTEN) ---
 
 def _format_single_ref(book_full, chapter, verses_str):
+    """Helper to format one chapter:verse segment (e.g., "chapter five, verse seven")."""
     chapter_words = _inflect.number_to_words(int(chapter))
     if not verses_str: return f"{book_full} chapter {chapter_words}"
     suffix = ""
@@ -104,57 +92,65 @@ def _format_single_ref(book_full, chapter, verses_str):
     elif verses_str.lower().endswith('f'):
         verses_str, suffix = verses_str[:-1].strip(), f" {BIBLE_REFS.get('f', 'and the following verse')}"
     
-    verse_prefix = "verses" if ',' in verses_str or '-' in verses_str or '–' in verses_str else "verse"
+    prefix = "verses" if any(c in verses_str for c in ',–-') else "verse"
     verses_str = re.sub(r'(\d)([a-z])', r'\1 \2', verses_str, flags=re.IGNORECASE)
     verses_str = verses_str.replace('–', '-').replace('-', ' through ')
     verse_words = re.sub(r'\d+', lambda m: _inflect.number_to_words(int(m.group())), verses_str)
-    return f"{book_full} chapter {chapter_words}, {verse_prefix} {verse_words}{suffix}"
+    return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
 def expand_scripture_references(text: str) -> str:
-    """The main scripture parsing function, handles simple, chained, and multi-book references."""
-    segments = BOOK_REGEX.split(text)
-    result = [segments[0]]
-    last_book_full = ""
-    last_chapter = ""
-
-    i = 1
-    while i < len(segments):
-        book_abbr = segments[i]
-        content = segments[i+1]
-        book_full = ABBREVIATIONS.get(book_abbr.replace('.', ''), ABBREVIATIONS.get(book_abbr, book_abbr))
-        
-        verse_match = VERSE_REGEX.match(content.strip())
-        if verse_match:
-            chapter, verses = verse_match.groups()
-            last_book_full = book_full
-            last_chapter = chapter
-            result.append(_format_single_ref(book_full, chapter, verses or ""))
-            
-            # Check for chained refs in the rest of the content
-            remaining_content = content.strip()[verse_match.end():].strip(' ;')
-            if remaining_content:
-                chained_refs = re.split(r'\s*;\s*', remaining_content)
-                for ref in chained_refs:
-                    if not ref: continue
-                    if ':' in ref:
-                        new_chapter, new_verses = ref.split(':', 1)
-                        last_chapter = new_chapter.strip()
-                        result.append(_format_single_ref(last_book_full, last_chapter, new_verses))
-                    else:
-                        result.append(_format_single_ref(last_book_full, last_chapter, ref))
-        else:
-            result.append(book_abbr + content)
-        i += 2
+    """Master function to find and expand all scripture references."""
+    book_keys = [re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)]
+    book_pattern_str = '|'.join(sorted(book_keys, key=len, reverse=True))
     
-    return "".join(result)
+    # This pattern finds a book name, followed by a block of chapter/verse info.
+    # It correctly handles both same-book and multi-book chains.
+    master_pattern = re.compile(
+        r'\b(' + book_pattern_str + r')' +  # Group 1: Book name
+        r'\s+' +
+        r'([\d\w\s,:–;-]+)',  # Group 2: The entire verse block (e.g., "3:7ff.; Neh 4:1ff.")
+        re.IGNORECASE
+    )
+
+    def replacer(match):
+        book_abbr, verse_block = match.groups()
+        
+        # Split the verse block by semicolons to handle chains
+        ref_segments = re.split(r'\s*;\s*', verse_block.strip())
+        
+        processed_parts = []
+        current_book_abbr = book_abbr
+        current_chapter = None
+
+        for segment in ref_segments:
+            if not segment: continue
+            
+            # Check if this segment starts with a new book name
+            book_match = re.match(r'(' + book_pattern_str + r')\s*(.*)', segment, re.IGNORECASE)
+            if book_match:
+                current_book_abbr, rest_of_segment = book_match.groups()
+                segment = rest_of_segment
+
+            book_full = ABBREVIATIONS.get(current_book_abbr.replace('.',''), current_book_abbr)
+
+            if ':' in segment:
+                chapter, verses = segment.split(':', 1)
+                current_chapter = chapter.strip()
+                processed_parts.append(_format_single_ref(book_full, current_chapter, verses))
+            elif current_chapter: # Verse only, inherits previous chapter
+                processed_parts.append(_format_single_ref(book_full, current_chapter, segment))
+
+        return ", ".join(processed_parts)
+
+    return master_pattern.sub(replacer, text)
 
 def expand_enclosed_scripture_references(text: str) -> str:
     """Finds content in () or [] and expands scripture refs within."""
-    pattern = re.compile(r'([(\[])([^)\]]+)[)\]]') # Handles both () and []
+    pattern = re.compile(r'([(\[])([^)\]]+)[)\]]')
     def replacer(match):
-        _, inner_text, _ = match.groups() if len(match.groups()) == 3 else ('', match.group(1), '')
+        _, inner_text, _ = match.groups()
         # Heuristic check
-        if not (BOOK_REGEX.search(inner_text) and re.search(r'\d', inner_text)):
+        if not (re.search(r'\b(' + '|'.join(ABBREVIATIONS.keys()) + r')', inner_text, re.IGNORECASE) and re.search(r'\d', inner_text)):
             return match.group(0)
         return f" {expand_scripture_references(inner_text)} "
     return pattern.sub(replacer, text)
@@ -171,12 +167,10 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
+    # Scripture parsing is now consolidated and runs first
     text = expand_enclosed_scripture_references(text)
     text = expand_scripture_references(text)
 
-    # Cleanup for biblical text artifacts
-    text = re.sub(r'\[\d+\]|\[fn\]|[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)', '', text)
-    
     for phrase, replacement in LATIN_PHRASES.items():
         text = re.sub(rf'{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
 
@@ -197,22 +191,19 @@ def normalize_text(text: str) -> str:
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
     # General cleanup
-    text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M) # Verse numbers at start of line
-    text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text) # Verse numbers after punctuation
-
+    text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
+    text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
+    
     text = re.sub(r"\b\d+\b", number_replacer, text)
     text = re.sub(r"\[|\]", " , ", text)
-    text = re.sub(r"(\s*,\s*){2,}", ", ", text) # multiple commas
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 class TTSService:
     def __init__(self, voice: str = "en_US-hfc_male-medium.onnx"):
         self.voice_path = Path(f"/app/voices/{voice}")
-        if not self.voice_path.exists():
-            self.voice_path = Path(f"voices/{voice}")
-        if not self.voice_path.exists():
-            raise ValueError(f"Voice model not found at {self.voice_path}")
+        if not self.voice_path.exists(): self.voice_path = Path(f"voices/{voice}")
+        if not self.voice_path.exists(): raise ValueError(f"Voice model not found at {self.voice_path}")
 
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)
