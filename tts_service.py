@@ -80,6 +80,8 @@ def expand_roman_numerals(text: str) -> str:
             return roman_str
     return pattern.sub(replacer, text)
 
+# --- NEW, ROBUST SCRIPTURE PARSER ---
+
 def _format_ref_segment(book_full, chapter, verses_str):
     chapter_words = _inflect.number_to_words(int(chapter))
     if not verses_str: return f"{book_full} chapter {chapter_words}"
@@ -104,14 +106,14 @@ def normalize_scripture(text: str) -> str:
     book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
     
-    # This comprehensive pattern finds a reference, which may or may not start with a book name.
-    # The verse group now accepts trailing punctuation like ';' and '.' to handle them gracefully.
+    # This pattern finds a single reference. The verse group intentionally does NOT match semicolons,
+    # as they are delimiters between separate references.
     ref_pattern = re.compile(
         r'\b(' + book_pattern_str + r')?' +  # Group 1: Book (optional)
         r'\s*' +
         r'(\d+)' +  # Group 2: Chapter (required)
         r'[:\s]' + # Separator
-        r'([\d\w\s,;.–-]+(?:ff|f)?)',  # Group 3: Verses (now includes . and ;)
+        r'([\d\w\s,.\–-]+(?:ff|f)?)',  # Group 3: Verses
         re.IGNORECASE
     )
 
@@ -127,20 +129,20 @@ def normalize_scripture(text: str) -> str:
         if not last_book_abbr:
             return match.group(0)
 
-        book_full = ABBREVIATIONS.get(last_book_abbr.replace('.',''), last_book_abbr) #
-        return _format_ref_segment(book_full, chapter, verses or "") #
+        book_full = ABBREVIATIONS.get(last_book_abbr.replace('.',''), last_book_abbr)
+        return _format_ref_segment(book_full, chapter, verses or "")
 
     def replacer_simple(match):
         book_abbr, chapter, verses = match.groups()
-        book_full = ABBREVIATIONS.get(book_abbr.replace('.',''), book_abbr) #
-        return _format_ref_segment(book_full, chapter, verses or "") #
+        book_full = ABBREVIATIONS.get(book_abbr.replace('.',''), book_abbr)
+        return _format_ref_segment(book_full, chapter, verses or "")
+
 
     # A simpler pattern for unambiguous prose references like "Genesis 17:17"
-    # The verse group now accepts trailing punctuation like ';' and '.'
-    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,;.-]+(?:ff|f)?)', re.IGNORECASE) #
+    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
 
     # A pattern to find content inside brackets/parentheses to parse with context
-    enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])') #
+    enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
 
     def enclosed_replacer(match):
         nonlocal last_book_abbr
@@ -157,12 +159,15 @@ def normalize_scripture(text: str) -> str:
             last_end = m.end()
         new_parts.append(inner_text[last_end:])
         
-        return "".join(new_parts)
+        # Re-add the enclosing brackets/parentheses
+        return opener + "".join(new_parts) + closer
 
     text = enclosed_pattern.sub(enclosed_replacer, text)
-    text = prose_pattern.sub(replacer_simple, text)
+    text = prose_pattern.sub(replacer_simple, text) # Handle remaining simple cases
 
     return text
+
+# --- END OF SCRIPTURE PARSER ---
 
 def number_replacer(match):
     num_str = match.group(0)
@@ -200,7 +205,7 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"\[\d+\]|\[fn\]|[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)", "", text)
 
     text = re.sub(r"\b\d+\b", number_replacer, text)
-    text = re.sub(r"\[|\]", " , ", text)
+    text = re.sub(r"\[|\]", " , ", text).replace("(", "").replace(")", "") # clean up brackets
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
