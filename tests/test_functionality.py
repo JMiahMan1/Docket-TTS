@@ -95,16 +95,18 @@ def test_roman_numeral_expansion():
     assert "chapter Roman Numeral six" in normalized_text
 
 # --- Heavier Tests Last ---
-
 def test_f_and_ff_suffixes():
     """
-    Tests normalization of verse references with 'f' and 'ff' suffixes.
+    Tests normalization of verse references with 'f' and 'ff' suffixes, including complex multi-book references.
     """
     title = "F and FF Suffix Test"
-    text = "Paul discusses the sacrifice of Jesus (Rom 3:21ff) and also the Passover (1 Cor 5:7f)."
+    text = "Paul discusses the sacrifice of Jesus (Rom 3:21ff), the Passover (1 Cor 5:7f), and the rebuilding period (Ezra 3:7ff.; Neh 4:1ff.)."
     normalized_text = submit_and_poll_task(title, text).lower()
+
     assert "romans chapter three, verse twenty-one and following" in normalized_text
     assert "first corinthians chapter five, verse seven and the following verse" in normalized_text
+    assert "ezra chapter three, verse seven and following" in normalized_text
+    assert "nehemiah chapter four, verse one and following" in normalized_text
 
 def test_partial_verses():
     """
