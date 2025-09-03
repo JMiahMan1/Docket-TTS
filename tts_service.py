@@ -11,6 +11,7 @@ if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
     ABBREVIATIONS = NORMALIZATION.get("abbreviations", {})
     BIBLE_BOOKS = NORMALIZATION.get("bible_books", [])
+    AMBIGUOUS_BIBLE_ABBRS = NORMALIZATION.get("ambiguous_bible_abbrs", [])
     CASE_SENSITIVE_ABBRS = NORMALIZATION.get("case_sensitive_abbrs", [])
     ROMAN_EXCEPTIONS = set(NORMALIZATION.get("roman_numeral_exceptions", []))
     BIBLE_REFS = NORMALIZATION.get("bible_refs", {})
@@ -20,7 +21,8 @@ if NORMALIZATION_PATH.exists():
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
 else:
-    ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], set(), {}, {}, {}, {}, {}, {}
+    ABBREVIATIONS, BIBLE_BOOKS, AMBIGUOUS_BIBLE_ABBRS, CASE_SENSITIVE_ABBRS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], [], {}, {}, {}, {}, {}, {}
+    ROMAN_EXCEPTIONS = set()
 
 _inflect = inflect.engine()
 
@@ -28,6 +30,11 @@ try:
     HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
 except Exception:
     HEBREW_TO_ENGLISH = None
+
+def _strip_diacritics(text: str) -> str:
+    """Strips diacritics from characters (e.g., 'ά' -> 'α')."""
+    normalized = unicodedata.normalize('NFD', text)
+    return "".join(c for c in normalized if unicodedata.category(c) != 'Mn')
 
 def normalize_hebrew(text: str) -> str:
     def translate_match(match):
@@ -97,7 +104,7 @@ def expand_roman_numerals(text: str) -> str:
 def build_scripture_patterns():
     all_abbrs = [re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)]
     
-    # This pattern now correctly stops at a semicolon, preventing it from being too greedy.
+    # This non-greedy pattern correctly stops at a semicolon.
     verse_pattern = r"([^;]*?)"
     
     unambiguous_pattern = re.compile(r"\b(" + "|".join(sorted(all_abbrs, key=len, reverse=True)) + r")" + r"\s+(\d+)(?::" + verse_pattern + r")?", re.IGNORECASE)
@@ -111,7 +118,6 @@ def _format_single_ref(book_full, chapter, verses_str):
         return f"{book_full} chapter {chapter_words}"
 
     suffix = ""
-    # YOUR FIX IS HERE:
     verses_str = verses_str.strip().rstrip(".;")
     
     if verses_str.lower().endswith("ff"):
@@ -149,7 +155,6 @@ def expand_complex_scripture_references(text: str) -> str:
         if not (re.search(book_pattern, inner_text, re.IGNORECASE) and re.search(r'\d', inner_text)):
             return match.group(0)
 
-        # Split by semicolon and process each segment individually
         segments = inner_text.split(';')
         expanded_segments = [expand_scripture_references(segment) for segment in segments]
         
@@ -170,11 +175,9 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
-    # This two-step process is now more robust.
     text = expand_complex_scripture_references(text)
     text = expand_scripture_references(text)
 
-    # All other normalization rules follow
     for phrase, replacement in LATIN_PHRASES.items():
         text = re.sub(rf'{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
 
