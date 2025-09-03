@@ -104,8 +104,9 @@ def expand_roman_numerals(text: str) -> str:
 def build_scripture_patterns():
     all_abbrs = [re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)]
     
-    # This non-greedy pattern correctly stops at a semicolon.
-    verse_pattern = r"([^;]*?)"
+    # *** THE FIX IS HERE ***
+    # This pattern is now correctly greedy (*), ensuring it captures the full verse.
+    verse_pattern = r"([^;]*)"
     
     unambiguous_pattern = re.compile(r"\b(" + "|".join(sorted(all_abbrs, key=len, reverse=True)) + r")" + r"\s+(\d+)(?::" + verse_pattern + r")?", re.IGNORECASE)
     return unambiguous_pattern
