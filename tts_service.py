@@ -103,21 +103,19 @@ def expand_scripture_references(text: str) -> str:
     book_keys = [re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)]
     book_pattern_str = '|'.join(sorted(book_keys, key=len, reverse=True))
     
-    # This pattern finds a book name, followed by a block of chapter/verse info.
-    # It correctly handles both same-book and multi-book chains.
+    # FIX: Pattern is now stricter, requiring a book to be followed by a digit.
+    # This prevents misidentifying things like "Acts XV".
     master_pattern = re.compile(
-        r'\b(' + book_pattern_str + r')' +  # Group 1: Book name
+        r'\b(' + book_pattern_str + r')' +
         r'\s+' +
-        r'([\d\w\s,:–;-]+)',  # Group 2: The entire verse block (e.g., "3:7ff.; Neh 4:1ff.")
+        r'(\d+[\d\w\s,:–;-]*)',  # Must start with a digit
         re.IGNORECASE
     )
 
     def replacer(match):
         book_abbr, verse_block = match.groups()
         
-        # Split the verse block by semicolons to handle chains
         ref_segments = re.split(r'\s*;\s*', verse_block.strip())
-        
         processed_parts = []
         current_book_abbr = book_abbr
         current_chapter = None
@@ -125,7 +123,6 @@ def expand_scripture_references(text: str) -> str:
         for segment in ref_segments:
             if not segment: continue
             
-            # Check if this segment starts with a new book name
             book_match = re.match(r'(' + book_pattern_str + r')\s*(.*)', segment, re.IGNORECASE)
             if book_match:
                 current_book_abbr, rest_of_segment = book_match.groups()
@@ -137,7 +134,7 @@ def expand_scripture_references(text: str) -> str:
                 chapter, verses = segment.split(':', 1)
                 current_chapter = chapter.strip()
                 processed_parts.append(_format_single_ref(book_full, current_chapter, verses))
-            elif current_chapter: # Verse only, inherits previous chapter
+            elif current_chapter:
                 processed_parts.append(_format_single_ref(book_full, current_chapter, segment))
 
         return ", ".join(processed_parts)
@@ -146,12 +143,14 @@ def expand_scripture_references(text: str) -> str:
 
 def expand_enclosed_scripture_references(text: str) -> str:
     """Finds content in () or [] and expands scripture refs within."""
-    pattern = re.compile(r'([(\[])([^)\]]+)[)\]]')
+    # FIX: Regex now correctly captures start, content, and end bracket/paren
+    pattern = re.compile(r'([(\[])([^)\]]+)([)\]])') 
     def replacer(match):
-        _, inner_text, _ = match.groups()
+        start_bracket, inner_text, end_bracket = match.groups()
+        
         # Heuristic check
         if not (re.search(r'\b(' + '|'.join(ABBREVIATIONS.keys()) + r')', inner_text, re.IGNORECASE) and re.search(r'\d', inner_text)):
-            return match.group(0)
+            return match.group(0) # Return original if not a scripture ref
         return f" {expand_scripture_references(inner_text)} "
     return pattern.sub(replacer, text)
 
@@ -167,7 +166,6 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
-    # Scripture parsing is now consolidated and runs first
     text = expand_enclosed_scripture_references(text)
     text = expand_scripture_references(text)
 
@@ -180,7 +178,6 @@ def normalize_text(text: str) -> str:
     
     text = expand_roman_numerals(text)
 
-    # Handle non-bible abbreviations
     non_bible_abbrs = {k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS)}
     for abbr, expanded in non_bible_abbrs.items():
         flags = 0 if abbr in CASE_SENSITIVE_ABBRS else re.IGNORECASE
@@ -190,7 +187,6 @@ def normalize_text(text: str) -> str:
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
-    # General cleanup
     text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
     text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
     
