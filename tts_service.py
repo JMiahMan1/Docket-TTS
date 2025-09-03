@@ -79,10 +79,7 @@ def expand_roman_numerals(text: str) -> str:
             return roman_str
     return pattern.sub(replacer, text)
 
-# --- UNIFIED SCRIPTURE PARSING LOGIC (REWRITTEN) ---
-
 def _format_single_ref(book_full, chapter, verses_str):
-    """Helper to format one chapter:verse segment (e.g., "chapter five, verse seven")."""
     chapter_words = _inflect.number_to_words(int(chapter))
     if not verses_str: return f"{book_full} chapter {chapter_words}"
     suffix = ""
@@ -98,23 +95,19 @@ def _format_single_ref(book_full, chapter, verses_str):
     verse_words = re.sub(r'\d+', lambda m: _inflect.number_to_words(int(m.group())), verses_str)
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
-def expand_scripture_references(text: str) -> str:
-    """Master function to find and expand all scripture references."""
+def expand_scripture_references_worker(text: str) -> str:
     book_keys = [re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)]
     book_pattern_str = '|'.join(sorted(book_keys, key=len, reverse=True))
     
-    # FIX: Pattern is now stricter, requiring a book to be followed by a digit.
-    # This prevents misidentifying things like "Acts XV".
     master_pattern = re.compile(
         r'\b(' + book_pattern_str + r')' +
         r'\s+' +
-        r'(\d+[\d\w\s,:–;-]*)',  # Must start with a digit
+        r'(\d+[\d\w\s,:–;-]*)',
         re.IGNORECASE
     )
 
     def replacer(match):
         book_abbr, verse_block = match.groups()
-        
         ref_segments = re.split(r'\s*;\s*', verse_block.strip())
         processed_parts = []
         current_book_abbr = book_abbr
@@ -142,19 +135,13 @@ def expand_scripture_references(text: str) -> str:
     return master_pattern.sub(replacer, text)
 
 def expand_enclosed_scripture_references(text: str) -> str:
-    """Finds content in () or [] and expands scripture refs within."""
-    # FIX: Regex now correctly captures start, content, and end bracket/paren
-    pattern = re.compile(r'([(\[])([^)\]]+)([)\]])') 
+    pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
     def replacer(match):
         start_bracket, inner_text, end_bracket = match.groups()
-        
-        # Heuristic check
         if not (re.search(r'\b(' + '|'.join(ABBREVIATIONS.keys()) + r')', inner_text, re.IGNORECASE) and re.search(r'\d', inner_text)):
-            return match.group(0) # Return original if not a scripture ref
-        return f" {expand_scripture_references(inner_text)} "
+            return match.group(0)
+        return f" {expand_scripture_references_worker(inner_text)} "
     return pattern.sub(replacer, text)
-
-# --- END OF SCRIPTURE LOGIC ---
 
 def number_replacer(match):
     num_str = match.group(0)
@@ -167,7 +154,7 @@ def number_replacer(match):
 
 def normalize_text(text: str) -> str:
     text = expand_enclosed_scripture_references(text)
-    text = expand_scripture_references(text)
+    text = expand_scripture_references_worker(text)
 
     for phrase, replacement in LATIN_PHRASES.items():
         text = re.sub(rf'{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
