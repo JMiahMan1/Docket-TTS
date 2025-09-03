@@ -20,7 +20,7 @@ if NORMALIZATION_PATH.exists():
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
 else:
-    ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSitive_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], set(), {}, {}, {}, {}, {}, {}
+    ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], set(), {}, {}, {}, {}, {}, {}
 
 _inflect = inflect.engine()
 
@@ -83,7 +83,6 @@ def expand_roman_numerals(text: str) -> str:
 # --- NEW, ROBUST SCRIPTURE PARSER ---
 
 def _format_ref_segment(book_full, chapter, verses_str):
-    """Helper to format one chapter:verse segment."""
     chapter_words = _inflect.number_to_words(int(chapter))
     if not verses_str: return f"{book_full} chapter {chapter_words}"
     suffix = ""
@@ -101,56 +100,57 @@ def _format_ref_segment(book_full, chapter, verses_str):
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
 def normalize_scripture(text: str) -> str:
-    """A stateful parser to handle all scripture references, including complex chains."""
-    book_keys = [re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)]
-    book_pattern_str = '|'.join(sorted(book_keys, key=len, reverse=True))
+    book_keys = sorted([re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)], key=len, reverse=True)
+    book_pattern_str = '|'.join(book_keys)
     
-    # This pattern finds either a full "Book C:V" ref or a chained "C:V" or "V" ref
+    # This comprehensive pattern finds a reference, which may or may not start with a book name.
     ref_pattern = re.compile(
-        r'\b(' + book_pattern_str + r')?' +  # Optional Book (Group 1)
+        r'\b(' + book_pattern_str + r')?' +  # Group 1: Book (optional)
         r'\s*' +
-        r'(\d+)(?::([\d\w\s,–-]+(?:ff|f)?))?', # Chapter (Group 2) and optional Verse (Group 3)
+        r'(\d+)' +  # Group 2: Chapter (required)
+        r'[:\s]' + # Separator
+        r'([\d\w\s,–-]+(?:ff|f)?)',  # Group 3: Verses
         re.IGNORECASE
     )
 
     last_book_abbr = None
-    last_chapter = None
 
     def replacer(match):
-        nonlocal last_book_abbr, last_chapter
+        nonlocal last_book_abbr
         book_abbr, chapter, verses = match.groups()
 
         if book_abbr:
             last_book_abbr = book_abbr
         
-        last_chapter = chapter
-        
+        if not last_book_abbr:
+            return match.group(0)
+
         book_full = ABBREVIATIONS.get(last_book_abbr.replace('.',''), last_book_abbr)
         return _format_ref_segment(book_full, chapter, verses or "")
 
-    # Main replacement logic
-    # First, handle complex, chained references which are typically in parentheses/brackets
-    def complex_replacer(match):
-        nonlocal last_book_abbr, last_chapter
-        last_book_abbr = None # Reset context for each parenthetical block
-        last_chapter = None
+    def replacer_simple(match):
+        book_abbr, chapter, verses = match.groups()
+        book_full = ABBREVIATIONS.get(book_abbr.replace('.',''), book_abbr)
+        return _format_ref_segment(book_full, chapter, verses or "")
+
+
+    # A simpler pattern for unambiguous prose references like "Genesis 17:17"
+    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,-]+(?:ff|f)?)', re.IGNORECASE)
+
+    # A pattern to find content inside brackets/parentheses to parse with context
+    enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
+
+    def enclosed_replacer(match):
+        nonlocal last_book_abbr
+        last_book_abbr = None # Reset context for each new block
         
-        # Split by semicolon and process, maintaining context within the block
-        segments = match.group(2).split(';')
-        expanded = []
-        for segment in segments:
-            # `re.sub` is used here to process each part of the chain
-            expanded_segment = ref_pattern.sub(replacer, segment.strip())
-            expanded.append(expanded_segment)
-        return " ".join(expanded)
+        opener, inner_text, closer = match.groups()
+        
+        # Use re.sub with our stateful replacer on the inner text
+        return ref_pattern.sub(replacer, inner_text)
 
-    # Pass 1: Handle complex references in parentheses/brackets
-    text = re.sub(r'([(\[])([^)\]]+)([)\]])', complex_replacer, text)
-
-    # Pass 2: Handle simple references in the main prose
-    last_book_abbr = None
-    last_chapter = None
-    text = ref_pattern.sub(replacer, text)
+    text = enclosed_pattern.sub(enclosed_replacer, text)
+    text = prose_pattern.sub(replacer_simple, text) # Handle remaining simple cases
 
     return text
 
