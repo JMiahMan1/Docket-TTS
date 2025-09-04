@@ -1,28 +1,37 @@
 import pytest
 from pathlib import Path
+import base64
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC
 
-# Assuming app.py is in the root directory and contains tag_mp3_file
+# Import the application code to be tested
 from app import tag_mp3_file
+from tts_service import TTSService
 
-# The asset data is now pre-decoded into bytes literals, bypassing the problematic
-# base64.b64decode() call that was causing the tests to crash.
-
-# 1x1 transparent PNG
-TINY_PNG_BYTES = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x04\x00\x00\x00\xb5\x1c\x0c\x04\x00\x00\x00\x0bIDATx\xda\x63` \x00\x00\x00\x06\x00\x01\x8c\x20\x07\xd0\xbf\x00\x00\x00\x00IEND\xaeB`\x82'
-
-# Silent MP3
-SILENT_MP3_BYTES = b'ID3\x04\x00\x00\x00\x00\x00\x00#TSSSE\x00\x00\x00\x0f\x00\x00\x03Lavf58.45.100\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00//\xed\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+# Base64 encoded 1x1 transparent PNG to be used as cover art
+TINY_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+TINY_PNG_BYTES = base64.b64decode(TINY_PNG_B64)
 
 @pytest.fixture
 def setup_test_mp3(tmp_path: Path) -> Path:
     """
-    A pytest fixture that creates a valid, silent MP3 file in a temporary directory
-    for testing the tagging functionality.
+    A pytest fixture that dynamically creates a valid, playable MP3 file by calling
+    the TTSService, perfectly mimicking the application's workflow.
     """
     mp3_path = tmp_path / "test.mp3"
-    mp3_path.write_bytes(SILENT_MP3_BYTES)
+    test_text = "This is a test of the text to speech system."
+    
+    try:
+        # Use the application's own service to generate a real MP3 file.
+        # This assumes a default voice model is available where the tests are run.
+        tts = TTSService()
+        tts.synthesize(test_text, str(mp3_path))
+    except Exception as e:
+        pytest.fail(f"Failed to generate test MP3 file using TTSService: {e}")
+
+    # Ensure the file was created and is not empty before yielding it to the test
+    assert mp3_path.exists() and mp3_path.stat().st_size > 0, "TTS service failed to create a valid MP3 file for the test."
+    
     yield mp3_path
 
 def test_id3_tagging_with_cover_art(setup_test_mp3):
