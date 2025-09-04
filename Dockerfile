@@ -46,12 +46,16 @@ RUN dnf -y install \
     python3-beautifulsoup4 \
     python3-inflect \
     python3-mutagen \
-    && dnf clean all \
-    && python3 -m venv --system-site-packages /opt/venv \
-    && . /opt/venv/bin/activate \
-    && pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt \
-    && python -c "\
+    && dnf clean all
+
+# Install Python dependencies using pip, including a CPU-only version of Torch
+RUN python3 -m venv --system-site-packages /opt/venv && \
+    . /opt/venv/bin/activate && \
+    /opt/venv/bin/pip install --upgrade pip && \
+    /opt/venv/bin/pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
+    /opt/venv/bin/pip install --no-cache-dir onnxruntime sentencepiece && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt && \
+    /opt/venv/bin/python -c "\
 from argostranslate import package;\
 package.update_package_index();\
 available_packages = package.get_available_packages();\
