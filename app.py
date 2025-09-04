@@ -21,6 +21,7 @@ import redis
 import shutil
 import base64
 import requests
+from mutagen.mp3 import MP3
 
 from tts_service import TTSService
 
