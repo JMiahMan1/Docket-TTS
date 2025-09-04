@@ -41,6 +41,7 @@ RUN dnf -y install \
     python3-beautifulsoup4 \
     python3-inflect \
     python3-mutagen \
+    python3-pillow \
     && dnf clean all
 
 # Install Python dependencies using pip, including a CPU-only version of Torch

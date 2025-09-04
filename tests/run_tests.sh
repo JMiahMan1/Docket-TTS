@@ -6,7 +6,7 @@ set -e
 
 echo "--- Installing test dependencies ---"
 # Install app dependencies from requirements.txt and the pytest package
-pip install --no-cache-dir -r requirements.txt pytest Flask gunicorn celery redis python-docx EbookLib PyMuPDF beautifulsoup4 inflect mutagen argostranslate requests pytest-xdist
+pip install --no-cache-dir -r requirements.txt pytest Flask gunicorn celery redis python-docx EbookLib PyMuPDF beautifulsoup4 inflect mutagen argostranslate requests pytest-xdist Pillow
 
 echo "--- Downloading Argos Translate model for testing ---"
 # This step is crucial to ensure the test environment has the required model
@@ -34,8 +34,7 @@ pytest -v -n auto \
   tests/test_deployment.py \
   tests/test_normalization.py \
   tests/test_functionality.py \
-  tests/test_audiobook_creation.py \
-  tests/test_metadata.py
+  tests/test_audiobook_creation.py
 
 pytest -v tests/
 

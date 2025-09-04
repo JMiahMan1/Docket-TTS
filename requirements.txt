@@ -2,4 +2,3 @@ gunicorn
 piper-tts
 argostranslate
 filetype
-Pillow
