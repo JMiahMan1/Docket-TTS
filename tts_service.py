@@ -86,6 +86,7 @@ def expand_roman_numerals(text: str) -> str:
 
 def build_scripture_patterns():
     all_abbrs = [re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)]
+    # This pattern correctly stops at a semicolon, allowing re.sub to iterate.
     verse_pattern = r"([^;]*)"
     unambiguous_pattern = re.compile(r"\b(" + "|".join(sorted(all_abbrs, key=len, reverse=True)) + r")" + r"\s+(\d+)(?::" + verse_pattern + r")?", re.IGNORECASE)
     return unambiguous_pattern
@@ -93,10 +94,10 @@ def build_scripture_patterns():
 UNAMBIGUOUS_PATTERN = build_scripture_patterns()
 
 def _scripture_replacer(match):
-    book_abbr, chapter, verses = match.groups() if len(match.groups()) == 3 else (match.group(1), match.group(2), None)
+    book_abbr, chapter, verses_str = match.groups() if len(match.groups()) == 3 else (match.group(1), match.group(2), None)
     book_full = ABBREVIATIONS.get(book_abbr.replace('.', ''), ABBREVIATIONS.get(book_abbr, book_abbr))
     
-    verses_str = (verses or "").strip().rstrip(".;")
+    verses_str = (verses_str or "").strip().rstrip(".;")
     
     if verses_str.lower().endswith('ff'):
         verses_str, suffix = verses_str[:-2].strip(), f" {BIBLE_REFS.get('ff', 'and following')}"
@@ -116,16 +117,25 @@ def _scripture_replacer(match):
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
 def expand_scripture_references(text: str) -> str:
+    """Iteratively finds and replaces all scripture references in a block of text."""
     return UNAMBIGUOUS_PATTERN.sub(_scripture_replacer, text)
 
 def expand_complex_scripture_references(text: str) -> str:
+    """Finds parenthesized/bracketed text and expands scripture references within it."""
     pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
+    
     def complex_replacer(match):
         opener, inner_text, closer = match.groups()
+        
         book_pattern_str = '|'.join([re.escape(k) for k in ABBREVIATIONS.keys() if any(book in ABBREVIATIONS[k] for book in BIBLE_BOOKS)])
         if not (re.search(r'\b(' + book_pattern_str + r')', inner_text, re.IGNORECASE) and re.search(r'\d', inner_text)):
             return match.group(0)
+
+        # The fix: Pass the entire inner block to the main parser.
+        # The parser's re.sub will then handle each semicolon-separated part iteratively.
+        expanded_text = expand_scripture_references(inner_text)
         
+        # This handles chains where the book name is not repeated (e.g., Gen 17:17; 18:1-15)
         last_book_abbr = None
         segments = inner_text.split(';')
         expanded_segments = []
@@ -138,8 +148,9 @@ def expand_complex_scripture_references(text: str) -> str:
             elif last_book_abbr:
                 expanded_segments.append(expand_scripture_references(f"{last_book_abbr} {segment}"))
             else:
-                expanded_segments.append(segment)
+                 expanded_segments.append(segment)
         return " ".join(expanded_segments)
+
     return pattern.sub(complex_replacer, text)
 
 def number_replacer(match):
@@ -154,22 +165,30 @@ def number_replacer(match):
 def normalize_text(text: str) -> str:
     text = expand_complex_scripture_references(text)
     text = expand_scripture_references(text)
+
     for phrase, replacement in LATIN_PHRASES.items():
         text = re.sub(rf'{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
+
     text = _strip_diacritics(text)
     text = normalize_hebrew(text)
     text = normalize_greek(text)
+    
     text = expand_roman_numerals(text)
+
     non_bible_abbrs = { k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS) }
     for abbr, expanded in non_bible_abbrs.items():
         flags = 0 if abbr in CASE_SENSITIVE_ABBRS else re.IGNORECASE
         text = re.sub(rf"\b{re.escape(abbr)}\b", expanded, text, flags=flags)
+    
     for contr, expanded in CONTRACTIONS.items(): text = text.replace(contr, expanded)
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
+
     text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
     text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
+    
     text = re.sub(r"\[\d+\]|\[fn\]|[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)", "", text)
+
     text = re.sub(r"\b\d+\b", number_replacer, text)
     text = re.sub(r"\[|\]", " , ", text)
     text = re.sub(r"\s+", " ", text).strip()
@@ -177,16 +196,11 @@ def normalize_text(text: str) -> str:
 
 class TTSService:
     def __init__(self, voice: str = "en_US-hfc_male-medium.onnx"):
-        # This logic robustly finds the voice model relative to this file's location
-        voices_dir = Path(__file__).parent / 'voices'
-        self.voice_path = voices_dir / voice
+        self.voice_path = Path(f"/app/voices/{voice}")
         if not self.voice_path.exists():
-            # Fallback for test environments where CWD is the project root
-            cwd_voices_path = Path.cwd() / "voices" / voice
-            if cwd_voices_path.exists():
-                self.voice_path = cwd_voices_path
-            else:
-                 raise ValueError(f"Voice model not found at {self.voice_path} or {cwd_voices_path}")
+            self.voice_path = Path(f"voices/{voice}")
+        if not self.voice_path.exists():
+            raise ValueError(f"Voice model not found at {self.voice_path}")
 
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)
