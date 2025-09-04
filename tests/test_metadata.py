@@ -1,5 +1,3 @@
-# tests/test_metadata.py
-
 import pytest
 from pathlib import Path
 import base64
@@ -61,13 +59,15 @@ def test_placeholder_cover_generation(setup_test_mp3):
     """Tests that a generated placeholder cover can be successfully embedded."""
     mp3_path = setup_test_mp3
     metadata = {'title': 'A Generated Cover', 'author': 'Pillow & Co.'}
+
     generated_image_data = generate_placeholder_cover(
         title=metadata['title'],
         author=metadata['author']
     )
-    assert generated_image_data is not None
     assert isinstance(generated_image_data, bytes)
+
     tag_mp3_file(mp3_path, metadata, generated_image_data)
+
     audio = MP3(mp3_path)
     assert audio.tags.getall('APIC')
     apic_frame = audio.tags.getall('APIC')[0]

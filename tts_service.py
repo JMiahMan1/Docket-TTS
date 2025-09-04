@@ -2,11 +2,14 @@ import re
 import json
 import inflect
 import subprocess
-import unicodedata
 from pathlib import Path
 from argostranslate import translate
+import unicodedata
 
-NORMALIZATION_PATH = Path("normalization.json")
+# Define the voices directory relative to this file's location
+VOICES_DIR = Path(__file__).parent / 'voices'
+
+NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
     ABBREVIATIONS = NORMALIZATION.get("abbreviations", {})
@@ -80,8 +83,6 @@ def expand_roman_numerals(text: str) -> str:
             return roman_str
     return pattern.sub(replacer, text)
 
-# --- NEW, ROBUST SCRIPTURE PARSER ---
-
 def _format_ref_segment(book_full, chapter, verses_str):
     chapter_words = _inflect.number_to_words(int(chapter))
     if not verses_str: return f"{book_full} chapter {chapter_words}"
@@ -100,35 +101,26 @@ def _format_ref_segment(book_full, chapter, verses_str):
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
 def normalize_scripture(text: str) -> str:
-    # Combine abbreviation keys and full book names for a comprehensive pattern
-    bible_abbr_keys = {re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)}
-    full_book_names = {re.escape(book) for book in BIBLE_BOOKS}
-    book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
+    book_keys = sorted([re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)], key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
     
-    # This pattern finds a single reference. The verse group intentionally does NOT match semicolons,
-    # as they are delimiters between separate references.
     ref_pattern = re.compile(
-        r'\b(' + book_pattern_str + r')?' +  # Group 1: Book (optional)
+        r'\b(' + book_pattern_str + r')?' +
         r'\s*' +
-        r'(\d+)' +  # Group 2: Chapter (required)
-        r'[:\s]' + # Separator
-        r'([\d\w\s,.\–-]+(?:ff|f)?)',  # Group 3: Verses
+        r'(\d+)' +
+        r'[:\s]' +
+        r'([\d\w\s,–-]+(?:ff|f)?)',
         re.IGNORECASE
     )
-
+    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,-]+(?:ff|f)?)', re.IGNORECASE)
+    enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
     last_book_abbr = None
 
     def replacer(match):
         nonlocal last_book_abbr
         book_abbr, chapter, verses = match.groups()
-
-        if book_abbr:
-            last_book_abbr = book_abbr.strip()
-        
-        if not last_book_abbr:
-            return match.group(0)
-
+        if book_abbr: last_book_abbr = book_abbr
+        if not last_book_abbr: return match.group(0)
         book_full = ABBREVIATIONS.get(last_book_abbr.replace('.',''), last_book_abbr)
         return _format_ref_segment(book_full, chapter, verses or "")
 
@@ -137,37 +129,15 @@ def normalize_scripture(text: str) -> str:
         book_full = ABBREVIATIONS.get(book_abbr.replace('.',''), book_abbr)
         return _format_ref_segment(book_full, chapter, verses or "")
 
-
-    # A simpler pattern for unambiguous prose references like "Genesis 17:17"
-    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
-
-    # A pattern to find content inside brackets/parentheses to parse with context
-    enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
-
     def enclosed_replacer(match):
         nonlocal last_book_abbr
-        last_book_abbr = None # Reset context for each new block
-        
+        last_book_abbr = None
         opener, inner_text, closer = match.groups()
-        
-        # Use a finditer loop for robust stateful parsing of multiple references
-        last_end = 0
-        new_parts = []
-        for m in ref_pattern.finditer(inner_text):
-            new_parts.append(inner_text[last_end:m.start()])
-            new_parts.append(replacer(m))
-            last_end = m.end()
-        new_parts.append(inner_text[last_end:])
-        
-        # Re-add the enclosing brackets/parentheses
-        return opener + "".join(new_parts) + closer
+        return ref_pattern.sub(replacer, inner_text)
 
     text = enclosed_pattern.sub(enclosed_replacer, text)
-    text = prose_pattern.sub(replacer_simple, text) # Handle remaining simple cases
-
+    text = prose_pattern.sub(replacer_simple, text)
     return text
-
-# --- END OF SCRIPTURE PARSER ---
 
 def number_replacer(match):
     num_str = match.group(0)
@@ -180,78 +150,54 @@ def number_replacer(match):
 
 def normalize_text(text: str) -> str:
     text = normalize_scripture(text)
-
     for phrase, replacement in LATIN_PHRASES.items():
         text = re.sub(rf'{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
-
     text = _strip_diacritics(text)
     text = normalize_hebrew(text)
     text = normalize_greek(text)
-    
     text = expand_roman_numerals(text)
-
     non_bible_abbrs = { k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS) }
     for abbr, expanded in non_bible_abbrs.items():
         flags = 0 if abbr in CASE_SENSITIVE_ABBRS else re.IGNORECASE
         text = re.sub(rf"\b{re.escape(abbr)}\b", expanded, text, flags=flags)
-    
     for contr, expanded in CONTRACTIONS.items(): text = text.replace(contr, expanded)
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
-
     text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
     text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
-    
     text = re.sub(r"\[\d+\]|\[fn\]|[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)", "", text)
-
     text = re.sub(r"\b\d+\b", number_replacer, text)
-    text = re.sub(r"\[|\]", " , ", text).replace("(", "").replace(")", "") # clean up brackets
+    text = re.sub(r"\[|\]", " , ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 class TTSService:
     def __init__(self, voice: str = "en_US-hfc_male-medium.onnx"):
-        self.voice_path = Path(f"/app/voices/{voice}")
+        # This logic robustly finds the voice model relative to this file's location
+        self.voice_path = VOICES_DIR / voice
         if not self.voice_path.exists():
-            self.voice_path = Path(f"voices/{voice}")
-        if not self.voice_path.exists():
-            raise ValueError(f"Voice model not found at {self.voice_path}")
+             # Fallback for environments where the script is not in the project root
+            alt_path = Path.cwd() / "voices" / voice
+            if alt_path.exists():
+                self.voice_path = alt_path
+            else:
+                raise ValueError(f"Voice model not found at {self.voice_path} or {alt_path}")
 
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)
-        
         piper_command = ["piper", "--model", str(self.voice_path), "--output_file", "-"]
-        
-        ffmpeg_command = [
-            "ffmpeg",
-            "-y",
-            "-f", "s16le",
-            "-ar", "22050",
-            "-ac", "1",
-            "-i", "-",
-            "-acodec", "libmp3lame",
-            "-q:a", "2",
-            output_path
-        ]
-
+        ffmpeg_command = ["ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1", "-i", "-", "-acodec", "libmp3lame", "-q:a", "2", output_path]
         try:
             piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
             piper_process.stdin.write(normalized_text.encode('utf-8'))
             piper_process.stdin.close()
-            
             piper_process.stdout.close()
-            
             _, ffmpeg_err = ffmpeg_process.communicate()
-
             if piper_process.wait() != 0:
-                piper_err = piper_process.stderr.read().decode()
-                raise RuntimeError(f"Piper process failed: {piper_err}")
-
+                raise RuntimeError(f"Piper process failed: {piper_process.stderr.read().decode()}")
             if ffmpeg_process.returncode != 0:
                 raise RuntimeError(f"FFmpeg encoding process failed: {ffmpeg_err.decode()}")
         except FileNotFoundError as e:
             raise RuntimeError(f"Command not found: {e.filename}. Ensure piper-tts and ffmpeg are installed.")
-            
         return output_path, normalized_text
