@@ -2,18 +2,16 @@ import re
 import json
 import inflect
 import subprocess
+import unicodedata
 from pathlib import Path
 from argostranslate import translate
-import unicodedata
-
-# Define the voices directory relative to this file's location
-VOICES_DIR = Path(__file__).parent / 'voices'
 
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
     ABBREVIATIONS = NORMALIZATION.get("abbreviations", {})
     BIBLE_BOOKS = NORMALIZATION.get("bible_books", [])
+    AMBIGUOUS_BIBLE_ABBRS = NORMALIZATION.get("ambiguous_bible_abbrs", [])
     CASE_SENSITIVE_ABBRS = NORMALIZATION.get("case_sensitive_abbrs", [])
     ROMAN_EXCEPTIONS = set(NORMALIZATION.get("roman_numeral_exceptions", []))
     BIBLE_REFS = NORMALIZATION.get("bible_refs", {})
@@ -23,7 +21,8 @@ if NORMALIZATION_PATH.exists():
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
 else:
-    ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], set(), {}, {}, {}, {}, {}, {}
+    ABBREVIATIONS, BIBLE_BOOKS, AMBIGUOUS_BIBLE_ABBRS, CASE_SENSITIVE_ABBRS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], [], {}, {}, {}, {}, {}, {}
+    ROMAN_EXCEPTIONS = set()
 
 _inflect = inflect.engine()
 
@@ -46,7 +45,9 @@ def normalize_hebrew(text: str) -> str:
     return re.sub(r'[\u0590-\u05FF]+', translate_match, text)
 
 def normalize_greek(text: str) -> str:
-    return text.translate(str.maketrans(GREEK_TRANSLITERATION))
+    for char, replacement in GREEK_TRANSLITERATION.items():
+        text = text.replace(char, replacement)
+    return text
 
 def roman_to_int(s):
     roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
@@ -83,16 +84,30 @@ def expand_roman_numerals(text: str) -> str:
             return roman_str
     return pattern.sub(replacer, text)
 
-def _format_ref_segment(book_full, chapter, verses_str):
-    chapter_words = _inflect.number_to_words(int(chapter))
-    if not verses_str: return f"{book_full} chapter {chapter_words}"
-    suffix = ""
-    verses_str = verses_str.strip().rstrip(".;,")
+def build_scripture_patterns():
+    all_abbrs = [re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)]
+    verse_pattern = r"([^;]*)"
+    unambiguous_pattern = re.compile(r"\b(" + "|".join(sorted(all_abbrs, key=len, reverse=True)) + r")" + r"\s+(\d+)(?::" + verse_pattern + r")?", re.IGNORECASE)
+    return unambiguous_pattern
+
+UNAMBIGUOUS_PATTERN = build_scripture_patterns()
+
+def _scripture_replacer(match):
+    book_abbr, chapter, verses = match.groups() if len(match.groups()) == 3 else (match.group(1), match.group(2), None)
+    book_full = ABBREVIATIONS.get(book_abbr.replace('.', ''), ABBREVIATIONS.get(book_abbr, book_abbr))
     
-    if verses_str.lower().endswith("ff"):
+    verses_str = (verses or "").strip().rstrip(".;")
+    
+    if verses_str.lower().endswith('ff'):
         verses_str, suffix = verses_str[:-2].strip(), f" {BIBLE_REFS.get('ff', 'and following')}"
-    elif verses_str.lower().endswith("f"):
+    elif verses_str.lower().endswith('f'):
         verses_str, suffix = verses_str[:-1].strip(), f" {BIBLE_REFS.get('f', 'and the following verse')}"
+    else:
+        suffix = ""
+
+    chapter_words = _inflect.number_to_words(int(chapter))
+    if not verses_str:
+        return f"{book_full} chapter {chapter_words}{suffix}"
 
     prefix = "verses" if any(c in verses_str for c in ",–-") else "verse"
     verses_str = re.sub(r"(\d)([a-z])", r"\1 \2", verses_str, flags=re.IGNORECASE)
@@ -100,44 +115,32 @@ def _format_ref_segment(book_full, chapter, verses_str):
     verse_words = re.sub(r"\d+", lambda m: _inflect.number_to_words(int(m.group())), verses_str)
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
-def normalize_scripture(text: str) -> str:
-    book_keys = sorted([re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)], key=len, reverse=True)
-    book_pattern_str = '|'.join(book_keys)
-    
-    ref_pattern = re.compile(
-        r'\b(' + book_pattern_str + r')?' +
-        r'\s*' +
-        r'(\d+)' +
-        r'[:\s]' +
-        r'([\d\w\s,–-]+(?:ff|f)?)',
-        re.IGNORECASE
-    )
-    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,-]+(?:ff|f)?)', re.IGNORECASE)
-    enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
-    last_book_abbr = None
+def expand_scripture_references(text: str) -> str:
+    return UNAMBIGUOUS_PATTERN.sub(_scripture_replacer, text)
 
-    def replacer(match):
-        nonlocal last_book_abbr
-        book_abbr, chapter, verses = match.groups()
-        if book_abbr: last_book_abbr = book_abbr
-        if not last_book_abbr: return match.group(0)
-        book_full = ABBREVIATIONS.get(last_book_abbr.replace('.',''), last_book_abbr)
-        return _format_ref_segment(book_full, chapter, verses or "")
-
-    def replacer_simple(match):
-        book_abbr, chapter, verses = match.groups()
-        book_full = ABBREVIATIONS.get(book_abbr.replace('.',''), book_abbr)
-        return _format_ref_segment(book_full, chapter, verses or "")
-
-    def enclosed_replacer(match):
-        nonlocal last_book_abbr
-        last_book_abbr = None
+def expand_complex_scripture_references(text: str) -> str:
+    pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
+    def complex_replacer(match):
         opener, inner_text, closer = match.groups()
-        return ref_pattern.sub(replacer, inner_text)
-
-    text = enclosed_pattern.sub(enclosed_replacer, text)
-    text = prose_pattern.sub(replacer_simple, text)
-    return text
+        book_pattern_str = '|'.join([re.escape(k) for k in ABBREVIATIONS.keys() if any(book in ABBREVIATIONS[k] for book in BIBLE_BOOKS)])
+        if not (re.search(r'\b(' + book_pattern_str + r')', inner_text, re.IGNORECASE) and re.search(r'\d', inner_text)):
+            return match.group(0)
+        
+        last_book_abbr = None
+        segments = inner_text.split(';')
+        expanded_segments = []
+        for segment in segments:
+            segment = segment.strip()
+            book_match = re.match(r'(' + book_pattern_str + r')\b(.*)', segment, re.IGNORECASE)
+            if book_match:
+                last_book_abbr = book_match.group(1)
+                expanded_segments.append(expand_scripture_references(segment))
+            elif last_book_abbr:
+                expanded_segments.append(expand_scripture_references(f"{last_book_abbr} {segment}"))
+            else:
+                expanded_segments.append(segment)
+        return " ".join(expanded_segments)
+    return pattern.sub(complex_replacer, text)
 
 def number_replacer(match):
     num_str = match.group(0)
@@ -149,7 +152,8 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
-    text = normalize_scripture(text)
+    text = expand_complex_scripture_references(text)
+    text = expand_scripture_references(text)
     for phrase, replacement in LATIN_PHRASES.items():
         text = re.sub(rf'{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
     text = _strip_diacritics(text)
@@ -174,14 +178,15 @@ def normalize_text(text: str) -> str:
 class TTSService:
     def __init__(self, voice: str = "en_US-hfc_male-medium.onnx"):
         # This logic robustly finds the voice model relative to this file's location
-        self.voice_path = VOICES_DIR / voice
+        voices_dir = Path(__file__).parent / 'voices'
+        self.voice_path = voices_dir / voice
         if not self.voice_path.exists():
-             # Fallback for environments where the script is not in the project root
-            alt_path = Path.cwd() / "voices" / voice
-            if alt_path.exists():
-                self.voice_path = alt_path
+            # Fallback for test environments where CWD is the project root
+            cwd_voices_path = Path.cwd() / "voices" / voice
+            if cwd_voices_path.exists():
+                self.voice_path = cwd_voices_path
             else:
-                raise ValueError(f"Voice model not found at {self.voice_path} or {alt_path}")
+                 raise ValueError(f"Voice model not found at {self.voice_path} or {cwd_voices_path}")
 
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)
