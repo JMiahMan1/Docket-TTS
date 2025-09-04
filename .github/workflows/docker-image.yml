@@ -24,6 +24,22 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install Python Dependencies (including piper-tts)
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Setup FFmpeg (Static Build)
+      run: |
+        mkdir -p ~/ffmpeg
+        curl -sL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | tar xJ --strip-components=1 -C ~/ffmpeg
+        echo "$HOME/ffmpeg" >> $GITHUB_PATH
+
     - name: Set up Docker Buildx and install Compose
       uses: docker/setup-buildx-action@v3
 
