@@ -78,7 +78,7 @@ def tag_mp3_file(filepath, metadata):
         title = metadata.get('title', 'Unknown Title')
         author = metadata.get('author', 'Unknown Author')
         safe_title = (title[:100] + '..') if len(title) > 100 else title
-        safe_author = (author[:100] + '..') if len(author) > 100 else author
+        safe_author = (author[:100] + '..') if len(author) < 100 else author
         audio.tags.add(TIT2(encoding=3, text=safe_title))
         audio.tags.add(TPE1(encoding=3, text=safe_author))
         audio.tags.add(TALB(encoding=3, text=safe_title))
@@ -219,17 +219,21 @@ def create_generic_cover_image(title, author, save_path):
         title_lines = textwrap.wrap(title, width=20)
         y_text = height / 4
         for line in title_lines:
-            line_width, line_height = draw.textsize(line, font=font_title)
+            bbox = draw.textbbox((0, 0), line, font=font_title)
+            line_width = bbox[2] - bbox[0]
+            line_height = bbox[3] - bbox[1]
             draw.text(((width - line_width) / 2, y_text), line, font=font_title, fill=(255, 255, 255))
-            y_text += line_height
+            y_text += line_height + 5 # Add padding
 
         # Author
         y_text += 50 # add some space
         author_lines = textwrap.wrap(author, width=30)
         for line in author_lines:
-            line_width, line_height = draw.textsize(line, font=font_author)
+            bbox = draw.textbbox((0, 0), line, font=font_author)
+            line_width = bbox[2] - bbox[0]
+            line_height = bbox[3] - bbox[1]
             draw.text(((width - line_width) / 2, y_text), line, font=font_author, fill=(255, 255, 255))
-            y_text += line_height
+            y_text += line_height + 5 # Add padding
 
         # Save the image
         image.save(save_path)
@@ -245,7 +249,7 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
             task_self.update_state(state=state, meta=meta)
 
     unique_file_list = sorted(list(set(file_list)))
-
+    
     update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
     safe_mp3_paths = [Path(GENERATED_FOLDER) / secure_filename(fname) for fname in unique_file_list]
     merged_text_content = ""
@@ -265,7 +269,7 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
         except requests.RequestException as e:
             app.logger.error(f"Failed to download cover art: {e}")
             cover_path = None
-
+    
     if not cover_path and audiobook_title and audiobook_author:
         generic_cover_path = build_dir / "generic_cover.jpg"
         if create_generic_cover_image(audiobook_title, audiobook_author, generic_cover_path):
@@ -304,7 +308,7 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
         mux_command.extend(['-disposition:v', 'attached_pic'])
     mux_command.extend(['-c:a', 'copy', '-c:v', 'copy', str(output_filepath)])
     subprocess.run(mux_command, check=True, capture_output=True)
-
+        
     return {'status': 'Success', 'filename': output_filename}
 
 @celery.task(bind=True)
@@ -341,7 +345,7 @@ def upload_file():
             Path(input_filepath).write_text(text_input, encoding='utf-8')
             task = convert_to_speech_task.delay(input_filepath, original_filename, voice_name)
             return render_template('result.html', task_id=task.id)
-
+        
         file = request.files.get('file')
         if not file or file.filename == '':
             flash('No file selected.', 'error')
@@ -368,7 +372,7 @@ def list_files():
     for entry in all_files:
         if not entry.is_file() or entry.name.startswith('sample_'):
             continue
-
+        
         match = re.match(r'^(.*?)_([a-f0-9]{8})$', entry.stem)
         if match:
             base_name = match.group(1)
@@ -387,7 +391,7 @@ def list_files():
             file_map[key]['date'] = datetime.fromtimestamp(entry.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
         elif entry.suffix == '.txt':
             file_map[key]['txt_name'] = entry.name
-
+            
     audio_files = [data for data in file_map.values() if 'audio_name' in data]
     return render_template('files.html', audio_files=audio_files)
 
@@ -396,13 +400,13 @@ def get_book_metadata():
     filenames = request.json.get('filenames', [])
     if not filenames:
         return jsonify({'error': 'No filenames provided'}), 400
-
+    
     match = re.match(r'^(.*?)_([a-f0-9]{8})$', Path(filenames[0]).stem)
     if match:
         first_file_path_stem = match.group(1)
     else:
         first_file_path_stem = Path(filenames[0]).stem
-
+        
     title_from_name = first_file_path_stem.replace('_', ' ').replace('-', ' ').title()
     metadata = {'title': title_from_name, 'author': 'Unknown'}
 
@@ -432,7 +436,7 @@ def get_book_metadata():
                 cover_url = book_info.get('imageLinks', {}).get('thumbnail', '')
         except requests.RequestException as e:
             app.logger.error(f"Google Books API request failed: {e}")
-
+            
     return jsonify({'title': title, 'author': author, 'cover_url': cover_url})
 
 @app.route('/create-audiobook', methods=['POST'])
@@ -461,7 +465,7 @@ def jobs_page():
                 if task_args and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
                     original_filename = Path(task_args[1]).name
                 running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker_name})
-
+        
         reserved_tasks = inspector.reserved() or {}
         for worker_name, tasks in reserved_tasks.items():
             for task in tasks:
@@ -470,7 +474,7 @@ def jobs_page():
                 if task_args and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
                     original_filename = Path(task_args[1]).name
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
-
+        
         if redis_client:
             try:
                 unassigned_job_count = redis_client.llen('celery')
@@ -480,10 +484,10 @@ def jobs_page():
     except Exception as e:
         app.logger.error(f"Could not inspect Celery/Redis: {e}")
         flash("Could not connect to the Celery worker or Redis.", "error")
-
+        
     return render_template(
-        'jobs.html',
-        running_jobs=running_jobs,
+        'jobs.html', 
+        running_jobs=running_jobs, 
         waiting_jobs=queued_jobs,
         unassigned_job_count=unassigned_job_count
     )
@@ -503,7 +507,7 @@ def delete_bulk():
     if not basenames_to_delete:
         flash("No files selected for deletion.", "warning")
         return redirect(url_for('list_files'))
-
+    
     deleted_count = 0
     for base_name in basenames_to_delete:
         safe_base_name = secure_filename(base_name)
@@ -523,14 +527,14 @@ def speak_sample(voice_name):
     safe_voice_name = secure_filename(Path(voice_name).stem)
     filename = f"sample_{safe_voice_name}.mp3"
     filepath = os.path.join(GENERATED_FOLDER, filename)
-
+    
     if not os.path.exists(filepath):
         try:
             tts = TTSService(voice=voice_name)
             tts.synthesize(sample_text, filepath)
         except Exception as e:
             return f"Error generating sample: {e}", 500
-
+            
     return send_from_directory(app.config["GENERATED_FOLDER"], filename)
 
 @app.route('/status/<task_id>')
