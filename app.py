@@ -76,7 +76,7 @@ def tag_mp3_file(filepath, metadata, image_data=None):
     try:
         audio = MP3(filepath)
         
-        # Add tags if they don't exist
+        # Add tags container if it doesn't exist
         if audio.tags is None:
             audio.add_tags()
 
@@ -214,37 +214,68 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         raise e
 
 def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, build_dir, task_self=None):
+    """Reverted to original, robust M4B creation logic."""
     def update_state(state, meta):
         if task_self:
             task_self.update_state(state=state, meta=meta)
+
     unique_file_list = sorted(list(set(file_list)))
+    
     update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
     safe_mp3_paths = [Path(GENERATED_FOLDER) / secure_filename(fname) for fname in unique_file_list]
+    merged_text_content = ""
+    for mp3_path in safe_mp3_paths:
+        txt_path = mp3_path.with_suffix('.txt')
+        if txt_path.exists():
+            merged_text_content += txt_path.read_text(encoding='utf-8') + "\n\n"
     update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Downloading cover art...'})
-    cover_image_data = None
+    cover_path = None
     if cover_url:
         try:
             response = requests.get(cover_url, stream=True)
             response.raise_for_status()
-            cover_image_data = response.content
+            cover_path = build_dir / "cover.jpg"
+            with open(cover_path, 'wb') as f:
+                shutil.copyfileobj(response.raw, f)
         except requests.RequestException as e:
             app.logger.error(f"Failed to download cover art: {e}")
+            cover_path = None
     update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Analyzing chapters...'})
+    chapters_meta_content = f";FFMETADATA1\ntitle={audiobook_title}\nartist={audiobook_author}\n\n"
     concat_list_content = ""
+    current_duration_ms = 0
     for i, path in enumerate(safe_mp3_paths):
+        try:
+            duration_s = MP3(path).info.length
+        except Exception:
+            duration_s = 0.0
+        duration_ms = int(duration_s * 1000)
         concat_list_content += f"file '{path.resolve()}'\n"
+        chapters_meta_content += f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={current_duration_ms}\nEND={current_duration_ms + duration_ms}\ntitle=Chapter {i + 1}\n\n"
+        current_duration_ms += duration_ms
     concat_list_path = build_dir / "concat_list.txt"
+    chapters_meta_path = build_dir / "chapters.meta"
     concat_list_path.write_text(concat_list_content)
+    chapters_meta_path.write_text(chapters_meta_content, encoding='utf-8')
     update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Merging and encoding audio...'})
-    temp_audio_path = build_dir / "temp_audio.mp3"
-    concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-c', 'copy', str(temp_audio_path)]
+    temp_audio_path = build_dir / "temp_audio.aac"
+    concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-c:a', 'aac', '-b:a', '128k', str(temp_audio_path)]
     subprocess.run(concat_command, check=True, capture_output=True)
-    update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Tagging audiobook...'})
-    tag_mp3_file(temp_audio_path, {'title': audiobook_title, 'author': audiobook_author}, cover_image_data)
+    update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Assembling audiobook...'})
     timestamp = build_dir.name.replace('audiobook_build_', '')
-    output_filename = f"{secure_filename(audiobook_title)}_{timestamp}.mp3"
+    output_filename = f"{secure_filename(audiobook_title)}_{timestamp}.m4b"
     output_filepath = Path(GENERATED_FOLDER) / output_filename
-    shutil.move(temp_audio_path, output_filepath)
+    mux_command = ['ffmpeg']
+    if cover_path:
+        mux_command.extend(['-i', str(cover_path)])
+    mux_command.extend(['-i', str(temp_audio_path), '-i', str(chapters_meta_path)])
+    map_offset = 1 if cover_path else 0
+    mux_command.extend(['-map', f'{map_offset}:a', '-map_metadata', f'{map_offset + 1}'])
+    if cover_path:
+        mux_command.extend(['-map', '0:v'])
+        mux_command.extend(['-disposition:v', 'attached_pic'])
+    mux_command.extend(['-c:a', 'copy', '-c:v', 'copy', str(output_filepath)])
+    subprocess.run(mux_command, check=True, capture_output=True)
     return {'status': 'Success', 'filename': output_filename}
 
 @celery.task(bind=True)
