@@ -1,18 +1,19 @@
 import pytest
 from pathlib import Path
-import base64
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC
 
 # Assuming app.py is in the root directory and contains tag_mp3_file
 from app import tag_mp3_file
 
-# Base64 encoded 1x1 transparent PNG to be used as cover art
-TINY_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
-TINY_PNG_BYTES = base64.b64decode(TINY_PNG_B64)
+# The asset data is now pre-decoded into bytes literals, bypassing the problematic
+# base64.b64decode() call that was causing the tests to crash.
 
-SILENT_MP3_B64 = "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjQ1LjEwMAAAAAAAAAAAAAAA//tAwAAAAAAAAAAAA=="
-SILENT_MP3_BYTES = base64.b64decode(SILENT_MP3_B64)
+# 1x1 transparent PNG
+TINY_PNG_BYTES = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x04\x00\x00\x00\xb5\x1c\x0c\x04\x00\x00\x00\x0bIDATx\xda\x63` \x00\x00\x00\x06\x00\x01\x8c\x20\x07\xd0\xbf\x00\x00\x00\x00IEND\xaeB`\x82'
+
+# Silent MP3
+SILENT_MP3_BYTES = b'ID3\x04\x00\x00\x00\x00\x00\x00#TSSSE\x00\x00\x00\x0f\x00\x00\x03Lavf58.45.100\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00//\xed\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
 
 @pytest.fixture
 def setup_test_mp3(tmp_path: Path) -> Path:
