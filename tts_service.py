@@ -173,7 +173,7 @@ def normalize_text(text: str) -> str:
         # If no chapter is present (e.g., ":5"), just say "verse 5".
         return f"verse {verse_words}"
 
-    text = re.sub(r'^\s*(?:(\d+):)?(\d+)\b', _replace_leading_verse_marker, text, flags=re.M)
+    text = re.sub(r'^\s*(?:(\d+))?:(\d+)\b', _replace_leading_verse_marker, text, flags=re.M)
     text = normalize_scripture(text)
 
     for phrase in sorted(LATIN_PHRASES.keys(), key=len, reverse=True):
