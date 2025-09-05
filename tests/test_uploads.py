@@ -5,8 +5,21 @@ from app import app as flask_app # Import the Flask app instance
 from ebooklib import epub # Import for creating a test epub file
 
 @pytest.fixture
-def app():
-    """Create and configure a new app instance for each test."""
+def app(tmp_path, monkeypatch):
+    """
+    Create and configure a new app instance for each test, using temporary
+    folders for file uploads.
+    """
+    # Create temporary folders for uploads and generated files
+    upload_folder = tmp_path / "uploads"
+    generated_folder = tmp_path / "generated"
+    upload_folder.mkdir()
+    generated_folder.mkdir()
+
+    # Use monkeypatch to temporarily set the app's config for the test
+    monkeypatch.setitem(flask_app.config, "UPLOAD_FOLDER", str(upload_folder))
+    monkeypatch.setitem(flask_app.config, "GENERATED_FOLDER", str(generated_folder))
+
     flask_app.config.update({
         "TESTING": True,
         "SECRET_KEY": "testing" # A secret key is needed to test flash messages
