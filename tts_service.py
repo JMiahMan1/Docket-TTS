@@ -169,9 +169,8 @@ def normalize_text(text: str) -> str:
         verse_words = _inflect.number_to_words(verse)
         if chapter:
             chapter_words = _inflect.number_to_words(chapter)
-            return f"chapter {chapter_words} verse {verse_words}"
-        # If no chapter is present (e.g., ":5"), just say "verse 5".
-        return f"verse {verse_words}"
+            return f"chapter {chapter_words} verse {verse_words} "
+        return f"verse {verse_words} "
 
     text = re.sub(r'^\s*(?:(\d+))?:(\d+)\b', _replace_leading_verse_marker, text, flags=re.M)
     text = re.sub(r"verse\s+([A-Z\s]+)([a-z]+):([a-z]+)", r"\1. verse \3", text)
@@ -200,11 +199,7 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"\[\d+\]|\[fn\]|[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)", "", text)
     text = re.sub(r"\b\d+\b", number_replacer, text)
 
-    # This block is added at the end to insert pauses for headings and paragraphs.
-    # Add a long pause before and after lines that are entirely uppercase (likely headings).
     text = re.sub(r'^([A-Z][A-Z0-9\s,.-]{4,})$', r'. ... \1. ... ', text, flags=re.MULTILINE)
-
-    # Add a pause for paragraph breaks (two or more newlines).
     text = re.sub(r'\n\s*\n', '. ... \n', text)
 
     text = re.sub(r"\[|\]", " , ", text).replace("(", "").replace(")", "")
@@ -212,8 +207,9 @@ def normalize_text(text: str) -> str:
     return text
 
 class TTSService:
-    def __init__(self, voice: str = "en_US-hfc_male-medium.onnx"):
+    def __init__(self, voice: str = "en_US-hfc_male-medium.onnx", speed_rate: str = "1.0"):
         self.voice_path = Path(f"/app/voices/{voice}")
+        self.speed_rate = speed_rate
         if not self.voice_path.exists():
             self.voice_path = Path(f"voices/{voice}")
         if not self.voice_path.exists():
@@ -222,7 +218,12 @@ class TTSService:
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)
         
-        piper_command = ["piper", "--model", str(self.voice_path), "--output_file", "-"]
+        piper_command = [
+            "piper", 
+            "--model", str(self.voice_path), 
+            "--length_scale", self.speed_rate,
+            "--output_file", "-"
+        ]
         
         ffmpeg_command = [
             "ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1",

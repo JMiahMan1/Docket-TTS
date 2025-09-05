@@ -9,13 +9,14 @@ BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8000")
 POLL_INTERVAL = 5  # seconds
 TIMEOUT = 600      # 10 minutes, increased for slower CI runners
 
-def submit_and_poll_task(title, text_content):
+def submit_and_poll_task(title, text_content, speed_rate="1.0"):
     """Helper function to submit a task and poll for its completion."""
     # Step 1: Submit the text for conversion
     payload = {
         'text_title': title,
         'text_input': text_content,
-        'voice': 'en_US-hfc_male-medium.onnx' # Use a default voice for testing
+        'voice': 'en_US-hfc_male-medium.onnx', # Use a default voice for testing
+        'speed_rate': speed_rate
     }
     submit_response = requests.post(f"{BASE_URL}/", data=payload)
     assert submit_response.status_code == 200, f"Failed to submit task. Status: {submit_response.status_code}"
@@ -156,3 +157,27 @@ def test_mp3_cover_art_embedding():
 
     cover_art_tag = next((tag for key, tag in audio.tags.items() if key.startswith('APIC:')), None)
     assert cover_art_tag is not None and len(cover_art_tag.data) > 0, "Cover art data is empty."
+
+def get_mp3_duration(mp3_filename):
+    """Downloads an MP3 and returns its duration in seconds."""
+    mp3_response = requests.get(f"{BASE_URL}/generated/{mp3_filename}")
+    assert mp3_response.status_code == 200
+    mp3_file = io.BytesIO(mp3_response.content)
+    audio = MP3(mp3_file)
+    return audio.info.length
+
+def test_speech_speed_rate():
+    """Tests that changing speech rate affects audio duration."""
+    title = "Speech Speed Test"
+    text = "This is a simple sentence used to test the duration of an audio file."
+
+    _, slow_mp3 = submit_and_poll_task(title, text, speed_rate="1.3") # Slower
+    _, normal_mp3 = submit_and_poll_task(title, text, speed_rate="1.0") # Normal
+    _, fast_mp3 = submit_and_poll_task(title, text, speed_rate="0.7") # Faster
+
+    slow_duration = get_mp3_duration(slow_mp3)
+    normal_duration = get_mp3_duration(normal_mp3)
+    fast_duration = get_mp3_duration(fast_mp3)
+
+    assert slow_duration > normal_duration
+    assert normal_duration > fast_duration
