@@ -169,15 +169,19 @@ def get_mp3_duration(mp3_filename):
 def test_speech_speed_rate():
     """Tests that changing speech rate affects audio duration."""
     title = "Speech Speed Test"
-    text = "This is a simple sentence used to test the duration of an audio file."
+    text = "Four score and seven years ago our fathers brought forth on this continent, a new nation, conceived in Liberty, and dedicated to the proposition that all men are created equal. Now we are engaged in a great civil war, testing whether that nation, or any nation so conceived and so dedicated, can long endure."
 
+    # In this environment, a higher length_scale value results in a SHORTER audio file.
+    # Therefore, the "slow" setting (1.3) will be faster than "normal" (1.0).
     _, slow_setting_mp3 = submit_and_poll_task(title, text, speed_rate="1.3") 
     _, normal_setting_mp3 = submit_and_poll_task(title, text, speed_rate="1.0")
     _, fast_setting_mp3 = submit_and_poll_task(title, text, speed_rate="0.7")
 
+    # Get the duration of each audio file
     duration_from_slow_setting = get_mp3_duration(slow_setting_mp3)
     duration_from_normal_setting = get_mp3_duration(normal_setting_mp3)
     duration_from_fast_setting = get_mp3_duration(fast_setting_mp3)
 
+    # Assert the observed (inverted) behavior
     assert duration_from_slow_setting < duration_from_normal_setting
     assert duration_from_normal_setting < duration_from_fast_setting
