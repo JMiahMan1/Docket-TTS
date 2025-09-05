@@ -6,7 +6,8 @@ def test_header_and_verse_separation():
     Tests that a header embedded with a word-based verse is correctly separated.
     Example: '...PEOPLEfive:one'
     """
-    [cite_start]input_text = "Romans chapter five, verse THE MESSIAH KING AND THE PILGRIMAGE OF HIS PEOPLEfive:one, which is a tricky case." [cite: 7]
+    # This input text is based on the provided document
+    input_text = "Romans chapter five, verse THE MESSIAH KING AND THE PILGRIMAGE OF HIS PEOPLEfive:one, which is a tricky case."
     expected_fragment = "THE MESSIAH KING AND THE PILGRIMAGE OF HIS PEOPLE. verse one"
     
     # Run the normalization function
