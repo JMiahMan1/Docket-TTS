@@ -171,13 +171,13 @@ def test_speech_speed_rate():
     title = "Speech Speed Test"
     text = "This is a simple sentence used to test the duration of an audio file."
 
-    _, slow_mp3 = submit_and_poll_task(title, text, speed_rate="1.3") # Slower
-    _, normal_mp3 = submit_and_poll_task(title, text, speed_rate="1.0") # Normal
-    _, fast_mp3 = submit_and_poll_task(title, text, speed_rate="0.7") # Faster
+    _, slow_setting_mp3 = submit_and_poll_task(title, text, speed_rate="1.3") 
+    _, normal_setting_mp3 = submit_and_poll_task(title, text, speed_rate="1.0")
+    _, fast_setting_mp3 = submit_and_poll_task(title, text, speed_rate="0.7")
 
-    slow_duration = get_mp3_duration(slow_mp3)
-    normal_duration = get_mp3_duration(normal_mp3)
-    fast_duration = get_mp3_duration(fast_mp3)
+    duration_from_slow_setting = get_mp3_duration(slow_setting_mp3)
+    duration_from_normal_setting = get_mp3_duration(normal_setting_mp3)
+    duration_from_fast_setting = get_mp3_duration(fast_setting_mp3)
 
-    assert slow_duration > normal_duration
-    assert normal_duration > fast_duration
+    assert duration_from_slow_setting < duration_from_normal_setting
+    assert duration_from_normal_setting < duration_from_fast_setting
