@@ -346,18 +346,25 @@ def upload_file():
             task = convert_to_speech_task.delay(input_filepath, original_filename, voice_name)
             return render_template('result.html', task_id=task.id)
         
-        file = request.files.get('file')
-        if not file or file.filename == '':
-            flash('No file selected.', 'error')
+        files = request.files.getlist('file') # Use getlist() to get all files
+        
+        if not files or all(f.filename == '' for f in files):
+            flash('No files selected.', 'error')
             return redirect(request.url)
 
-        if file and allowed_file(file.filename):
-            original_filename = secure_filename(file.filename)
-            unique_internal_filename = f"{uuid.uuid4().hex}{Path(original_filename).suffix}"
-            input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
-            file.save(input_filepath)
-            task = convert_to_speech_task.delay(input_filepath, original_filename, voice_name)
-            return render_template('result.html', task_id=task.id)
+        tasks_created = 0
+        for file in files:
+            if file and allowed_file(file.filename):
+                original_filename = secure_filename(file.filename)
+                unique_internal_filename = f"{uuid.uuid4().hex}{Path(original_filename).suffix}"
+                input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
+                file.save(input_filepath)
+                convert_to_speech_task.delay(input_filepath, original_filename, voice_name)
+                tasks_created += 1
+        
+        if tasks_created > 0:
+            flash(f'Successfully queued {tasks_created} files for processing.', 'success')
+            return redirect(url_for('jobs_page')) # Redirect to see all jobs
         else:
             flash(f'Invalid file type. Allowed types are: {", ".join(ALLOWED_EXTENSIONS)}.', 'error')
             return redirect(request.url)
