@@ -1,4 +1,40 @@
 from tts_service import normalize_text
+import pytest
+
+def test_header_and_verse_separation():
+    """
+    Tests that a header embedded with a word-based verse is correctly separated.
+    Example: '...PEOPLEfive:one'
+    """
+    [cite_start]input_text = "Romans chapter five, verse THE MESSIAH KING AND THE PILGRIMAGE OF HIS PEOPLEfive:one, which is a tricky case." [cite: 7]
+    expected_fragment = "THE MESSIAH KING AND THE PILGRIMAGE OF HIS PEOPLE. verse one"
+    
+    # Run the normalization function
+    result = normalize_text(input_text)
+    
+    # Assert that the formatted fragment is present in the result
+    assert expected_fragment in result
+    
+    # Assert that the original problematic string is gone
+    assert "PEOPLEfive:one" not in result
+
+def test_numeric_verse_and_header_separation():
+    """
+    Tests that a leading numeric verse is converted correctly and does not merge with a following header.
+    Example: ':83 THE GLORY...'
+    """
+    # This input simulates a line starting with a numeric verse marker followed immediately by a header
+    input_text = "\n:83 THE GLORY OF GOD. And we rejoice in the hope of the glory of God."
+    expected_fragment = "verse eighty-three THE GLORY OF GOD."
+    
+    # Run the normalization function
+    result = normalize_text(input_text)
+
+    # Assert that the space was correctly added after the converted verse number
+    assert expected_fragment in result
+
+    # Assert that the verse and header did not get merged
+    assert "eighty-threeTHE GLORY" not in result
 
 def test_biblical_verse_stripping():
     """

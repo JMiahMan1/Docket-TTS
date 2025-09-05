@@ -174,6 +174,7 @@ def normalize_text(text: str) -> str:
         return f"verse {verse_words}"
 
     text = re.sub(r'^\s*(?:(\d+))?:(\d+)\b', _replace_leading_verse_marker, text, flags=re.M)
+    text = re.sub(r"verse\s+([A-Z\s]+)([a-z]+):([a-z]+)", r"\1. verse \3", text)
     text = normalize_scripture(text)
 
     for phrase in sorted(LATIN_PHRASES.keys(), key=len, reverse=True):
