@@ -33,3 +33,23 @@ def test_biblical_verse_stripping():
     assert "They have all turned aside" in result
     assert "Their throat is an open tomb" in result
     assert "Whose mouth is full of cursing and bitterness" in result
+
+def test_leading_verse_marker_normalization():
+    """
+    Tests that leading chapter:verse markers are correctly parsed without
+    affecting the stripping of standalone verse numbers.
+    """
+    input_text = """
+2:5 Moses could have addressed this statement to Pharaoh.
+11 Paul has already made his argument regarding the depravity of man.
+"""
+
+    expected_text = "chapter two verse five Moses could have addressed this statement to Pharaoh. ... Paul has already made his argument regarding the depravity of man."
+
+    result = normalize_text(input_text)
+
+    # Check that "2:5" was correctly converted
+    assert "chapter two verse five" in result
+    # Check that the standalone "11" was correctly stripped and not converted
+    assert "eleven" not in result
+    assert "Paul has already" in result

@@ -164,6 +164,16 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
+    def _replace_leading_verse_marker(match):
+        chapter, verse = match.groups()
+        verse_words = _inflect.number_to_words(verse)
+        if chapter:
+            chapter_words = _inflect.number_to_words(chapter)
+            return f"chapter {chapter_words} verse {verse_words}"
+        # If no chapter is present (e.g., ":5"), just say "verse 5".
+        return f"verse {verse_words}"
+
+    text = re.sub(r'^\s*(?:(\d+):)?(\d+)\b', _replace_leading_verse_marker, text, flags=re.M)
     text = normalize_scripture(text)
 
     for phrase in sorted(LATIN_PHRASES.keys(), key=len, reverse=True):
