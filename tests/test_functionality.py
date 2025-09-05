@@ -2,6 +2,8 @@ import os
 import requests
 import time
 import pytest
+import io
+from mutagen.mp3 import MP3
 
 BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8000")
 POLL_INTERVAL = 5  # seconds
@@ -127,3 +129,21 @@ def test_multi_book_references():
     normalized_text = submit_and_poll_task(title, text).lower()
     assert "genesis chapter seventeen, verse seventeen" in normalized_text
     assert "genesis chapter eighteen, verses one through fifteen" in normalized_text
+
+def test_mp3_cover_art_embedding():
+    """
+    Tests that a generated MP3 file contains embedded cover art.
+    """
+    title = "MP3 Cover Art Test"
+    text = "This is a simple test to ensure an image is embedded in the output MP3 file."
+    _, mp3_filename = submit_and_poll_task(title, text)
+    
+    # Download the generated MP3
+    mp3_response = requests.get(f"{BASE_URL}/generated/{mp3_filename}")
+    assert mp3_response.status_code == 200
+    
+    # Load the MP3 from memory and check for the APIC tag
+    mp3_file = io.BytesIO(mp3_response.content)
+    audio = MP3(mp3_file)
+    assert 'APIC:' in audio.tags, "APIC (cover art) tag not found in the MP3 file."
+    assert len(audio.tags['APIC:'].data) > 0, "Cover art data is empty."
