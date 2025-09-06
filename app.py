@@ -27,7 +27,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from tts_service import TTSService, normalize_text
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "0.0.1"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
