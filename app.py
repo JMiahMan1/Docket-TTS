@@ -44,6 +44,9 @@ app.config.from_mapping(
 
 # --- Logging Setup ---
 if not app.debug:
+    # Ensure the log directory exists before setting up the handler.
+    os.makedirs(GENERATED_FOLDER, exist_ok=True)
+    
     log_file = os.path.join(GENERATED_FOLDER, 'app.log')
     file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024, backupCount=5)
     file_handler.setFormatter(logging.Formatter(
