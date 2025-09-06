@@ -35,7 +35,7 @@ pytest -v -n auto \
   tests/test_normalization.py \
   tests/test_functionality.py \
   tests/test_audiobook_creation.py \
-  tests/test_uploads.py
+  tests/test_uploads.py \
   tests/test_sample_generation.py
 
 pytest -v tests/
