@@ -196,7 +196,7 @@ def normalize_text(text: str) -> str:
 
     text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
     text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
-    text = re.sub(r"\[\d+\]|\[fn\]|[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)", "", text)
+    text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]|[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)", "", text)
     text = re.sub(r"\b\d+\b", number_replacer, text)
 
     text = re.sub(r'^([A-Z][A-Z0-9\s,.-]{4,})$', r'. ... \1. ... ', text, flags=re.MULTILINE)
@@ -209,7 +209,11 @@ def normalize_text(text: str) -> str:
 class TTSService:
     def __init__(self, voice: str = "en_US-hfc_male-medium.onnx", speed_rate: str = "1.0"):
         self.voice_path = Path(f"/app/voices/{voice}")
-        self.speed_rate = speed_rate
+        try:
+            self.speed_rate = float(speed_rate)
+        except (ValueError, TypeError):
+            self.speed_rate = 1.0
+        
         if not self.voice_path.exists():
             self.voice_path = Path(f"voices/{voice}")
         if not self.voice_path.exists():
@@ -221,7 +225,7 @@ class TTSService:
         piper_command = [
             "piper", 
             "--model", str(self.voice_path), 
-            "--length_scale", self.speed_rate,
+            "--length_scale", str(self.speed_rate),
             "--output_file", "-"
         ]
         
