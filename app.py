@@ -581,7 +581,7 @@ def delete_bulk():
 
 @app.route('/speak_sample/<voice_name>')
 def speak_sample(voice_name):
-    sample_text = "This is a sample of my voice."
+    sample_text = "The Lord is my shepherd; I shall not want. He makes me to lie down in green pastures; He leads me beside the still waters. He restores my soul; He leads me in the paths of righteousness For His name’s sake."
     speed_rate = request.args.get('speed', '1.0')
     
     # Sanitize speed_rate to be used in filename
