@@ -25,8 +25,9 @@ import requests
 import textwrap
 from PIL import Image, ImageDraw, ImageFont
 
-from tts_service import TTSService
+from tts_service import TTSService, normalize_text
 
+APP_VERSION = "1.1.0"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
@@ -38,6 +39,11 @@ app.config.from_mapping(
     GENERATED_FOLDER=GENERATED_FOLDER,
     SECRET_KEY='a-secure-and-random-secret-key'
 )
+
+# Make the app version available to all templates
+@app.context_processor
+def inject_version():
+    return dict(app_version=APP_VERSION)
 
 def celery_init_app(app: Flask) -> Celery:
     class FlaskTask(Task):
@@ -194,7 +200,6 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         tts = TTSService(voice=voice_name, speed_rate=speed_rate)
         _, normalized_text = tts.synthesize(text_content, output_filepath)
         
-        # --- Fetch or create cover art ---
         title = metadata.get('title', '')
         author = metadata.get('author', 'Unknown')
         cover_url = ''
@@ -247,45 +252,30 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
             os.remove(temp_cover_path)
 
 def create_generic_cover_image(title, author, save_path):
-    """Creates a generic cover image with the book title and author."""
     try:
-        # Create a blank image
         width, height = 800, 1200
         image = Image.new('RGB', (width, height), color = (73, 109, 137))
         draw = ImageDraw.Draw(image)
-
-        # Load a font
         try:
-            # Try to load a common font
             font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", size=60)
             font_author = ImageFont.truetype("DejaVuSans.ttf", size=40)
         except IOError:
-            # If the font is not available, use the default font
             font_title = ImageFont.load_default()
             font_author = ImageFont.load_default()
-
-        # Add text to the image
-        # Title
         title_lines = textwrap.wrap(title, width=20)
         y_text = height / 4
         for line in title_lines:
             bbox = draw.textbbox((0, 0), line, font=font_title)
-            line_width = bbox[2] - bbox[0]
-            line_height = bbox[3] - bbox[1]
+            line_width, line_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
             draw.text(((width - line_width) / 2, y_text), line, font=font_title, fill=(255, 255, 255))
-            y_text += line_height + 5 # Add padding
-
-        # Author
-        y_text += 50 # add some space
+            y_text += line_height + 5
+        y_text += 50
         author_lines = textwrap.wrap(author, width=30)
         for line in author_lines:
             bbox = draw.textbbox((0, 0), line, font=font_author)
-            line_width = bbox[2] - bbox[0]
-            line_height = bbox[3] - bbox[1]
+            line_width, line_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
             draw.text(((width - line_width) / 2, y_text), line, font=font_author, fill=(255, 255, 255))
-            y_text += line_height + 5 # Add padding
-
-        # Save the image
+            y_text += line_height + 5
         image.save(save_path)
         return save_path
     except Exception as e:
@@ -293,20 +283,13 @@ def create_generic_cover_image(title, author, save_path):
         return None
 
 def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, build_dir, task_self=None):
-    """Contains the core logic for creating an audiobook, using the passed build_dir."""
     def update_state(state, meta):
         if task_self:
             task_self.update_state(state=state, meta=meta)
-
     unique_file_list = sorted(list(set(file_list)))
-    
     update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
     safe_mp3_paths = [Path(GENERATED_FOLDER) / secure_filename(fname) for fname in unique_file_list]
-    merged_text_content = ""
-    for mp3_path in safe_mp3_paths:
-        txt_path = mp3_path.with_suffix('.txt')
-        if txt_path.exists():
-            merged_text_content += txt_path.read_text(encoding='utf-8') + "\n\n"
+    merged_text_content = "".join(p.with_suffix('.txt').read_text(encoding='utf-8') + "\n\n" for p in safe_mp3_paths if p.with_suffix('.txt').exists())
     update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Downloading cover art...'})
     cover_path = None
     if cover_url:
@@ -314,17 +297,14 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
             response = requests.get(cover_url, stream=True)
             response.raise_for_status()
             cover_path = build_dir / "cover.jpg"
-            with open(cover_path, 'wb') as f:
-                shutil.copyfileobj(response.raw, f)
+            with open(cover_path, 'wb') as f: shutil.copyfileobj(response.raw, f)
         except requests.RequestException as e:
             app.logger.error(f"Failed to download cover art: {e}")
             cover_path = None
-    
     if not cover_path and audiobook_title and audiobook_author:
         generic_cover_path = build_dir / "generic_cover.jpg"
         if create_generic_cover_image(audiobook_title, audiobook_author, generic_cover_path):
             cover_path = generic_cover_path
-
     update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Analyzing chapters...'})
     chapters_meta_content = f";FFMETADATA1\ntitle={audiobook_title}\nartist={audiobook_author}\ncomment={merged_text_content.replace(';', ';;').replace('=', r'=')}\n\n"
     concat_list_content = ""
@@ -348,17 +328,14 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
     output_filename = f"{secure_filename(audiobook_title)}_{timestamp}.m4b"
     output_filepath = Path(GENERATED_FOLDER) / output_filename
     mux_command = ['ffmpeg']
-    if cover_path:
-        mux_command.extend(['-i', str(cover_path)])
+    if cover_path: mux_command.extend(['-i', str(cover_path)])
     mux_command.extend(['-i', str(temp_audio_path), '-i', str(chapters_meta_path)])
     map_offset = 1 if cover_path else 0
     mux_command.extend(['-map', f'{map_offset}:a', '-map_metadata', f'{map_offset + 1}'])
     if cover_path:
-        mux_command.extend(['-map', '0:v'])
-        mux_command.extend(['-disposition:v', 'attached_pic'])
+        mux_command.extend(['-map', '0:v', '-disposition:v', 'attached_pic'])
     mux_command.extend(['-c:a', 'copy', '-c:v', 'copy', str(output_filepath)])
     subprocess.run(mux_command, check=True, capture_output=True)
-        
     return {'status': 'Success', 'filename': output_filename}
 
 @celery.task(bind=True)
@@ -367,17 +344,14 @@ def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, co
     build_dir = Path(GENERATED_FOLDER) / f"audiobook_build_{timestamp}"
     os.makedirs(build_dir, exist_ok=True)
     try:
-        return _create_audiobook_logic(
-            file_list, audiobook_title, audiobook_author, cover_url, build_dir, task_self=self
-        )
+        return _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, build_dir, task_self=self)
     except Exception as e:
         app.logger.error(f"Audiobook creation failed: {e}")
         if isinstance(e, subprocess.CalledProcessError):
             app.logger.error(f"FFMPEG stderr: {e.stderr.decode()}")
         raise e
     finally:
-        if build_dir.exists():
-            shutil.rmtree(build_dir)
+        if build_dir.exists(): shutil.rmtree(build_dir)
 
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
@@ -397,12 +371,10 @@ def upload_file():
             task = convert_to_speech_task.delay(input_filepath, original_filename, voice_name, speed_rate)
             return render_template('result.html', task_id=task.id)
         
-        files = request.files.getlist('file') # Use getlist() to get all files
-        
+        files = request.files.getlist('file')
         if not files or all(f.filename == '' for f in files):
             flash('No files selected.', 'error')
             return redirect(request.url)
-
         tasks_created = 0
         for file in files:
             if file and allowed_file(file.filename):
@@ -412,14 +384,12 @@ def upload_file():
                 file.save(input_filepath)
                 convert_to_speech_task.delay(input_filepath, original_filename, voice_name, speed_rate)
                 tasks_created += 1
-        
         if tasks_created > 0:
             flash(f'Successfully queued {tasks_created} files for processing.', 'success')
-            return redirect(url_for('jobs_page')) # Redirect to see all jobs
+            return redirect(url_for('jobs_page'))
         else:
             flash(f'Invalid file type. Allowed types are: {", ".join(ALLOWED_EXTENSIONS)}.', 'error')
             return redirect(request.url)
-
     voices = list_available_voices()
     return render_template('index.html', voices=voices)
 
@@ -428,62 +398,40 @@ def list_files():
     file_map = {}
     all_files = sorted(Path(GENERATED_FOLDER).iterdir(), key=os.path.getmtime, reverse=True)
     for entry in all_files:
-        if not entry.is_file() or entry.name.startswith('sample_') or entry.name.startswith('cover_'):
+        if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
             continue
-        
         match = re.match(r'^(.*?)_([a-f0-9]{8})$', entry.stem)
-        if match:
-            base_name = match.group(1)
-            unique_id = match.group(2)
-            key = f"{base_name}_{unique_id}"
-        else:
-            base_name = entry.stem
-            key = base_name
-
+        key = f"{match.group(1)}_{match.group(2)}" if match else entry.stem
         if key not in file_map:
-            file_map[key] = {'base_name': f"{base_name}_{unique_id}" if match else base_name}
-
+            file_map[key] = {'base_name': match.group(1) if match else entry.stem}
         if entry.suffix in ['.mp3', '.m4b']:
-            file_map[key]['audio_name'] = entry.name
-            file_map[key]['size'] = human_readable_size(entry.stat().st_size)
-            file_map[key]['date'] = datetime.fromtimestamp(entry.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+            file_map[key].update({
+                'audio_name': entry.name,
+                'size': human_readable_size(entry.stat().st_size),
+                'date': datetime.fromtimestamp(entry.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+            })
         elif entry.suffix == '.txt':
             file_map[key]['txt_name'] = entry.name
-            
     audio_files = [data for data in file_map.values() if 'audio_name' in data]
     return render_template('files.html', audio_files=audio_files)
 
 @app.route('/get-book-metadata', methods=['POST'])
 def get_book_metadata():
     filenames = request.json.get('filenames', [])
-    if not filenames:
-        return jsonify({'error': 'No filenames provided'}), 400
-    
+    if not filenames: return jsonify({'error': 'No filenames provided'}), 400
     match = re.match(r'^(.*?)_([a-f0-9]{8})$', Path(filenames[0]).stem)
-    if match:
-        first_file_path_stem = match.group(1)
-    else:
-        first_file_path_stem = Path(filenames[0]).stem
-        
+    first_file_path_stem = match.group(1) if match else Path(filenames[0]).stem
     title_from_name = first_file_path_stem.replace('_', ' ').replace('-', ' ').title()
     metadata = {'title': title_from_name, 'author': 'Unknown'}
-
     txt_filename = next((f.replace('.mp3', '.txt') for f in filenames if f.endswith('.mp3')), None)
-    if txt_filename:
-        txt_path = Path(GENERATED_FOLDER) / txt_filename
-        if txt_path.exists():
-            text = txt_path.read_text(encoding='utf-8')
-            parsed_meta = parse_metadata_from_text(text)
-            metadata['author'] = parsed_meta.get('author', metadata['author'])
-
-    title = metadata.get('title', '')
-    author = metadata.get('author', '')
-    cover_url = ''
+    if txt_filename and (txt_path := Path(GENERATED_FOLDER) / txt_filename).exists():
+        text = txt_path.read_text(encoding='utf-8')
+        parsed_meta = parse_metadata_from_text(text)
+        metadata['author'] = parsed_meta.get('author', metadata['author'])
+    title, author, cover_url = metadata.get('title', ''), metadata.get('author', ''), ''
     if title:
         try:
-            query = f"intitle:{title}"
-            if author and author != 'Unknown':
-                query += f"+inauthor:{author}"
+            query = f"intitle:{title}" + (f"+inauthor:{author}" if author and author != 'Unknown' else "")
             response = requests.get(f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=1")
             response.raise_for_status()
             data = response.json()
@@ -494,7 +442,6 @@ def get_book_metadata():
                 cover_url = book_info.get('imageLinks', {}).get('thumbnail', '')
         except requests.RequestException as e:
             app.logger.error(f"Google Books API request failed: {e}")
-            
     return jsonify({'title': title, 'author': author, 'cover_url': cover_url})
 
 @app.route('/create-audiobook', methods=['POST'])
@@ -516,39 +463,28 @@ def jobs_page():
     try:
         inspector = celery.control.inspect()
         active_tasks = inspector.active() or {}
-        for worker_name, tasks in active_tasks.items():
+        for worker, tasks in active_tasks.items():
             for task in tasks:
                 original_filename = "N/A"
-                task_args = task.get('args')
-                if task_args and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
+                if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
                     original_filename = Path(task_args[1]).name
-                running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker_name})
-        
+                running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker})
         reserved_tasks = inspector.reserved() or {}
-        for worker_name, tasks in reserved_tasks.items():
+        for worker, tasks in reserved_tasks.items():
             for task in tasks:
                 original_filename = "N/A"
-                task_args = task.get('args')
-                if task_args and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
+                if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
                     original_filename = Path(task_args[1]).name
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
-        
         if redis_client:
             try:
                 unassigned_job_count = redis_client.llen('celery')
             except Exception as e:
                 app.logger.error(f"Could not get queue length from Redis: {e}")
-
     except Exception as e:
         app.logger.error(f"Could not inspect Celery/Redis: {e}")
         flash("Could not connect to the Celery worker or Redis.", "error")
-        
-    return render_template(
-        'jobs.html', 
-        running_jobs=running_jobs, 
-        waiting_jobs=queued_jobs,
-        unassigned_job_count=unassigned_job_count
-    )
+    return render_template('jobs.html', running_jobs=running_jobs, waiting_jobs=queued_jobs, unassigned_job_count=unassigned_job_count)
 
 @app.route('/cancel-job/<task_id>', methods=['POST'])
 def cancel_job(task_id):
@@ -565,7 +501,6 @@ def delete_bulk():
     if not basenames_to_delete:
         flash("No files selected for deletion.", "warning")
         return redirect(url_for('list_files'))
-    
     deleted_count = 0
     for base_name in basenames_to_delete:
         safe_base_name = secure_filename(base_name)
@@ -575,7 +510,6 @@ def delete_bulk():
                 deleted_count +=1
             except OSError as e:
                 app.logger.error(f"Error deleting file {f}: {e}")
-
     flash(f"Successfully deleted {deleted_count} file(s).", "success")
     return redirect(url_for('list_files'))
 
@@ -583,21 +517,16 @@ def delete_bulk():
 def speak_sample(voice_name):
     sample_text = "The Lord is my shepherd; I shall not want. He makes me to lie down in green pastures; He leads me beside the still waters. He restores my soul; He leads me in the paths of righteousness For His name’s sake."
     speed_rate = request.args.get('speed', '1.0')
-    
-    # Sanitize speed_rate to be used in filename
     safe_speed = str(speed_rate).replace('.', 'p')
     safe_voice_name = secure_filename(Path(voice_name).stem)
-    
     filename = f"sample_{safe_voice_name}_speed_{safe_speed}.mp3"
     filepath = os.path.join(GENERATED_FOLDER, filename)
-    
     if not os.path.exists(filepath):
         try:
             tts = TTSService(voice=voice_name, speed_rate=speed_rate)
             tts.synthesize(sample_text, filepath)
         except Exception as e:
             return f"Error generating sample: {e}", 500
-            
     return send_from_directory(app.config["GENERATED_FOLDER"], filename)
 
 @app.route('/status/<task_id>')
@@ -616,3 +545,19 @@ def task_status(task_id):
 @app.route('/generated/<name>')
 def download_file(name):
     return send_from_directory(app.config["GENERATED_FOLDER"], name)
+
+@app.route('/health')
+def health_check():
+    """A simple health check endpoint."""
+    return jsonify({"status": "healthy"}), 200
+
+@app.route('/debug', methods=['GET', 'POST'])
+def debug_page():
+    voices = list_available_voices()
+    normalized_output = ""
+    original_text = ""
+    if request.method == 'POST':
+        original_text = request.form.get('text_to_normalize', '')
+        if original_text:
+            normalized_output = normalize_text(original_text)
+    return render_template('debug.html', voices=voices, original_text=original_text, normalized_output=normalized_output)
