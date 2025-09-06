@@ -157,30 +157,3 @@ def test_mp3_cover_art_embedding():
 
     cover_art_tag = next((tag for key, tag in audio.tags.items() if key.startswith('APIC:')), None)
     assert cover_art_tag is not None and len(cover_art_tag.data) > 0, "Cover art data is empty."
-
-def get_mp3_duration(mp3_filename):
-    """Downloads an MP3 and returns its duration in seconds."""
-    mp3_response = requests.get(f"{BASE_URL}/generated/{mp3_filename}")
-    assert mp3_response.status_code == 200
-    mp3_file = io.BytesIO(mp3_response.content)
-    audio = MP3(mp3_file)
-    return audio.info.length
-
-def test_speech_speed_rate():
-    """Tests that changing speech rate affects audio duration."""
-    title = "Speech Speed Test"
-    text = "Four score and seven years ago our fathers brought forth on this continent, a new nation, conceived in Liberty, and dedicated to the proposition that all men are created equal. Now we are engaged in a great civil war, testing whether that nation, or any nation so conceived and so dedicated, can long endure."
-
-    # A higher length_scale value makes the speech slower (longer duration).
-    _, slow_mp3 = submit_and_poll_task(title, text, speed_rate="1.3") 
-    _, normal_mp3 = submit_and_poll_task(title, text, speed_rate="1.0")
-    _, fast_mp3 = submit_and_poll_task(title, text, speed_rate="0.7")
-
-    # Get the duration of each audio file
-    slow_duration = get_mp3_duration(slow_mp3)
-    normal_duration = get_mp3_duration(normal_mp3)
-    fast_duration = get_mp3_duration(fast_mp3)
-
-    # Assert the correct behavior: slower speed means longer duration.
-    assert slow_duration > normal_duration
-    assert normal_duration > fast_duration

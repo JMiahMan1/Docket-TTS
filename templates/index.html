@@ -96,10 +96,10 @@
     <script>
     document.getElementById("speakSampleBtn").addEventListener("click", function() {
         const voiceId = document.getElementById("voice").value;
+        const speedRate = document.getElementById("speed_rate").value;
         const audio = document.getElementById("sampleAudio");
         const container = document.getElementById("sampleContainer");
-
-        audio.src = `/speak_sample/${encodeURIComponent(voiceId)}`;
+        audio.src = `/speak_sample/${encodeURIComponent(voiceId)}?speed=${speedRate}`;
         container.style.display = "block";
         audio.play();
     });
@@ -133,9 +133,9 @@
         if (speed > 0.95 && speed < 1.05) {
             label = `Normal ${label}`;
         } else if (speed > 1) {
-            label = `Slower ${label}`;
-        } else {
             label = `Faster ${label}`;
+        } else {
+            label = `Slower ${label}`;
         }
         speedDisplay.textContent = label;
     }
