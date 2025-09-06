@@ -413,10 +413,16 @@ def list_files():
     for entry in all_files:
         if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
             continue
+        
+        # This regex only matches files with an 8-char hex ID
         match = re.match(r'^(.*?)_([a-f0-9]{8})$', entry.stem)
-        key = f"{match.group(1)}_{match.group(2)}" if match else entry.stem
-        if key not in file_map:
-            file_map[key] = {'base_name': match.group(1) if match else entry.stem}
+        
+        # For M4B files, match is None, so base_name becomes the full stem
+        base_name_for_delete = match.group(1) if match else entry.stem
+
+        if (key := f"{base_name_for_delete}_{match.group(2)}" if match else base_name_for_delete) not in file_map:
+            file_map[key] = {'base_name': base_name_for_delete}
+        
         if entry.suffix in ['.mp3', '.m4b']:
             file_map[key].update({
                 'audio_name': entry.name,
@@ -425,6 +431,7 @@ def list_files():
             })
         elif entry.suffix == '.txt':
             file_map[key]['txt_name'] = entry.name
+            
     audio_files = [data for data in file_map.values() if 'audio_name' in data]
     return render_template('files.html', audio_files=audio_files)
 
@@ -512,19 +519,30 @@ def cancel_job(task_id):
 def delete_bulk():
     app.logger.info(f"Received delete request. Form data: {request.form}")
     basenames_to_delete = set(request.form.getlist('files_to_delete'))
-    app.logger.info(f"Basenames to delete: {basenames_to_delete}")
+    app.logger.info(f"Basenames to delete from form: {basenames_to_delete}")
+    
+    deleted_count = 0
     if not basenames_to_delete:
         flash("No files selected for deletion.", "warning")
+        app.logger.warning("files_to_delete was empty, no files will be deleted.")
         return redirect(url_for('list_files'))
-    deleted_count = 0
+        
     for base_name in basenames_to_delete:
         safe_base_name = secure_filename(base_name)
-        for f in Path(GENERATED_FOLDER).glob(f"{safe_base_name}.*"):
+        app.logger.info(f"Processing base_name: '{base_name}', sanitized to: '{safe_base_name}'")
+        
+        # Corrected glob pattern to find files with unique IDs or without (like M4Bs)
+        files_found = list(Path(GENERATED_FOLDER).glob(f"{safe_base_name}*.*"))
+        app.logger.info(f"Glob pattern '{safe_base_name}*.*' found {len(files_found)} files: {files_found}")
+
+        for f in files_found:
             try:
                 f.unlink()
-                deleted_count +=1
+                app.logger.info(f"Successfully deleted {f}")
+                deleted_count += 1
             except OSError as e:
                 app.logger.error(f"Error deleting file {f}: {e}")
+                
     flash(f"Successfully deleted {deleted_count} file(s).", "success")
     return redirect(url_for('list_files'))
 
