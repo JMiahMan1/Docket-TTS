@@ -30,7 +30,7 @@
             <div class="card-body">
                 {% if audio_files %}
                 <div class="table-responsive">
-                    <form id="audiobookForm" action="{{ url_for('create_audiobook') }}" method="POST">
+                    <form id="mainForm" method="POST">
                         <table class="table table-striped table-hover align-middle">
                             <thead>
                                 <tr>
@@ -53,7 +53,7 @@
                                         {% else %}<span class="text-muted">N/A</span>{% endif %}
                                     </td>
                                     <td>{{ file.date }}</td>
-                                    <td><input class="form-check-input delete-checkbox" type="checkbox" value="{{ file.base_name }}"></td>
+                                    <td><input class="form-check-input delete-checkbox" type="checkbox" name="files_to_delete" value="{{ file.base_name }}"></td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
@@ -62,13 +62,19 @@
                 </div>
                 <div class="d-flex gap-2 mt-3">
                     <button type="button" class="btn btn-primary" id="createAudiobookBtn">Create Audiobook from Selected</button>
-                    <form action="{{ url_for('delete_bulk') }}" method="POST" id="deleteForm">
-                        <button type="submit" class="btn btn-danger">Delete Selected Items</button>
-                    </form>
+                    <button type="button" class="btn btn-danger" id="deleteBtn">Delete Selected Items</button>
                 </div>
                 {% else %}
                 <p class="text-center text-muted">No audio files generated yet.</p>
                 {% endif %}
+            </div>
+             <div class="card-footer text-center d-flex justify-content-between align-items-center">
+                <div>
+                    <a href="/">New Conversion</a> |
+                    <a href="/jobs">View Running Jobs</a> |
+                    <a href="/debug">Debug</a>
+                </div>
+                <small class="text-muted">v{{ app_version }}</small>
             </div>
         </div>
     </div>
@@ -112,6 +118,7 @@
     <script>
         const createAudiobookBtn = document.getElementById('createAudiobookBtn');
         const audiobookModal = new bootstrap.Modal(document.getElementById('audiobookModal'));
+        const mainForm = document.getElementById('mainForm');
         
         createAudiobookBtn.addEventListener('click', async () => {
             const checkedFiles = document.querySelectorAll('input.file-checkbox:checked');
@@ -152,47 +159,39 @@
         });
 
         document.getElementById('submitAudiobook').addEventListener('click', () => {
-            const form = document.getElementById('audiobookForm');
+            mainForm.action = "{{ url_for('create_audiobook') }}";
+            
             const title = document.getElementById('audiobookTitle').value;
             const author = document.getElementById('audiobookAuthor').value;
             const coverUrl = document.getElementById('audiobookCoverUrl').value;
+            
             let titleInput = document.createElement('input');
             titleInput.type = 'hidden'; titleInput.name = 'title'; titleInput.value = title;
-            form.appendChild(titleInput);
+            mainForm.appendChild(titleInput);
+            
             let authorInput = document.createElement('input');
             authorInput.type = 'hidden'; authorInput.name = 'author'; authorInput.value = author;
-            form.appendChild(authorInput);
+            mainForm.appendChild(authorInput);
+
             let coverUrlInput = document.createElement('input');
             coverUrlInput.type = 'hidden'; coverUrlInput.name = 'cover_url'; coverUrlInput.value = coverUrl;
+            mainForm.appendChild(coverUrlInput);
             
-            // Collect selected files and append them to the form
-            const checkedFiles = document.querySelectorAll('input.file-checkbox:checked');
-            checkedFiles.forEach(checkbox => {
-                let fileInput = document.createElement('input');
-                fileInput.type = 'hidden';
-                fileInput.name = 'files_to_merge';
-                fileInput.value = checkbox.value;
-                form.appendChild(fileInput);
-            });
-
-            form.submit();
+            mainForm.submit();
         });
 
-        document.getElementById('deleteForm').addEventListener('submit', function(event) {
-            event.preventDefault();
+        document.getElementById('deleteBtn').addEventListener('click', function() {
             const checkedDeleteBoxes = document.querySelectorAll('input.delete-checkbox:checked');
-            if (checkedDeleteBoxes.length === 0) { alert('Please select at least one item to delete.'); return; }
+            if (checkedDeleteBoxes.length === 0) {
+                alert('Please select at least one item to delete.');
+                return;
+            }
             if (confirm(`Are you sure you want to delete the selected ${checkedDeleteBoxes.length} item(s) and their associated files?`)) {
-                checkedDeleteBoxes.forEach(checkbox => {
-                    const hiddenInput = document.createElement('input');
-                    hiddenInput.type = 'hidden';
-                    hiddenInput.name = 'files_to_delete';
-                    hiddenInput.value = checkbox.value;
-                    this.appendChild(hiddenInput);
-                });
-                this.submit();
+                mainForm.action = "{{ url_for('delete_bulk') }}";
+                mainForm.submit();
             }
         });
+
         document.getElementById('selectAll').addEventListener('click', function(event) {
             document.querySelectorAll('input.file-checkbox, input.delete-checkbox').forEach(checkbox => {
                 checkbox.checked = event.target.checked;

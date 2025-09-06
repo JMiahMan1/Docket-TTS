@@ -24,10 +24,12 @@ import base64
 import requests
 import textwrap
 from PIL import Image, ImageDraw, ImageFont
+import logging
+from logging.handlers import RotatingFileHandler
 
 from tts_service import TTSService, normalize_text
 
-APP_VERSION = "0.0.1"
+APP_VERSION = "0.0.2"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
@@ -40,7 +42,18 @@ app.config.from_mapping(
     SECRET_KEY='a-secure-and-random-secret-key'
 )
 
-# Make the app version available to all templates
+# --- Logging Setup ---
+if not app.debug:
+    log_file = os.path.join(GENERATED_FOLDER, 'app.log')
+    file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024, backupCount=5)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    app.logger.setLevel(logging.INFO)
+    app.logger.info('Docket TTS startup')
+
 @app.context_processor
 def inject_version():
     return dict(app_version=APP_VERSION)
@@ -515,7 +528,7 @@ def delete_bulk():
 
 @app.route('/speak_sample/<voice_name>')
 def speak_sample(voice_name):
-    sample_text = "The Lord is my shepherd; I shall not want. He makes me to lie down in green pastures; He leads me beside the still waters. He restores my soul; He leads me in the paths of righteousness For His name’s sake."
+    sample_text = "The Lord is my shepherd; I shall not want. He makes me to lie down in green pastures; He leads me beside the still waters. He restores my soul; He leads me in the paths of righteousness For His name’s sake."
     speed_rate = request.args.get('speed', '1.0')
     safe_speed = str(speed_rate).replace('.', 'p')
     safe_voice_name = secure_filename(Path(voice_name).stem)
@@ -551,13 +564,25 @@ def health_check():
     """A simple health check endpoint."""
     return jsonify({"status": "healthy"}), 200
 
+# New debug route
 @app.route('/debug', methods=['GET', 'POST'])
 def debug_page():
     voices = list_available_voices()
     normalized_output = ""
     original_text = ""
+    log_content = "Log file not found."
+    log_file = os.path.join(app.config['GENERATED_FOLDER'], 'app.log')
+
     if request.method == 'POST':
         original_text = request.form.get('text_to_normalize', '')
         if original_text:
             normalized_output = normalize_text(original_text)
-    return render_template('debug.html', voices=voices, original_text=original_text, normalized_output=normalized_output)
+    
+    try:
+        with open(log_file, 'r') as f:
+            lines = f.readlines()
+            log_content = "".join(lines[-100:])
+    except FileNotFoundError:
+        app.logger.warning(f"Log file not found at {log_file} for debug page.")
+
+    return render_template('debug.html', voices=voices, original_text=original_text, normalized_output=normalized_output, log_content=log_content)
