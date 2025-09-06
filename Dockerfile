@@ -10,11 +10,8 @@ WORKDIR /voices
 # Download high-quality voice models
 RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx && \
     wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/high/en_US-ryan-high.onnx && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/high/en_US-ryan-high.onnx.json && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/norman/medium/en_US-norman-medium.onnx && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/norman/medium/en_US-norman-medium.onnx.json
-
+    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx && \
+    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx.json
 
 # Stage 2: Final Application Image
 FROM fedora:42
@@ -33,7 +30,6 @@ RUN dnf -y install \
     ffmpeg \
     espeak-ng \
     python3-requests \
-    python3-torch \
     python3-onnxruntime \
     python3-sentencepiece \
     python3-flask \
@@ -45,12 +41,17 @@ RUN dnf -y install \
     python3-beautifulsoup4 \
     python3-inflect \
     python3-mutagen \
-    && dnf clean all \
-    && python3 -m venv --system-site-packages /opt/venv \
-    && . /opt/venv/bin/activate \
-    && pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt \
-    && python -c "\
+    python3-pillow \
+    && dnf clean all
+
+# Install Python dependencies using pip, including a CPU-only version of Torch
+RUN python3 -m venv --system-site-packages /opt/venv && \
+    . /opt/venv/bin/activate && \
+    /opt/venv/bin/pip install --upgrade pip && \
+    /opt/venv/bin/pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
+    /opt/venv/bin/pip install --no-cache-dir onnxruntime sentencepiece && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt && \
+    /opt/venv/bin/python -c "\
 from argostranslate import package;\
 package.update_package_index();\
 available_packages = package.get_available_packages();\

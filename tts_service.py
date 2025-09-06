@@ -80,8 +80,6 @@ def expand_roman_numerals(text: str) -> str:
             return roman_str
     return pattern.sub(replacer, text)
 
-# --- NEW, ROBUST SCRIPTURE PARSER ---
-
 def _format_ref_segment(book_full, chapter, verses_str):
     chapter_words = _inflect.number_to_words(int(chapter))
     if not verses_str: return f"{book_full} chapter {chapter_words}"
@@ -100,20 +98,17 @@ def _format_ref_segment(book_full, chapter, verses_str):
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
 def normalize_scripture(text: str) -> str:
-    # Combine abbreviation keys and full book names for a comprehensive pattern
     bible_abbr_keys = {re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)}
     full_book_names = {re.escape(book) for book in BIBLE_BOOKS}
     book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
     
-    # This pattern finds a single reference. The verse group intentionally does NOT match semicolons,
-    # as they are delimiters between separate references.
     ref_pattern = re.compile(
-        r'\b(' + book_pattern_str + r')?' +  # Group 1: Book (optional)
+        r'\b(' + book_pattern_str + r')?' +
         r'\s*' +
-        r'(\d+)' +  # Group 2: Chapter (required)
-        r'[:\s]' + # Separator
-        r'([\d\w\s,.\–-]+(?:ff|f)?)',  # Group 3: Verses
+        r'(\d+)' +
+        r'[:\s]' +
+        r'([\d\w\s,.\–-]+(?:ff|f)?)',
         re.IGNORECASE
     )
 
@@ -122,13 +117,10 @@ def normalize_scripture(text: str) -> str:
     def replacer(match):
         nonlocal last_book_abbr
         book_abbr, chapter, verses = match.groups()
-
         if book_abbr:
             last_book_abbr = book_abbr.strip()
-        
         if not last_book_abbr:
             return match.group(0)
-
         book_full = ABBREVIATIONS.get(last_book_abbr.replace('.',''), last_book_abbr)
         return _format_ref_segment(book_full, chapter, verses or "")
 
@@ -137,20 +129,13 @@ def normalize_scripture(text: str) -> str:
         book_full = ABBREVIATIONS.get(book_abbr.replace('.',''), book_abbr)
         return _format_ref_segment(book_full, chapter, verses or "")
 
-
-    # A simpler pattern for unambiguous prose references like "Genesis 17:17"
-    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
-
-    # A pattern to find content inside brackets/parentheses to parse with context
+    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+)[:\s]([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
     enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
 
     def enclosed_replacer(match):
         nonlocal last_book_abbr
-        last_book_abbr = None # Reset context for each new block
-        
+        last_book_abbr = None
         opener, inner_text, closer = match.groups()
-        
-        # Use a finditer loop for robust stateful parsing of multiple references
         last_end = 0
         new_parts = []
         for m in ref_pattern.finditer(inner_text):
@@ -158,19 +143,19 @@ def normalize_scripture(text: str) -> str:
             new_parts.append(replacer(m))
             last_end = m.end()
         new_parts.append(inner_text[last_end:])
-        
-        # Re-add the enclosing brackets/parentheses
         return opener + "".join(new_parts) + closer
 
     text = enclosed_pattern.sub(enclosed_replacer, text)
-    text = prose_pattern.sub(replacer_simple, text) # Handle remaining simple cases
-
+    text = prose_pattern.sub(replacer_simple, text)
     return text
-
-# --- END OF SCRIPTURE PARSER ---
 
 def number_replacer(match):
     num_str = match.group(0)
+    if len(num_str) == 4 and 1100 <= int(num_str) <= 1999:
+        part1 = _inflect.number_to_words(num_str[:2])
+        part2 = _inflect.number_to_words(num_str[2:])
+        return f"{part1} {part2}"
+    
     num_int = int(num_str)
     if len(num_str) == 4 and 1000 <= num_int <= 2099:
         if 2000 <= num_int <= 2009: return _inflect.number_to_words(num_int, andword="")
@@ -179,15 +164,27 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
+    text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
+
+    def _replace_leading_verse_marker(match):
+        chapter, verse = match.groups()
+        verse_words = _inflect.number_to_words(verse)
+        if chapter:
+            chapter_words = _inflect.number_to_words(chapter)
+            return f"chapter {chapter_words} verse {verse_words} "
+        return f"verse {verse_words} "
+
+    text = re.sub(r'^\s*(?:(\d+))?:(\d+)\b', _replace_leading_verse_marker, text, flags=re.M)
+    text = re.sub(r"verse\s+([A-Z\s]+)([a-z]+):([a-z]+)", r"\1. verse \3", text)
     text = normalize_scripture(text)
 
-    for phrase, replacement in LATIN_PHRASES.items():
-        text = re.sub(rf'{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
+    for phrase in sorted(LATIN_PHRASES.keys(), key=len, reverse=True):
+        replacement = LATIN_PHRASES[phrase]
+        text = re.sub(rf'\b{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
 
     text = _strip_diacritics(text)
     text = normalize_hebrew(text)
     text = normalize_greek(text)
-    
     text = expand_roman_numerals(text)
 
     non_bible_abbrs = { k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS) }
@@ -201,17 +198,20 @@ def normalize_text(text: str) -> str:
 
     text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
     text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
-    
-    text = re.sub(r"\[\d+\]|\[fn\]|[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)", "", text)
-
+    text = re.sub(r"[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)", "", text)
     text = re.sub(r"\b\d+\b", number_replacer, text)
-    text = re.sub(r"\[|\]", " , ", text).replace("(", "").replace(")", "") # clean up brackets
+
+    text = re.sub(r'^([A-Z][A-Z0-9\s,.-]{4,})$', r'. ... \1. ... ', text, flags=re.MULTILINE)
+    text = re.sub(r'\n\s*\n', '. ... \n', text)
+
+    text = re.sub(r"\[|\]", " , ", text).replace("(", "").replace(")", "")
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 class TTSService:
-    def __init__(self, voice: str = "en_US-hfc_male-medium.onnx"):
+    def __init__(self, voice: str = "en_US-hfc_male-medium.onnx", speed_rate: str = "1.0"):
         self.voice_path = Path(f"/app/voices/{voice}")
+        self.speed_rate = speed_rate
         if not self.voice_path.exists():
             self.voice_path = Path(f"voices/{voice}")
         if not self.voice_path.exists():
@@ -220,18 +220,16 @@ class TTSService:
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)
         
-        piper_command = ["piper", "--model", str(self.voice_path), "--output_file", "-"]
+        piper_command = [
+            "piper", 
+            "--model", str(self.voice_path),
+            "--length_scale", str(self.speed_rate),
+            "--output_file", "-"
+        ]
         
         ffmpeg_command = [
-            "ffmpeg",
-            "-y",
-            "-f", "s16le",
-            "-ar", "22050",
-            "-ac", "1",
-            "-i", "-",
-            "-acodec", "libmp3lame",
-            "-q:a", "2",
-            output_path
+            "ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1",
+            "-i", "-", "-acodec", "libmp3lame", "-q:a", "2", output_path
         ]
 
         try:
@@ -240,7 +238,6 @@ class TTSService:
 
             piper_process.stdin.write(normalized_text.encode('utf-8'))
             piper_process.stdin.close()
-            
             piper_process.stdout.close()
             
             _, ffmpeg_err = ffmpeg_process.communicate()
