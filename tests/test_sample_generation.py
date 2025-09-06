@@ -27,7 +27,5 @@ def test_sample_generation_with_speed_control():
     normal_duration = get_sample_duration(voice, "1.0")
     fast_duration = get_sample_duration(voice, "0.7")
 
-    # Assert that the durations differ as expected
-    # A higher speed_rate value should result in a longer (slower) audio file
     assert slow_duration > normal_duration
-    assert fast_duration > normal_duration
+    assert normal_duration > fast_duration
