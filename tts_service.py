@@ -108,7 +108,7 @@ def normalize_scripture(text: str) -> str:
         r'\s*' +
         r'(\d+)' +
         r'[:\s]' +
-        r'([\d\w\s,.\–-]+(?:ff|f)?)',
+        r'([\d\w\s,.;\–-]+(?:ff|f)?)',
         re.IGNORECASE
     )
 
@@ -129,7 +129,7 @@ def normalize_scripture(text: str) -> str:
         book_full = ABBREVIATIONS.get(book_abbr.replace('.',''), book_abbr)
         return _format_ref_segment(book_full, chapter, verses or "")
 
-    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+)[:\s]([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
+    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+)[:\s]([\d\w\s,.;-–]+(?:ff|f)?)', re.IGNORECASE)
     enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
 
     def enclosed_replacer(match):
@@ -164,18 +164,12 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
-    # STEP 1: Pre-emptively strip artifacts to prevent misinterpretation.
-    # Remove bracketed footnotes, e.g., [a], [b].
     text = re.sub(r"\[[a-zA-Z]\]", "", text)
-    # Remove verse numbers at the start of lines or attached to words.
     text = re.sub(r'^\s*\d+\s*', '', text, flags=re.M)
     text = re.sub(r'([.?!;"]\s*)\d+', r'\1', text)
-    # Remove footnote letters attached to words, e.g., "bsome" -> "some".
     text = re.sub(r'\b(?<=\s)\d*[a-z](?=[A-Z“])', '', text)
     text = re.sub(r'\b\d*[a-z](?=[A-Z“])', '', text)
 
-
-    # STEP 2: Main normalization pipeline.
     def _replace_leading_verse_marker(match):
         chapter, verse = match.groups()
         verse_words = _inflect.number_to_words(verse)
@@ -184,7 +178,7 @@ def normalize_text(text: str) -> str:
             return f"chapter {chapter_words} verse {verse_words} "
         return f"verse {verse_words} "
 
-    text = re.sub(r'^\s*(?:(\d+))?:(\d+)\b', _replace_leading_verse_marker, text, flags=re.M)
+    text = re.sub(r'^\s*(\d+)?:(\d+)\b', _replace_leading_verse_marker, text, flags=re.M)
     text = re.sub(r"verse\s+([A-Z\s]+)([a-z]+):([a-z]+)", r"\1. verse \3", text)
     text = normalize_scripture(text)
 
@@ -206,11 +200,11 @@ def normalize_text(text: str) -> str:
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
-    # STEP 3: Strip remaining numerical artifacts.
+    text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
+    text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
     text = re.sub(r"[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)", "", text)
     text = re.sub(r"\b\d+\b", number_replacer, text)
 
-    # STEP 4: Add stylistic pauses and perform final cleanup.
     text = re.sub(r'^([A-Z][A-Z0-9\s,.-]{4,})$', r'. ... \1. ... ', text, flags=re.MULTILINE)
     text = re.sub(r'\n\s*\n', '. ... \n', text)
 

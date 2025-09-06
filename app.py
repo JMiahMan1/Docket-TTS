@@ -43,19 +43,21 @@ app.config.from_mapping(
 )
 
 # --- Logging Setup ---
-if not app.debug:
-    # Ensure the log directory exists before setting up the handler.
-    os.makedirs(GENERATED_FOLDER, exist_ok=True)
-    
-    log_file = os.path.join(GENERATED_FOLDER, 'app.log')
-    file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024, backupCount=5)
-    file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-    ))
-    file_handler.setLevel(logging.INFO)
-    app.logger.addHandler(file_handler)
-    app.logger.setLevel(logging.INFO)
-    app.logger.info('Docket TTS startup')
+try:
+    if not app.debug and not app.testing:
+        os.makedirs(GENERATED_FOLDER, exist_ok=True)
+        log_file = os.path.join(GENERATED_FOLDER, 'app.log')
+        file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024, backupCount=5)
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+        ))
+        file_handler.setLevel(logging.INFO)
+        app.logger.addHandler(file_handler)
+        app.logger.setLevel(logging.INFO)
+        app.logger.info('Docket TTS startup')
+except PermissionError:
+    app.logger.warning("Could not configure file logger due to a permission error. This is expected in some test environments.")
+
 
 @app.context_processor
 def inject_version():
@@ -417,10 +419,8 @@ def list_files():
         if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
             continue
         
-        # This regex only matches files with an 8-char hex ID
         match = re.match(r'^(.*?)_([a-f0-9]{8})$', entry.stem)
         
-        # For M4B files, match is None, so base_name becomes the full stem
         base_name_for_delete = match.group(1) if match else entry.stem
 
         if (key := f"{base_name_for_delete}_{match.group(2)}" if match else base_name_for_delete) not in file_map:
@@ -534,7 +534,6 @@ def delete_bulk():
         safe_base_name = secure_filename(base_name)
         app.logger.info(f"Processing base_name: '{base_name}', sanitized to: '{safe_base_name}'")
         
-        # Corrected glob pattern to find files with unique IDs or without (like M4Bs)
         files_found = list(Path(GENERATED_FOLDER).glob(f"{safe_base_name}*.*"))
         app.logger.info(f"Glob pattern '{safe_base_name}*.*' found {len(files_found)} files: {files_found}")
 
