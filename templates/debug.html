@@ -28,7 +28,7 @@
             </div>
         </div>
 
-        <div class="card shadow-sm border-0 rounded-3">
+        <div class="card shadow-sm border-0 rounded-3 mb-4">
             <div class="card-header"><h4 class="mb-0">Normalization Tester</h4></div>
             <div class="card-body">
                 <form method="POST">
@@ -46,6 +46,14 @@
                 {% endif %}
             </div>
         </div>
+
+        <div class="card shadow-sm border-0 rounded-3">
+            <div class="card-header"><h4 class="mb-0">Recent Application Logs</h4></div>
+            <div class="card-body">
+                <pre class="bg-dark text-white p-3 rounded" style="max-height: 400px; overflow-y: auto;"><code>{{ log_content }}</code></pre>
+            </div>
+        </div>
+
     </div>
 </body>
 </html>

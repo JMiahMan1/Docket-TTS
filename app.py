@@ -24,10 +24,12 @@ import base64
 import requests
 import textwrap
 from PIL import Image, ImageDraw, ImageFont
+import logging
+from logging.handlers import RotatingFileHandler
 
 from tts_service import TTSService, normalize_text
 
-APP_VERSION = "0.0.1"
+APP_VERSION = "0.0.3"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
@@ -40,7 +42,21 @@ app.config.from_mapping(
     SECRET_KEY='a-secure-and-random-secret-key'
 )
 
-# Make the app version available to all templates
+# --- Logging Setup ---
+if not app.debug:
+    # Ensure the log directory exists before setting up the handler.
+    os.makedirs(GENERATED_FOLDER, exist_ok=True)
+    
+    log_file = os.path.join(GENERATED_FOLDER, 'app.log')
+    file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024, backupCount=5)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    app.logger.setLevel(logging.INFO)
+    app.logger.info('Docket TTS startup')
+
 @app.context_processor
 def inject_version():
     return dict(app_version=APP_VERSION)
@@ -400,10 +416,16 @@ def list_files():
     for entry in all_files:
         if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
             continue
+        
+        # This regex only matches files with an 8-char hex ID
         match = re.match(r'^(.*?)_([a-f0-9]{8})$', entry.stem)
-        key = f"{match.group(1)}_{match.group(2)}" if match else entry.stem
-        if key not in file_map:
-            file_map[key] = {'base_name': match.group(1) if match else entry.stem}
+        
+        # For M4B files, match is None, so base_name becomes the full stem
+        base_name_for_delete = match.group(1) if match else entry.stem
+
+        if (key := f"{base_name_for_delete}_{match.group(2)}" if match else base_name_for_delete) not in file_map:
+            file_map[key] = {'base_name': base_name_for_delete}
+        
         if entry.suffix in ['.mp3', '.m4b']:
             file_map[key].update({
                 'audio_name': entry.name,
@@ -412,6 +434,7 @@ def list_files():
             })
         elif entry.suffix == '.txt':
             file_map[key]['txt_name'] = entry.name
+            
     audio_files = [data for data in file_map.values() if 'audio_name' in data]
     return render_template('files.html', audio_files=audio_files)
 
@@ -497,19 +520,32 @@ def cancel_job(task_id):
 
 @app.route('/delete-bulk', methods=['POST'])
 def delete_bulk():
+    app.logger.info(f"Received delete request. Form data: {request.form}")
     basenames_to_delete = set(request.form.getlist('files_to_delete'))
+    app.logger.info(f"Basenames to delete from form: {basenames_to_delete}")
+    
+    deleted_count = 0
     if not basenames_to_delete:
         flash("No files selected for deletion.", "warning")
+        app.logger.warning("files_to_delete was empty, no files will be deleted.")
         return redirect(url_for('list_files'))
-    deleted_count = 0
+        
     for base_name in basenames_to_delete:
         safe_base_name = secure_filename(base_name)
-        for f in Path(GENERATED_FOLDER).glob(f"{safe_base_name}.*"):
+        app.logger.info(f"Processing base_name: '{base_name}', sanitized to: '{safe_base_name}'")
+        
+        # Corrected glob pattern to find files with unique IDs or without (like M4Bs)
+        files_found = list(Path(GENERATED_FOLDER).glob(f"{safe_base_name}*.*"))
+        app.logger.info(f"Glob pattern '{safe_base_name}*.*' found {len(files_found)} files: {files_found}")
+
+        for f in files_found:
             try:
                 f.unlink()
-                deleted_count +=1
+                app.logger.info(f"Successfully deleted {f}")
+                deleted_count += 1
             except OSError as e:
                 app.logger.error(f"Error deleting file {f}: {e}")
+                
     flash(f"Successfully deleted {deleted_count} file(s).", "success")
     return redirect(url_for('list_files'))
 
@@ -551,13 +587,25 @@ def health_check():
     """A simple health check endpoint."""
     return jsonify({"status": "healthy"}), 200
 
+# New debug route
 @app.route('/debug', methods=['GET', 'POST'])
 def debug_page():
     voices = list_available_voices()
     normalized_output = ""
     original_text = ""
+    log_content = "Log file not found."
+    log_file = os.path.join(app.config['GENERATED_FOLDER'], 'app.log')
+
     if request.method == 'POST':
         original_text = request.form.get('text_to_normalize', '')
         if original_text:
             normalized_output = normalize_text(original_text)
-    return render_template('debug.html', voices=voices, original_text=original_text, normalized_output=normalized_output)
+    
+    try:
+        with open(log_file, 'r') as f:
+            lines = f.readlines()
+            log_content = "".join(lines[-100:])
+    except FileNotFoundError:
+        app.logger.warning(f"Log file not found at {log_file} for debug page.")
+
+    return render_template('debug.html', voices=voices, original_text=original_text, normalized_output=normalized_output, log_content=log_content)

@@ -164,8 +164,18 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
-    text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
+    # STEP 1: Pre-emptively strip artifacts to prevent misinterpretation.
+    # Remove bracketed footnotes, e.g., [a], [b].
+    text = re.sub(r"\[[a-zA-Z]\]", "", text)
+    # Remove verse numbers at the start of lines or attached to words.
+    text = re.sub(r'^\s*\d+\s*', '', text, flags=re.M)
+    text = re.sub(r'([.?!;"]\s*)\d+', r'\1', text)
+    # Remove footnote letters attached to words, e.g., "bsome" -> "some".
+    text = re.sub(r'\b(?<=\s)\d*[a-z](?=[A-Z“])', '', text)
+    text = re.sub(r'\b\d*[a-z](?=[A-Z“])', '', text)
 
+
+    # STEP 2: Main normalization pipeline.
     def _replace_leading_verse_marker(match):
         chapter, verse = match.groups()
         verse_words = _inflect.number_to_words(verse)
@@ -196,11 +206,11 @@ def normalize_text(text: str) -> str:
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
-    text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
-    text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
+    # STEP 3: Strip remaining numerical artifacts.
     text = re.sub(r"[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)", "", text)
     text = re.sub(r"\b\d+\b", number_replacer, text)
 
+    # STEP 4: Add stylistic pauses and perform final cleanup.
     text = re.sub(r'^([A-Z][A-Z0-9\s,.-]{4,})$', r'. ... \1. ... ', text, flags=re.MULTILINE)
     text = re.sub(r'\n\s*\n', '. ... \n', text)
 
