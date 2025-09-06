@@ -159,6 +159,7 @@
         });
 
         document.getElementById('submitAudiobook').addEventListener('click', () => {
+            document.querySelectorAll('input.delete-checkbox').forEach(cb => cb.disabled = true);
             mainForm.action = "{{ url_for('create_audiobook') }}";
             
             const title = document.getElementById('audiobookTitle').value;
@@ -187,6 +188,7 @@
                 return;
             }
             if (confirm(`Are you sure you want to delete the selected ${checkedDeleteBoxes.length} item(s) and their associated files?`)) {
+                document.querySelectorAll('input.file-checkbox').forEach(cb => cb.disabled = true);
                 mainForm.action = "{{ url_for('delete_bulk') }}";
                 mainForm.submit();
             }

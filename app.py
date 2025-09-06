@@ -29,7 +29,7 @@ from logging.handlers import RotatingFileHandler
 
 from tts_service import TTSService, normalize_text
 
-APP_VERSION = "0.0.2"
+APP_VERSION = "0.0.3"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
@@ -510,7 +510,9 @@ def cancel_job(task_id):
 
 @app.route('/delete-bulk', methods=['POST'])
 def delete_bulk():
+    app.logger.info(f"Received delete request. Form data: {request.form}")
     basenames_to_delete = set(request.form.getlist('files_to_delete'))
+    app.logger.info(f"Basenames to delete: {basenames_to_delete}")
     if not basenames_to_delete:
         flash("No files selected for deletion.", "warning")
         return redirect(url_for('list_files'))
@@ -528,7 +530,7 @@ def delete_bulk():
 
 @app.route('/speak_sample/<voice_name>')
 def speak_sample(voice_name):
-    sample_text = "The Lord is my shepherd; I shall not want. He makes me to lie down in green pastures; He leads me beside the still waters. He restores my soul; He leads me in the paths of righteousness For His name’s sake."
+    sample_text = "The Lord is my shepherd; I shall not want. He makes me to lie down in green pastures; He leads me beside the still waters. He restores my soul; He leads me in the paths of righteousness For His name’s sake."
     speed_rate = request.args.get('speed', '1.0')
     safe_speed = str(speed_rate).replace('.', 'p')
     safe_voice_name = secure_filename(Path(voice_name).stem)
