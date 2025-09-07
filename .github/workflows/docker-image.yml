@@ -24,6 +24,15 @@ jobs:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata for base image
+      id: meta_base
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository }}-base
+        tags: |
+          type=raw,value=latest
+          type=raw,value=v1
         
     - name: Build and push base Docker image
       uses: docker/build-push-action@v6
@@ -31,9 +40,8 @@ jobs:
         context: .
         file: ./base.Dockerfile
         push: true
-        tags: |
-          ghcr.io/${{ github.repository }}-base:latest
-          ghcr.io/${{ github.repository }}-base:v1
+        tags: ${{ steps.meta_base.outputs.tags }}
+        labels: ${{ steps.meta_base.outputs.labels }}
 
   test:
     name: Test Application
@@ -74,7 +82,7 @@ jobs:
       uses: docker/setup-buildx-action@v3
 
     - name: Build the Docker services
-      run: docker compose build --build-arg GITHUB_REPOSITORY=${{ github.repository }}
+      run: docker compose build --build-arg GITHUB_REPOSITORY=${{ github.repository_owner }}/${{ github.event.repository.name }}
 
     - name: Start the services in the background
       run: docker compose up -d
@@ -143,4 +151,4 @@ jobs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         build-args: |
-          GITHUB_REPOSITORY=${{ github.repository }}
+          GITHUB_REPOSITORY=${{ github.repository_owner }}/${{ github.event.repository.name }}
