@@ -25,11 +25,15 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
+    - name: Set repository name to lowercase
+      id: repo_name
+      run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
     - name: Extract metadata for base image
       id: meta_base
       uses: docker/metadata-action@v5
       with:
-        images: ghcr.io/${{ github.repository }}-base
+        images: ghcr.io/${{ steps.repo_name.outputs.name }}-base
         tags: |
           type=raw,value=latest
           type=raw,value=v1
@@ -42,8 +46,8 @@ jobs:
         push: true
         tags: ${{ steps.meta_base.outputs.tags }}
         labels: ${{ steps.meta_base.outputs.labels }}
-        cache-from: type=registry,ref=${{ steps.meta_base.outputs.tags }}-cache
-        cache-to: type=registry,ref=${{ steps.meta_base.outputs.tags }}-cache,mode=max
+        cache-from: type=registry,ref=ghcr.io/${{ steps.repo_name.outputs.name }}-base:cache
+        cache-to: type=registry,ref=ghcr.io/${{ steps.repo_name.outputs.name }}-base:cache,mode=max
 
   test:
     name: Test Application
