@@ -170,8 +170,16 @@ def number_replacer(match):
     else:
         return _inflect.number_to_words(num_int, andword="")
 
+def remove_letter_numeric_footnotes(text: str) -> str:
+    # Remove single-letter footnotes at start of words (e.g., bsome, cWill)
+    text = re.sub(r'\b[a-z](?=[A-Za-z])', '', text)
+    # Remove numeric footnotes at start of words (e.g., 1What)
+    text = re.sub(r'\b\d+(?=[A-Za-z])', '', text)
+    return text
+
 def normalize_text(text: str) -> str:
     text = remove_superscripts(text)
+    text = remove_letter_numeric_footnotes(text)
     text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
 
     def _replace_leading_verse_marker(match):
