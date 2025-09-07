@@ -37,8 +37,7 @@ def normalize_hebrew(text: str) -> str:
     def translate_match(match):
         hebrew_text = match.group(0)
         if HEBREW_TO_ENGLISH:
-            translated_text = HEBREW_TO_ENGLISH.translate(hebrew_text)
-            return f" , translation from Hebrew: {translated_text} , "
+            return f" , translation from Hebrew: {HEBREW_TO_ENGLISH.translate(hebrew_text)} , "
         return " [Hebrew text] "
     return re.sub(r'[\u0590-\u05FF]+', translate_match, text)
 
@@ -80,30 +79,14 @@ def expand_roman_numerals(text: str) -> str:
             return roman_str
     return pattern.sub(replacer, text)
 
-# -----------------------
-# Scripture expansion helpers (improved)
-# -----------------------
-
 def _format_ref_segment(book_full: str, chapter: str, verses_str: str) -> str:
-    """
-    Format a single book/chapter/verses chunk into prose.
-    Handles:
-      - trailing punctuation after verse specs (ff., ff.; etc.)
-      - f / ff suffixes
-      - lettered partial verses (19a -> 'nineteen a')
-      - ranges (1-15 -> one through fifteen)
-      - lists (1,3,5 -> one, three, five)
-    """
     chapter_words = _inflect.number_to_words(int(chapter))
     if not verses_str:
         return f"{book_full} chapter {chapter_words}"
 
-    # Trim whitespace & trailing punctuation commonly found in PDFs
     verses_str = verses_str.strip().rstrip(".;,")
-
-    # Handle f / ff suffixes (after punctuation removal)
-    low = verses_str.lower()
     suffix = ""
+    low = verses_str.lower()
     if low.endswith("ff"):
         verses_str = verses_str[:-2].strip()
         suffix = f" {BIBLE_REFS.get('ff', 'and following')}"
@@ -111,32 +94,19 @@ def _format_ref_segment(book_full: str, chapter: str, verses_str: str) -> str:
         verses_str = verses_str[:-1].strip()
         suffix = f" {BIBLE_REFS.get('f', 'and the following verse')}"
 
-    # Normalize digit-letter (partial verses) "19b" -> "19 b"
-    verses_str = re.sub(r'(\d)([a-zA-Z])\b', r'\1 \2', verses_str, flags=re.IGNORECASE)
-
-    # Normalize en-dash and hyphen ranges to " through "
+    verses_str = re.sub(r'(\d+)([a-zA-Z])\b', r'\1 \2', verses_str, flags=re.IGNORECASE)
     verses_str = verses_str.replace('–', '-')
-    verses_str = re.sub(r'\s*-\s*', ' through ', verses_str)
+    verses_str = re.sub(r'(\d+)\s*[-–]\s*(\d+)', r'\1 through \2', verses_str)
 
-    # Convert numeric tokens to words, keep alphabetic suffixes
-    def num_to_words(m):
+    def _num_to_words(m):
         return _inflect.number_to_words(int(m.group(0)))
-    verse_words = re.sub(r'\b\d+\b', num_to_words, verses_str)
+    verse_words = re.sub(r'\b\d+\b', _num_to_words, verses_str)
 
-    # Decide "verse" vs "verses"
-    prefix = "verses" if ("," in verse_words or "through" in verse_words or " and " in verse_words) else "verse"
-
-    # Clean extra spaces and return
+    prefix = "verses" if ("," in verse_words or "through" in verse_words) else "verse"
     verse_words = re.sub(r'\s+', ' ', verse_words).strip()
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
 def normalize_scripture(text: str) -> str:
-    """
-    Expand scripture references both inside parentheses/brackets and in prose.
-    Handles implied-book across semicolon/comma-separated segments inside parentheses.
-    """
-
-    # Build alternation of abbreviations and full book names
     bible_abbr_keys = {re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)}
     full_book_names = {re.escape(book) for book in BIBLE_BOOKS}
     book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
@@ -144,40 +114,26 @@ def normalize_scripture(text: str) -> str:
         return text
     book_pattern_str = '|'.join(book_keys)
 
-    # A forgiving single-ref regex (captures optional book, chapter, verses block)
-    # groups:
-    #  1: overall optional book-with-period (may be None)
-    #  2: inner book token (without trailing punctuation)
-    #  3: chapter digits
-    #  4: verses part (digits, ranges, commas, possible trailing f/ff)
     single_ref = re.compile(
         rf"\b(({book_pattern_str})\b\.?)?\s*(\d+)\s*[:\s]\s*([0-9a-zA-Z,\s.\-–]+?)\b",
         re.IGNORECASE
     )
 
     def expand_sequence(s: str) -> str:
-        """
-        Expand a string that may contain a sequence of refs where the book may
-        only be provided on the first item (e.g., Gen 17:17; 18:1-15; 21:1-7).
-        """
         last_book = None
-
         def repl(m: re.Match) -> str:
             nonlocal last_book
-            inner_book = m.group(2)  # may be None
+            inner_book = m.group(2)
             chapter = m.group(3)
             verses = m.group(4) or ""
             if inner_book:
                 last_book = inner_book.strip()
             if not last_book:
-                # nothing we can expand (no book context)
                 return m.group(0)
             book_full = ABBREVIATIONS.get(last_book.replace('.', ''), last_book)
             return _format_ref_segment(book_full, chapter, verses)
-
         prev = None
         cur = s
-        # repeat a couple of times to allow chained replacements
         for _ in range(3):
             prev = cur
             cur = single_ref.sub(repl, cur)
@@ -185,18 +141,15 @@ def normalize_scripture(text: str) -> str:
                 break
         return cur
 
-    # 1) Expand inside parentheses/brackets (preserve delimiters)
     enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
     def enclosed_replacer(m: re.Match) -> str:
         opener, inner, closer = m.groups()
-        # Quick heuristic: only process if contains a book token or a digit+colon
         if not (re.search(rf"\b({book_pattern_str})\b", inner, re.IGNORECASE) or re.search(r"\d+\s*:\s*\d", inner)):
             return m.group(0)
         return opener + expand_sequence(inner) + closer
 
     text = enclosed_pattern.sub(enclosed_replacer, text)
 
-    # 2) Expand prose occurrences where the book name is present for each reference
     prose_ref = re.compile(
         rf"\b({book_pattern_str})\b\.?\s+(\d+)\s*[:\s]\s*([0-9a-zA-Z,\s.\-–]+?)\b",
         re.IGNORECASE
@@ -212,17 +165,8 @@ def normalize_scripture(text: str) -> str:
     text = prose_ref.sub(prose_repl, text)
     return text
 
-# -----------------------
-# End scripture helpers
-# -----------------------
-
 def number_replacer(match):
     num_str = match.group(0)
-    if len(num_str) == 4 and 1100 <= int(num_str) <= 1999:
-        part1 = _inflect.number_to_words(num_str[:2])
-        part2 = _inflect.number_to_words(num_str[2:])
-        return f"{part1} {part2}"
-    
     num_int = int(num_str)
     if len(num_str) == 4 and 1000 <= num_int <= 2099:
         if 2000 <= num_int <= 2009: return _inflect.number_to_words(num_int, andword="")
@@ -231,25 +175,14 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
-    # --- Clean PDF artifacts first ---
-
-    # 1) Remove superscript-like footnote digits (Unicode superscript block)
     text = re.sub(r'[\u00B2\u00B3\u00B9\u2070-\u209F]+', '', text)
-
-    # 2) Remove verse/footnote numbers that are glued to words (e.g. "1What" -> "What", "1oracles" -> "oracles")
+    text = re.sub(r'\[\d+\]|\[fn\]|\[[a-z]\]', '', text)
     text = re.sub(r'\b\d+(?=[A-Za-z])', '', text)
+    text = re.sub(r'\b[a-z](?=[A-Za-z])', '', text)
+    text = re.sub(r'(?<=[A-Za-z]{2})([a-z])(?=\s)', '', text)
 
-    # 3) Replace bracketed footnote markers like [1], [fn] etc.
-    text = re.sub(r'\[\d+\]|\[fn\]', '', text)
-
-    # 4) Normalize isolated uppercase headings on their own lines (preserve as needed)
-    # (keep your existing leading verse/group normalization if present)
-    # If you had a _replace_leading_verse_marker, you can call it here.
-
-    # Scripture expansion (done before converting all remaining digits to words)
     text = normalize_scripture(text)
 
-    # Latin phrases and other phrase replacements (keep as-is)
     for phrase in sorted(LATIN_PHRASES.keys(), key=len, reverse=True):
         replacement = LATIN_PHRASES[phrase]
         text = re.sub(rf'\b{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
@@ -257,27 +190,27 @@ def normalize_text(text: str) -> str:
     text = _strip_diacritics(text)
     text = normalize_hebrew(text)
     text = normalize_greek(text)
+
     text = expand_roman_numerals(text)
 
-    # Non-bible abbreviations (keep existing behavior)
     non_bible_abbrs = { k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS) }
     for abbr, expanded in non_bible_abbrs.items():
         flags = 0 if abbr in CASE_SENSITIVE_ABBRS else re.IGNORECASE
         text = re.sub(rf"\b{re.escape(abbr)}\b", expanded, text, flags=flags)
     
-    # contractions, symbols, punctuation replacements (preserve)
     for contr, expanded in CONTRACTIONS.items(): text = text.replace(contr, expanded)
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
-    # Remove leftover numeric footnotes like "1)" or superscript number groups
-    text = re.sub(r'\b\d+\)', '', text)
-    text = re.sub(r'[¹²³⁴⁵⁶⁷⁸⁹⁰]+', '', text)
+    text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
+    text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
+    text = re.sub(r"\[\d+\]|\[fn\]|[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)", "", text)
 
-    # Convert remaining whole numbers to words (runs after scripture expansion)
     text = re.sub(r"\b\d+\b", number_replacer, text)
 
-    # Bracket replacements and whitespace cleanup
+    text = re.sub(r'^([A-Z][A-Z0-9\s,.-]{4,})$', r'. ... \1. ... ', text, flags=re.MULTILINE)
+    text = re.sub(r'\n\s*\n', '. ... \n', text)
+
     text = re.sub(r"\[|\]", " , ", text).replace("(", "").replace(")", "")
     text = re.sub(r"\s+", " ", text).strip()
     return text
