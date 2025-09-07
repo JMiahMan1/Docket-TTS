@@ -170,15 +170,17 @@ def number_replacer(match):
     else:
         return _inflect.number_to_words(num_int, andword="")
 
-def remove_letter_numeric_footnotes(text: str) -> str:
-    # Remove single-letter footnotes at start of words (e.g., bsome, cWill)
-    text = re.sub(r'\b[a-z](?=[A-Za-z])', '', text)
-    # Remove numeric footnotes at start of words (e.g., 1What)
-    text = re.sub(r'\b\d+(?=[A-Za-z])', '', text)
+def convert_to_unicode_superscript(text: str) -> str:
+    def repl(match):
+        chars = match.group(0)
+        return ''.join(SUPERSCRIPT_MAP.get(c, c) for c in chars)
+    
+    # Example: detect numbers or letters at the start of a word as superscript
+    text = re.sub(r'\b(\d+|[a-z])(?=[A-Za-z])', repl, text)
     return text
 
 def normalize_text(text: str) -> str:
-    text = remove_letter_numeric_footnotes(text)
+    text = convert_to_unicode_superscript(text)
     text = remove_superscripts(text)
     text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
 
