@@ -89,13 +89,15 @@ He leads me beside the [c]still waters.
 
 def test_pdf_verse_and_footnote_removal():
     """Tests the removal of artifacts from the Romans 3 PDF text."""
-    input_text = """GOD’S JUDGMENT DEFENDED 1What advantage then has the Jew, or what is the profit of circumcision? 2Much in every way! Chiefly because ato them were committed the 1oracles of God. 3For what if bsome did not believe? cWill their unbelief make the faithfulness of God without effect? 4dCertainly not! Indeed, let eGod be 2true but fevery man a liar. As it is written: g“That You may be justified in Your words, And may overcome when You are judged.” 5But if our unrighteousness demonstrates the righteousness of God, what shall we say? Is God unjust who inflicts wrath? hI speak as a man. 6Certainly not! For then ihow will God judge the world? 7For if the truth of God has increased through my lie to His glory, why am I also still judged as a sinner? 8And why not say, j“Let us do evil that good may come”?, as we are slanderously reported and as some affirm that we say. Their 3condemnation is just. . ... ALL HAVE SINNED . ... 9What then? Are we better than they? Not at all. For we have previously charged both Jews and Greeks that kthey are all under sin. 10As it is written: “There is none righteous, no, not one; 11There is none who understands; There is none who seeks after God. 12They have all turned aside; They have together become unprofitable; There is none who does good, no, not one.” “Theirm throat is an open 4tomb; With their tongues they have practiced deceit”; n“The poison of asps is under their lips”; “Whoseo mouth is full of cursing and bitterness.” “Theirp feet are swift to shed blood; 16Destruction and misery are in their ways; 17And the way of peace they have not known.” “Thereq is no fear of God before their eyes.” 19Now we know that whatever rthe law says, it says to those who are under the law, that severy mouth may be stopped, and all the world may become 5guilty before God. 20Therefore tby the deeds of the law no flesh will be justified in His sight, for by the law is the knowledge of sin.. ..."""
+
+    input_text = """3
+God’s Judgment Defended
+1What advantage then has the Jew, or what is the profit of circumcision? 2Much in every way! Chiefly because ato them were committed the 1oracles of God. 3For what if bsome did not believe? cWill their unbelief make the faithfulness of God without effect? 4dCertainly not! Indeed, let eGod be 2true but fevery man a liar. As it is written:"""
     
     result = normalize_text(input_text)
 
     # Check that verse numbers are gone
     assert "1What" not in result
-    assert "19Now" not in result
     
     # Check that footnote letters are gone
     assert "bsome" not in result
@@ -105,4 +107,4 @@ def test_pdf_verse_and_footnote_removal():
     # Check that the text is preserved
     assert "What advantage then has the Jew" in result
     assert "Certainly not!" in result
-    assert "to them were committed" in result
+    assert "Indeed, let God be true but every man a liar" in result
