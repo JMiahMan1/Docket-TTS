@@ -348,6 +348,14 @@
     "Colossians", "First Thessalonians", "Second Thessalonians", "First Timothy", "Second Timothy", "Titus", "Philemon",
     "Hebrews", "James", "First Peter", "Second Peter", "First John", "Second John", "Third John", "Jude", "Revelation"
   ],
+  "superscripts": [
+    "¹","²","³","⁴","⁵","⁶","⁷","⁸","⁹","⁰",
+    "ⁱ","ⁿ",
+    "ᵃ","ᵇ","ᶜ","ᵈ","ᵉ","ᶠ","ᵍ","ʰ","ᶦ","ʲ",
+    "ᵏ","ˡ","ᵐ","ⁿ","ᵒ","ᵖ","ʳ","ˢ","ᵗ","ᵘ",
+    "ᵛ","ʷ","ˣ","ʸ","ᶻ",
+    "⁺","⁻","⁼","⁽","⁾"
+  ],
   "ambiguous_bible_abbrs": ["Is", "Rev", "Acts", "Job", "Song", "Amos"],
   "case_sensitive_abbrs": ["Bib", "Di", "Enc", "Int", "Rev", "SE", "ST", "Them"],
   "roman_numeral_exceptions": ["LXX", "I"],
