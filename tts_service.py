@@ -178,6 +178,7 @@ def remove_letter_numeric_footnotes(text: str) -> str:
     return text
 
 def normalize_text(text: str) -> str:
+    text = remove_letter_numeric_footnotes(text)
     text = remove_superscripts(text)
     text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
 
@@ -220,7 +221,6 @@ def normalize_text(text: str) -> str:
 
     text = re.sub(r"\[|\]", " , ", text).replace("(", "").replace(")", "")
     text = re.sub(r"\s+", " ", text).strip()
-    text = remove_letter_numeric_footnotes(text)
     return text
 
 class TTSService:
