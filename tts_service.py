@@ -165,10 +165,6 @@ def number_replacer(match):
 
 def normalize_text(text: str) -> str:
     text = re.sub(r"\[[a-zA-Z]\]", "", text)
-    text = re.sub(r'^\s*\d+\s*', '', text, flags=re.M)
-    text = re.sub(r'([.?!;"]\s*)\d+', r'\1', text)
-    text = re.sub(r'\b(?<=\s)\d*[a-z](?=[A-Z“])', '', text)
-    text = re.sub(r'\b\d*[a-z](?=[A-Z“])', '', text)
 
     def _replace_leading_verse_marker(match):
         chapter, verse = match.groups()

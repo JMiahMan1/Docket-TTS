@@ -53,11 +53,10 @@ jobs:
       run: |
         echo "Waiting for web service..."
         timeout=60
-        while ! curl --silent --fail http://localhost:8000; do
+        while ! curl --silent --fail http://localhost:8000/health; do
           timeout=$((timeout-5))
           if [ $timeout -le 0 ]; then
             echo "Service timed out."
-            # Print logs from all services for debugging
             docker compose logs
             exit 1
           fi
