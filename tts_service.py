@@ -179,7 +179,6 @@ def remove_letter_numeric_footnotes(text: str) -> str:
 
 def normalize_text(text: str) -> str:
     text = remove_superscripts(text)
-    text = remove_letter_numeric_footnotes(text)
     text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
 
     def _replace_leading_verse_marker(match):
@@ -221,6 +220,7 @@ def normalize_text(text: str) -> str:
 
     text = re.sub(r"\[|\]", " , ", text).replace("(", "").replace(")", "")
     text = re.sub(r"\s+", " ", text).strip()
+    text = remove_letter_numeric_footnotes(text)
     return text
 
 class TTSService:
