@@ -156,36 +156,33 @@ def extract_text_and_metadata(filepath):
     metadata = {'title': p_filepath.stem.replace('_', ' ').title(), 'author': 'Unknown'}
     try:
         if extension == '.pdf':
+            # --- UPDATED PDF EXTRACTION LOGIC ---
+            # This new method uses text flags to reliably detect superscripts
+            # and properly reconstructs the text to preserve spacing.
             with fitz.open(filepath) as doc:
                 doc_meta = doc.metadata
                 if doc_meta:
                     metadata['title'] = doc_meta.get('title') or metadata['title']
                     metadata['author'] = doc_meta.get('author') or metadata['author']
                 
-                page_texts = []
+                full_text_parts = []
                 for page in doc:
-                    # Extract text as a dictionary to get detailed font info
                     blocks = page.get_text("dict").get("blocks", [])
                     for b in blocks:
-                        if b.get('type') == 0: # It's a text block
+                        if b.get('type') == 0:  # This is a text block
                             for l in b.get("lines", []):
-                                if not l.get("spans"):
-                                    continue
-                                
-                                # Determine the most common font size for the line
-                                font_sizes = [s["size"] for s in l["spans"]]
-                                if not font_sizes:
-                                    continue
-                                normal_size = max(set(font_sizes), key=font_sizes.count)
-                                
-                                line_text = ""
+                                line_text_parts = []
                                 for s in l.get("spans", []):
-                                    # Skip spans with a font size smaller than normal (likely a footnote)
-                                    if s["size"] < (normal_size - 1):
-                                        continue
-                                    line_text += s["text"]
-                                page_texts.append(line_text)
-                text = "\n".join(page_texts)
+                                    # Check the flags for superscript. The 1st bit (2**0) is superscript.
+                                    is_superscript = s['flags'] & 2**0
+                                    if not is_superscript:
+                                        line_text_parts.append(s['text'])
+                                # Join spans with spaces and add a newline for each line
+                                full_text_parts.append(" ".join(line_text_parts))
+                
+                # Join all parts and clean up whitespace
+                text = "\n".join(full_text_parts)
+                text = re.sub(r'\s+', ' ', text).strip()
 
         elif extension == '.docx':
             doc = docx.Document(filepath)
