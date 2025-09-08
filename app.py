@@ -156,9 +156,9 @@ def extract_text_and_metadata(filepath):
     metadata = {'title': p_filepath.stem.replace('_', ' ').title(), 'author': 'Unknown'}
     try:
         if extension == '.pdf':
-            # --- DEFINITIVE PDF EXTRACTION LOGIC ---
-            # This method finds all superscripts, redacts (removes) them from the page,
-            # then extracts the perfectly formatted text from the cleaned page.
+            # --- COMBINED PDF EXTRACTION LOGIC ---
+            # This method checks for both superscript flags and smaller font sizes
+            # to reliably catch all types of footnotes before extraction.
             with fitz.open(filepath) as doc:
                 doc_meta = doc.metadata
                 if doc_meta:
@@ -167,15 +167,26 @@ def extract_text_and_metadata(filepath):
                 
                 page_texts = []
                 for page in doc:
-                    # Find all spans that are superscripts and add a redaction
                     blocks = page.get_text("dict").get("blocks", [])
                     for b in blocks:
                         if b.get('type') == 0:  # This is a text block
                             for l in b.get("lines", []):
+                                if not l.get("spans"):
+                                    continue
+                                
+                                # Determine the "normal" font size for the line
+                                font_sizes = [s["size"] for s in l["spans"]]
+                                if not font_sizes:
+                                    continue
+                                normal_size = max(set(font_sizes), key=font_sizes.count)
+
                                 for s in l.get("spans", []):
-                                    # Check the flags for superscript. The 1st bit (2**0) is superscript.
-                                    if s['flags'] & 2**0:
-                                        # Get the bounding box of the superscript and add a redaction
+                                    # Check for EITHER the superscript flag OR a smaller font size.
+                                    is_superscript_flag = s['flags'] & 2**0
+                                    is_smaller_font = s['size'] < (normal_size - 1)
+
+                                    if is_superscript_flag or is_smaller_font:
+                                        # Get the bounding box of the footnote and add a redaction
                                         r = fitz.Rect(s['bbox'])
                                         page.add_redact_annot(r)
                     
@@ -317,7 +328,7 @@ def create_generic_cover_image(title, author, save_path):
         for line in author_lines:
             bbox = draw.textbbox((0, 0), line, font=font_author)
             line_width, line_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            draw.text(((width - line_width) / 2, y_text), line, font=author_font, fill=(255, 255, 255))
+            draw.text(((width - line_width) / 2, y_text), line, font=font_author, fill=(255, 255, 255))
             y_text += line_height + 5
         image.save(save_path)
         return save_path
