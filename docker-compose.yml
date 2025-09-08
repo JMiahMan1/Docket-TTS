@@ -4,21 +4,27 @@ services:
     restart: always
 
   web:
-    build: .
+    build:
+      context: .
+      args:
+        - GITHUB_REPOSITORY
+        - BASE_IMAGE_TAG
     ports:
       - "8000:5000"
     volumes:
       - generated_data:/app/generated
       - uploads_data:/app/uploads
-    # This command now explicitly uses the venv's python to run gunicorn
     command: /opt/venv/bin/python -m gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 300 app:app
     depends_on:
       - redis
     restart: always
 
   worker:
-    build: .
-    # This command now explicitly uses the venv's python to run celery
+    build:
+      context: .
+      args:
+        - GITHUB_REPOSITORY
+        - BASE_IMAGE_TAG
     command: /opt/venv/bin/python -m celery -A app.celery worker --loglevel=info
     volumes:
       - generated_data:/app/generated
