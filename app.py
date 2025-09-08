@@ -156,38 +156,16 @@ def extract_text_and_metadata(filepath):
     metadata = {'title': p_filepath.stem.replace('_', ' ').title(), 'author': 'Unknown'}
     try:
         if extension == '.pdf':
+            # Reverted to the simplest, most reliable extraction method.
+            # This preserves word integrity, passing the artifacts to the powerful
+            # new normalizer in tts_service.py.
             with fitz.open(filepath) as doc:
                 doc_meta = doc.metadata
                 if doc_meta:
                     metadata['title'] = doc_meta.get('title') or metadata['title']
                     metadata['author'] = doc_meta.get('author') or metadata['author']
                 
-                page_texts = []
-                for page in doc:
-                    blocks = page.get_text("dict").get("blocks", [])
-                    for b in blocks:
-                        if b.get('type') == 0:
-                            for l in b.get("lines", []):
-                                spans = l.get("spans", [])
-                                if not spans:
-                                    continue
-                                
-                                font_sizes = [s["size"] for s in spans]
-                                if not font_sizes:
-                                    continue
-                                normal_size = max(set(font_sizes), key=font_sizes.count)
-
-                                for s in spans:
-                                    is_superscript = s['flags'] & 2**0
-                                    is_smaller = s['size'] < (normal_size * 0.95)
-
-                                    if is_superscript or is_smaller:
-                                        page.add_redact_annot(fitz.Rect(s['bbox']), fill=(1,1,1))
-                    
-                    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
-                    page_texts.append(page.get_text())
-                
-                text = "\n".join(page_texts)
+                text = "\n".join([page.get_text() for page in doc])
 
         elif extension == '.docx':
             doc = docx.Document(filepath)

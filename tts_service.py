@@ -48,10 +48,6 @@ def normalize_greek(text: str) -> str:
     return text.translate(str.maketrans(GREEK_TRANSLITERATION))
 
 def remove_superscripts(text: str) -> str:
-    """
-    Strips any remaining superscript characters. The complex logic for finding
-    footnotes in PDFs is now handled upstream during text extraction.
-    """
     def to_superscript(chars: str) -> str:
         return "".join(SUPERSCRIPT_MAP.get(c, c) for c in chars)
 
@@ -184,10 +180,23 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
-    # This rule was moved from later in the function to run first,
-    # ensuring verse numbers are removed before they can be converted to words.
-    text = re.sub(r'^\s*\d{1,3}\s', '', text, flags=re.MULTILINE)
+    # --- STAGE 1: RAW TEXT PRE-CLEANING ---
+    # This new pre-cleaning stage is designed to handle the messy, but now
+    # predictable, output from the simple PDF text extractor.
+
+    # Remove alphabetic footnotes attached to the beginning of words.
+    # Example: "fevery" -> "every", but won't affect "from".
+    # It looks for a single lowercase letter followed by a word of 4+ lowercase letters.
+    text = re.sub(r'\b([a-z])([a-z]{4,})\b', r'\2', text)
+
+    # Remove numeric verse markers attached to the beginning of capitalized words.
+    # Example: "11There" -> "There"
+    text = re.sub(r'\b(\d+)([A-Z])', r'\2', text)
     
+    # Remove any remaining verse numbers at the start of a line.
+    text = re.sub(r'^\s*\d{1,3}\s', '', text, flags=re.MULTILINE)
+
+    # --- STAGE 2: REGULAR NORMALIZATION ---
     text = remove_superscripts(text)
     text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
 
