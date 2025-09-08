@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime
 from flask import (
     Flask, request, render_template, send_from_directory,
-    flash, redirect, url_for, jsonify
+    flash, redirect, url_for, jsonify, current_app
 )
 from werkzeug.utils import secure_filename
 import docx
@@ -205,6 +205,7 @@ def list_available_voices():
 def convert_to_speech_task(self, input_filepath, original_filename, voice_name=None, speed_rate='1.0'):
     temp_cover_path = None
     unique_id = str(uuid.uuid4().hex[:8])
+    generated_folder = current_app.config['GENERATED_FOLDER']
     try:
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 4, 'status': 'Extracting text...'})
         text_content, metadata = extract_text_and_metadata(input_filepath)
@@ -214,7 +215,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 4, 'status': 'Synthesizing audio...'})
         base_name = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(original_filename).stem)
         output_filename = f"{base_name}_{unique_id}.mp3"
-        output_filepath = os.path.join(GENERATED_FOLDER, output_filename)
+        output_filepath = os.path.join(generated_folder, output_filename)
         tts = TTSService(voice=voice_name, speed_rate=speed_rate)
         _, normalized_text = tts.synthesize(text_content, output_filepath)
         
@@ -234,7 +235,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
             except requests.RequestException as e:
                 app.logger.error(f"Google Books API request failed during TTS task: {e}")
         
-        temp_cover_path = os.path.join(GENERATED_FOLDER, f"cover_{unique_id}.jpg")
+        temp_cover_path = os.path.join(generated_folder, f"cover_{unique_id}.jpg")
         cover_path_to_use = None
         if cover_url:
             try:
@@ -255,7 +256,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         
         self.update_state(state='PROGRESS', meta={'current': 4, 'total': 4, 'status': 'Saving text file...'})
         text_filename = f"{base_name}_{unique_id}.txt"
-        text_filepath = os.path.join(GENERATED_FOLDER, text_filename)
+        text_filepath = os.path.join(generated_folder, text_filename)
         Path(text_filepath).write_text(normalized_text, encoding="utf-8")
 
         return {'status': 'Success', 'filename': output_filename, 'textfile': text_filename}
@@ -304,9 +305,11 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
     def update_state(state, meta):
         if task_self:
             task_self.update_state(state=state, meta=meta)
+    
+    generated_folder = build_dir.parent
     unique_file_list = sorted(list(set(file_list)))
     update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
-    safe_mp3_paths = [Path(GENERATED_FOLDER) / secure_filename(fname) for fname in unique_file_list]
+    safe_mp3_paths = [generated_folder / secure_filename(fname) for fname in unique_file_list]
     merged_text_content = "".join(p.with_suffix('.txt').read_text(encoding='utf-8') + "\n\n" for p in safe_mp3_paths if p.with_suffix('.txt').exists())
     update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Downloading cover art...'})
     cover_path = None
@@ -344,7 +347,7 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
     update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Assembling audiobook...'})
     timestamp = build_dir.name.replace('audiobook_build_', '')
     output_filename = f"{secure_filename(audiobook_title)}_{timestamp}.m4b"
-    output_filepath = Path(GENERATED_FOLDER) / output_filename
+    output_filepath = generated_folder / output_filename
     mux_command = ['ffmpeg']
     if cover_path: mux_command.extend(['-i', str(cover_path)])
     mux_command.extend(['-i', str(temp_audio_path), '-i', str(chapters_meta_path)])
@@ -359,7 +362,7 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
 @celery.task(bind=True)
 def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, cover_url=None):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    build_dir = Path(GENERATED_FOLDER) / f"audiobook_build_{timestamp}"
+    build_dir = Path(current_app.config['GENERATED_FOLDER']) / f"audiobook_build_{timestamp}"
     os.makedirs(build_dir, exist_ok=True)
     try:
         return _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, build_dir, task_self=self)
@@ -414,7 +417,7 @@ def upload_file():
 @app.route('/files')
 def list_files():
     file_map = {}
-    all_files = sorted(Path(GENERATED_FOLDER).iterdir(), key=os.path.getmtime, reverse=True)
+    all_files = sorted(Path(app.config['GENERATED_FOLDER']).iterdir(), key=os.path.getmtime, reverse=True)
     for entry in all_files:
         if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
             continue
@@ -447,7 +450,7 @@ def get_book_metadata():
     title_from_name = first_file_path_stem.replace('_', ' ').replace('-', ' ').title()
     metadata = {'title': title_from_name, 'author': 'Unknown'}
     txt_filename = next((f.replace('.mp3', '.txt') for f in filenames if f.endswith('.mp3')), None)
-    if txt_filename and (txt_path := Path(GENERATED_FOLDER) / txt_filename).exists():
+    if txt_filename and (txt_path := Path(app.config['GENERATED_FOLDER']) / txt_filename).exists():
         text = txt_path.read_text(encoding='utf-8')
         parsed_meta = parse_metadata_from_text(text)
         metadata['author'] = parsed_meta.get('author', metadata['author'])
@@ -534,7 +537,7 @@ def delete_bulk():
         safe_base_name = secure_filename(base_name)
         app.logger.info(f"Processing base_name: '{base_name}', sanitized to: '{safe_base_name}'")
         
-        files_found = list(Path(GENERATED_FOLDER).glob(f"{safe_base_name}*.*"))
+        files_found = list(Path(app.config['GENERATED_FOLDER']).glob(f"{safe_base_name}*.*"))
         app.logger.info(f"Glob pattern '{safe_base_name}*.*' found {len(files_found)} files: {files_found}")
 
         for f in files_found:
@@ -555,7 +558,7 @@ def speak_sample(voice_name):
     safe_speed = str(speed_rate).replace('.', 'p')
     safe_voice_name = secure_filename(Path(voice_name).stem)
     filename = f"sample_{safe_voice_name}_speed_{safe_speed}.mp3"
-    filepath = os.path.join(GENERATED_FOLDER, filename)
+    filepath = os.path.join(app.config["GENERATED_FOLDER"], filename)
     if not os.path.exists(filepath):
         try:
             tts = TTSService(voice=voice_name, speed_rate=speed_rate)

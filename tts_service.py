@@ -57,7 +57,8 @@ def remove_superscripts(text: str) -> str:
         return "".join(SUPERSCRIPT_MAP.get(c, c) for c in chars)
 
     # Trailing footnote after a word (God1 -> God¹ -> God)
-    text = re.sub(r'([A-Za-z])(\d+|[a-z])\b',
+    # This regex was too broad and corrupted words. It's now restricted to words ending in digits.
+    text = re.sub(r'([A-Za-z]+)(\d+)\b',
                   lambda m: m.group(1) + to_superscript(m.group(2)),
                   text)
 
@@ -206,17 +207,8 @@ def number_replacer(match):
     else:
         return _inflect.number_to_words(num_int, andword="")
 
-def convert_to_unicode_superscript(text: str) -> str:
-    def repl(match):
-        chars = match.group(0)
-        return ''.join(SUPERSCRIPT_MAP.get(c, c) for c in chars)
-    
-    # Example: detect numbers or letters at the start of a word as superscript
-    text = re.sub(r'\b(\d+|[a-z])(?=[A-Za-z])', repl, text)
-    return text
-
 def normalize_text(text: str) -> str:
-    text = convert_to_unicode_superscript(text)
+    # Removed call to the buggy and redundant convert_to_unicode_superscript function
     text = remove_superscripts(text)
     text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
 
