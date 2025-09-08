@@ -49,40 +49,22 @@ def normalize_greek(text: str) -> str:
 
 def remove_superscripts(text: str) -> str:
     """
-    Detect and remove likely footnotes:
-    - Converts edge-case letters/numbers into superscripts
-    - Strips them out cleanly
+    Strips any remaining superscript characters. The complex logic for finding
+    footnotes in PDFs is now handled upstream during text extraction.
     """
     def to_superscript(chars: str) -> str:
         return "".join(SUPERSCRIPT_MAP.get(c, c) for c in chars)
 
-    # Trailing footnote after a word (God1 -> God¹ -> God)
-    # This regex was too broad and corrupted words. It's now restricted to words ending in digits.
+    # Keep the safe logic for non-PDF cases like "God1" -> "God¹"
     text = re.sub(r'([A-Za-z]+)(\d+)\b',
                   lambda m: m.group(1) + to_superscript(m.group(2)),
                   text)
+    
+    # The aggressive logic for finding leading-letter footnotes has been removed,
+    # as it's now handled robustly during PDF extraction. This prevents
+    # mangling clean text from the new PDF extractor.
 
-    # Leading footnote before a word (1What -> ¹What -> What)
-    if BIBLE_BOOKS:
-        bible_books_pattern = r'|'.join(map(re.escape, BIBLE_BOOKS))
-        text = re.sub(
-            rf'\b(\d+|[a-z])(?=(?:{bible_books_pattern}))',
-            lambda m: m.group(1),  # keep if Bible book
-            text
-        )
-        text = re.sub(
-            rf'\b(\d+|[a-z])(?=[A-Z][a-z])',
-            lambda m: to_superscript(m.group(1)),
-            text
-        )
-    else:
-        text = re.sub(
-            r'\b(\d+|[a-z])(?=[A-Z][a-z])',
-            lambda m: to_superscript(m.group(1)),
-            text
-        )
-
-    # Final strip: remove all superscripts defined in normalization.json
+    # Final strip: remove all Unicode superscripts.
     if SUPERSCRIPTS:
         pattern = f"[{''.join(re.escape(c) for c in SUPERSCRIPTS)}]"
         text = re.sub(pattern, "", text)
@@ -208,7 +190,6 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
-    # Removed call to the buggy and redundant convert_to_unicode_superscript function
     text = remove_superscripts(text)
     text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
 
