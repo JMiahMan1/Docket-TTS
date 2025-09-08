@@ -1,69 +1,17 @@
-# Stage 1: Builder for fetching Piper assets
-FROM fedora:42 AS builder
+# Stage 1: Final Application Image
+# Pull the pre-built base image from the GitHub Container Registry.
+# The GITHUB_REPOSITORY and BASE_IMAGE_TAG arguments are passed in by the GitHub Actions workflow.
+ARG GITHUB_REPOSITORY
+ARG BASE_IMAGE_TAG=latest
+FROM ghcr.io/${GITHUB_REPOSITORY}-base:${BASE_IMAGE_TAG}
 
-# Install build tools
-RUN dnf -y install wget && dnf clean all
-
-# Prepare voice directory
-WORKDIR /voices
-
-# Download high-quality voice models
-RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx.json
-
-# Stage 2: Final Application Image
-FROM fedora:42
-
-# Prepare app environment
-WORKDIR /app
+# The WORKDIR and PATH are inherited from the base image.
 
 # Copy requirements file first to leverage Docker layer caching
 COPY requirements.txt .
 
-# Install system dependencies AND heavy Python binaries from DNF for speed and efficiency
-RUN dnf -y install \
-    python3 \
-    python3-pip \
-    poppler-utils \
-    ffmpeg \
-    espeak-ng \
-    python3-requests \
-    python3-onnxruntime \
-    python3-sentencepiece \
-    python3-flask \
-    python3-celery \
-    python3-redis \
-    python3-docx \
-    python3-ebooklib \
-    python3-PyMuPDF \
-    python3-beautifulsoup4 \
-    python3-inflect \
-    python3-mutagen \
-    python3-pillow \
-    && dnf clean all
-
-# Install Python dependencies using pip, including a CPU-only version of Torch
-RUN python3 -m venv --system-site-packages /opt/venv && \
-    . /opt/venv/bin/activate && \
-    /opt/venv/bin/pip install --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
-    /opt/venv/bin/pip install --no-cache-dir onnxruntime sentencepiece && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt && \
-    /opt/venv/bin/python -c "\
-from argostranslate import package;\
-package.update_package_index();\
-available_packages = package.get_available_packages();\
-package_to_install = next(filter(lambda x: x.from_code == 'he' and x.to_code == 'en', available_packages));\
-package.install_from_path(package_to_install.download());\
-"
-
-# Set up environment for subsequent commands
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Copy voice models from the builder stage
-COPY --from=builder /voices /app/voices
+# Install any remaining small Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
 COPY app.py .

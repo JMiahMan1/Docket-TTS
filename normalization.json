@@ -348,6 +348,14 @@
     "Colossians", "First Thessalonians", "Second Thessalonians", "First Timothy", "Second Timothy", "Titus", "Philemon",
     "Hebrews", "James", "First Peter", "Second Peter", "First John", "Second John", "Third John", "Jude", "Revelation"
   ],
+  "superscripts": [
+    "¹","²","³","⁴","⁵","⁶","⁷","⁸","⁹","⁰",
+    "ⁱ","ⁿ",
+    "ᵃ","ᵇ","ᶜ","ᵈ","ᵉ","ᶠ","ᵍ","ʰ","ᶦ","ʲ",
+    "ᵏ","ˡ","ᵐ","ⁿ","ᵒ","ᵖ","ʳ","ˢ","ᵗ","ᵘ",
+    "ᵛ","ʷ","ˣ","ʸ","ᶻ",
+    "⁺","⁻","⁼","⁽","⁾"
+  ],
   "ambiguous_bible_abbrs": ["Is", "Rev", "Acts", "Job", "Song", "Amos"],
   "case_sensitive_abbrs": ["Bib", "Di", "Enc", "Int", "Rev", "SE", "ST", "Them"],
   "roman_numeral_exceptions": ["LXX", "I"],
@@ -377,5 +385,14 @@
     "ρ": "r", "Ρ": "R", "σ": "s", "Σ": "S", "ς": "s", "τ": "t", "Τ": "T", "υ": "y",
     "Υ": "Y", "φ": "ph", "Φ": "Ph", "χ": "ch", "Χ": "Ch", "ψ": "ps", "Ψ": "Ps",
     "ω": "o", "Ω": "O"
+  },
+  "SUPERSCRIPT_MAP": {
+    "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+    "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+    "a": "ᵃ", "b": "ᵇ", "c": "ᶜ", "d": "ᵈ", "e": "ᵉ",
+    "f": "ᶠ", "g": "ᵍ", "h": "ʰ", "i": "ⁱ", "j": "ʲ",
+    "k": "ᵏ", "l": "ˡ", "m": "ᵐ", "n": "ⁿ", "o": "ᵒ",
+    "p": "ᵖ", "r": "ʳ", "s": "ˢ", "t": "ᵗ", "u": "ᵘ",
+    "v": "ᵛ", "w": "ʷ", "x": "ˣ", "y": "ʸ", "z": "ᶻ"
   }
 }

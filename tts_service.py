@@ -19,8 +19,10 @@ if NORMALIZATION_PATH.exists():
     PUNCTUATION = NORMALIZATION.get("punctuation", {})
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
+    SUPERSCRIPTS = NORMALIZATION.get("superscripts", [])
+    SUPERSCRIPT_MAP = NORMALIZATION.get("SUPERSCRIPT_MAP", {})
 else:
-    ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION = {}, [], [], set(), {}, {}, {}, {}, {}, {}
+    ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION, SUPERSCRIPTS = {}, [], [], set(), {}, {}, {}, {}, {}, {}, []
 
 _inflect = inflect.engine()
 
@@ -44,6 +46,48 @@ def normalize_hebrew(text: str) -> str:
 
 def normalize_greek(text: str) -> str:
     return text.translate(str.maketrans(GREEK_TRANSLITERATION))
+
+def remove_superscripts(text: str) -> str:
+    """
+    Detect and remove likely footnotes:
+    - Converts edge-case letters/numbers into superscripts
+    - Strips them out cleanly
+    """
+    def to_superscript(chars: str) -> str:
+        return "".join(SUPERSCRIPT_MAP.get(c, c) for c in chars)
+
+    # Trailing footnote after a word (God1 -> God¹ -> God)
+    # This regex was too broad and corrupted words. It's now restricted to words ending in digits.
+    text = re.sub(r'([A-Za-z]+)(\d+)\b',
+                  lambda m: m.group(1) + to_superscript(m.group(2)),
+                  text)
+
+    # Leading footnote before a word (1What -> ¹What -> What)
+    if BIBLE_BOOKS:
+        bible_books_pattern = r'|'.join(map(re.escape, BIBLE_BOOKS))
+        text = re.sub(
+            rf'\b(\d+|[a-z])(?=(?:{bible_books_pattern}))',
+            lambda m: m.group(1),  # keep if Bible book
+            text
+        )
+        text = re.sub(
+            rf'\b(\d+|[a-z])(?=[A-Z][a-z])',
+            lambda m: to_superscript(m.group(1)),
+            text
+        )
+    else:
+        text = re.sub(
+            r'\b(\d+|[a-z])(?=[A-Z][a-z])',
+            lambda m: to_superscript(m.group(1)),
+            text
+        )
+
+    # Final strip: remove all superscripts defined in normalization.json
+    if SUPERSCRIPTS:
+        pattern = f"[{''.join(re.escape(c) for c in SUPERSCRIPTS)}]"
+        text = re.sub(pattern, "", text)
+
+    return text
 
 def roman_to_int(s):
     roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
@@ -85,7 +129,7 @@ def _format_ref_segment(book_full, chapter, verses_str):
     if not verses_str: return f"{book_full} chapter {chapter_words}"
     suffix = ""
     verses_str = verses_str.strip().rstrip(".;,")
-    
+
     if verses_str.lower().endswith("ff"):
         verses_str, suffix = verses_str[:-2].strip(), f" {BIBLE_REFS.get('ff', 'and following')}"
     elif verses_str.lower().endswith("f"):
@@ -102,7 +146,7 @@ def normalize_scripture(text: str) -> str:
     full_book_names = {re.escape(book) for book in BIBLE_BOOKS}
     book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
-    
+
     ref_pattern = re.compile(
         r'\b(' + book_pattern_str + r')?' +
         r'\s*' +
@@ -155,7 +199,7 @@ def number_replacer(match):
         part1 = _inflect.number_to_words(num_str[:2])
         part2 = _inflect.number_to_words(num_str[2:])
         return f"{part1} {part2}"
-    
+
     num_int = int(num_str)
     if len(num_str) == 4 and 1000 <= num_int <= 2099:
         if 2000 <= num_int <= 2009: return _inflect.number_to_words(num_int, andword="")
@@ -164,6 +208,8 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
+    # Removed call to the buggy and redundant convert_to_unicode_superscript function
+    text = remove_superscripts(text)
     text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
 
     def _replace_leading_verse_marker(match):
@@ -191,14 +237,13 @@ def normalize_text(text: str) -> str:
     for abbr, expanded in non_bible_abbrs.items():
         flags = 0 if abbr in CASE_SENSITIVE_ABBRS else re.IGNORECASE
         text = re.sub(rf"\b{re.escape(abbr)}\b", expanded, text, flags=flags)
-    
+
     for contr, expanded in CONTRACTIONS.items(): text = text.replace(contr, expanded)
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
     text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
     text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
-    text = re.sub(r"[¹²³⁴⁵⁶⁷⁸⁹⁰]+|\b\d+\)", "", text)
     text = re.sub(r"\b\d+\b", number_replacer, text)
 
     text = re.sub(r'^([A-Z][A-Z0-9\s,.-]{4,})$', r'. ... \1. ... ', text, flags=re.MULTILINE)
@@ -219,14 +264,14 @@ class TTSService:
 
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)
-        
+
         piper_command = [
             "piper", 
             "--model", str(self.voice_path),
             "--length_scale", str(self.speed_rate),
             "--output_file", "-"
         ]
-        
+
         ffmpeg_command = [
             "ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1",
             "-i", "-", "-acodec", "libmp3lame", "-q:a", "2", output_path
@@ -239,7 +284,7 @@ class TTSService:
             piper_process.stdin.write(normalized_text.encode('utf-8'))
             piper_process.stdin.close()
             piper_process.stdout.close()
-            
+
             _, ffmpeg_err = ffmpeg_process.communicate()
 
             if piper_process.wait() != 0:
@@ -250,5 +295,5 @@ class TTSService:
                 raise RuntimeError(f"FFmpeg encoding process failed: {ffmpeg_err.decode()}")
         except FileNotFoundError as e:
             raise RuntimeError(f"Command not found: {e.filename}. Ensure piper-tts and ffmpeg are installed.")
-            
+
         return output_path, normalized_text

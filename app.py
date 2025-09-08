@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime
 from flask import (
     Flask, request, render_template, send_from_directory,
-    flash, redirect, url_for, jsonify
+    flash, redirect, url_for, jsonify, current_app
 )
 from werkzeug.utils import secure_filename
 import docx
@@ -24,10 +24,12 @@ import base64
 import requests
 import textwrap
 from PIL import Image, ImageDraw, ImageFont
+import logging
+from logging.handlers import RotatingFileHandler
 
 from tts_service import TTSService, normalize_text
 
-APP_VERSION = "0.0.1"
+APP_VERSION = "0.0.3"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
@@ -40,7 +42,23 @@ app.config.from_mapping(
     SECRET_KEY='a-secure-and-random-secret-key'
 )
 
-# Make the app version available to all templates
+# --- Logging Setup ---
+try:
+    if not app.debug and not app.testing:
+        os.makedirs(GENERATED_FOLDER, exist_ok=True)
+        log_file = os.path.join(GENERATED_FOLDER, 'app.log')
+        file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024, backupCount=5)
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+        ))
+        file_handler.setLevel(logging.INFO)
+        app.logger.addHandler(file_handler)
+        app.logger.setLevel(logging.INFO)
+        app.logger.info('Docket TTS startup')
+except PermissionError:
+    app.logger.warning("Could not configure file logger due to a permission error. This is expected in some test environments.")
+
+
 @app.context_processor
 def inject_version():
     return dict(app_version=APP_VERSION)
@@ -187,6 +205,7 @@ def list_available_voices():
 def convert_to_speech_task(self, input_filepath, original_filename, voice_name=None, speed_rate='1.0'):
     temp_cover_path = None
     unique_id = str(uuid.uuid4().hex[:8])
+    generated_folder = current_app.config['GENERATED_FOLDER']
     try:
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 4, 'status': 'Extracting text...'})
         text_content, metadata = extract_text_and_metadata(input_filepath)
@@ -196,7 +215,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 4, 'status': 'Synthesizing audio...'})
         base_name = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(original_filename).stem)
         output_filename = f"{base_name}_{unique_id}.mp3"
-        output_filepath = os.path.join(GENERATED_FOLDER, output_filename)
+        output_filepath = os.path.join(generated_folder, output_filename)
         tts = TTSService(voice=voice_name, speed_rate=speed_rate)
         _, normalized_text = tts.synthesize(text_content, output_filepath)
         
@@ -216,7 +235,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
             except requests.RequestException as e:
                 app.logger.error(f"Google Books API request failed during TTS task: {e}")
         
-        temp_cover_path = os.path.join(GENERATED_FOLDER, f"cover_{unique_id}.jpg")
+        temp_cover_path = os.path.join(generated_folder, f"cover_{unique_id}.jpg")
         cover_path_to_use = None
         if cover_url:
             try:
@@ -237,7 +256,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         
         self.update_state(state='PROGRESS', meta={'current': 4, 'total': 4, 'status': 'Saving text file...'})
         text_filename = f"{base_name}_{unique_id}.txt"
-        text_filepath = os.path.join(GENERATED_FOLDER, text_filename)
+        text_filepath = os.path.join(generated_folder, text_filename)
         Path(text_filepath).write_text(normalized_text, encoding="utf-8")
 
         return {'status': 'Success', 'filename': output_filename, 'textfile': text_filename}
@@ -286,9 +305,11 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
     def update_state(state, meta):
         if task_self:
             task_self.update_state(state=state, meta=meta)
+    
+    generated_folder = build_dir.parent
     unique_file_list = sorted(list(set(file_list)))
     update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
-    safe_mp3_paths = [Path(GENERATED_FOLDER) / secure_filename(fname) for fname in unique_file_list]
+    safe_mp3_paths = [generated_folder / secure_filename(fname) for fname in unique_file_list]
     merged_text_content = "".join(p.with_suffix('.txt').read_text(encoding='utf-8') + "\n\n" for p in safe_mp3_paths if p.with_suffix('.txt').exists())
     update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Downloading cover art...'})
     cover_path = None
@@ -326,7 +347,7 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
     update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Assembling audiobook...'})
     timestamp = build_dir.name.replace('audiobook_build_', '')
     output_filename = f"{secure_filename(audiobook_title)}_{timestamp}.m4b"
-    output_filepath = Path(GENERATED_FOLDER) / output_filename
+    output_filepath = generated_folder / output_filename
     mux_command = ['ffmpeg']
     if cover_path: mux_command.extend(['-i', str(cover_path)])
     mux_command.extend(['-i', str(temp_audio_path), '-i', str(chapters_meta_path)])
@@ -341,7 +362,7 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
 @celery.task(bind=True)
 def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, cover_url=None):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    build_dir = Path(GENERATED_FOLDER) / f"audiobook_build_{timestamp}"
+    build_dir = Path(current_app.config['GENERATED_FOLDER']) / f"audiobook_build_{timestamp}"
     os.makedirs(build_dir, exist_ok=True)
     try:
         return _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, build_dir, task_self=self)
@@ -396,14 +417,18 @@ def upload_file():
 @app.route('/files')
 def list_files():
     file_map = {}
-    all_files = sorted(Path(GENERATED_FOLDER).iterdir(), key=os.path.getmtime, reverse=True)
+    all_files = sorted(Path(app.config['GENERATED_FOLDER']).iterdir(), key=os.path.getmtime, reverse=True)
     for entry in all_files:
         if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
             continue
+        
         match = re.match(r'^(.*?)_([a-f0-9]{8})$', entry.stem)
-        key = f"{match.group(1)}_{match.group(2)}" if match else entry.stem
-        if key not in file_map:
-            file_map[key] = {'base_name': match.group(1) if match else entry.stem}
+        
+        base_name_for_delete = match.group(1) if match else entry.stem
+
+        if (key := f"{base_name_for_delete}_{match.group(2)}" if match else base_name_for_delete) not in file_map:
+            file_map[key] = {'base_name': base_name_for_delete}
+        
         if entry.suffix in ['.mp3', '.m4b']:
             file_map[key].update({
                 'audio_name': entry.name,
@@ -412,6 +437,7 @@ def list_files():
             })
         elif entry.suffix == '.txt':
             file_map[key]['txt_name'] = entry.name
+            
     audio_files = [data for data in file_map.values() if 'audio_name' in data]
     return render_template('files.html', audio_files=audio_files)
 
@@ -424,7 +450,7 @@ def get_book_metadata():
     title_from_name = first_file_path_stem.replace('_', ' ').replace('-', ' ').title()
     metadata = {'title': title_from_name, 'author': 'Unknown'}
     txt_filename = next((f.replace('.mp3', '.txt') for f in filenames if f.endswith('.mp3')), None)
-    if txt_filename and (txt_path := Path(GENERATED_FOLDER) / txt_filename).exists():
+    if txt_filename and (txt_path := Path(app.config['GENERATED_FOLDER']) / txt_filename).exists():
         text = txt_path.read_text(encoding='utf-8')
         parsed_meta = parse_metadata_from_text(text)
         metadata['author'] = parsed_meta.get('author', metadata['author'])
@@ -497,19 +523,31 @@ def cancel_job(task_id):
 
 @app.route('/delete-bulk', methods=['POST'])
 def delete_bulk():
+    app.logger.info(f"Received delete request. Form data: {request.form}")
     basenames_to_delete = set(request.form.getlist('files_to_delete'))
+    app.logger.info(f"Basenames to delete from form: {basenames_to_delete}")
+    
+    deleted_count = 0
     if not basenames_to_delete:
         flash("No files selected for deletion.", "warning")
+        app.logger.warning("files_to_delete was empty, no files will be deleted.")
         return redirect(url_for('list_files'))
-    deleted_count = 0
+        
     for base_name in basenames_to_delete:
         safe_base_name = secure_filename(base_name)
-        for f in Path(GENERATED_FOLDER).glob(f"{safe_base_name}.*"):
+        app.logger.info(f"Processing base_name: '{base_name}', sanitized to: '{safe_base_name}'")
+        
+        files_found = list(Path(app.config['GENERATED_FOLDER']).glob(f"{safe_base_name}*.*"))
+        app.logger.info(f"Glob pattern '{safe_base_name}*.*' found {len(files_found)} files: {files_found}")
+
+        for f in files_found:
             try:
                 f.unlink()
-                deleted_count +=1
+                app.logger.info(f"Successfully deleted {f}")
+                deleted_count += 1
             except OSError as e:
                 app.logger.error(f"Error deleting file {f}: {e}")
+                
     flash(f"Successfully deleted {deleted_count} file(s).", "success")
     return redirect(url_for('list_files'))
 
@@ -520,7 +558,7 @@ def speak_sample(voice_name):
     safe_speed = str(speed_rate).replace('.', 'p')
     safe_voice_name = secure_filename(Path(voice_name).stem)
     filename = f"sample_{safe_voice_name}_speed_{safe_speed}.mp3"
-    filepath = os.path.join(GENERATED_FOLDER, filename)
+    filepath = os.path.join(app.config["GENERATED_FOLDER"], filename)
     if not os.path.exists(filepath):
         try:
             tts = TTSService(voice=voice_name, speed_rate=speed_rate)
@@ -551,13 +589,25 @@ def health_check():
     """A simple health check endpoint."""
     return jsonify({"status": "healthy"}), 200
 
+# New debug route
 @app.route('/debug', methods=['GET', 'POST'])
 def debug_page():
     voices = list_available_voices()
     normalized_output = ""
     original_text = ""
+    log_content = "Log file not found."
+    log_file = os.path.join(app.config['GENERATED_FOLDER'], 'app.log')
+
     if request.method == 'POST':
         original_text = request.form.get('text_to_normalize', '')
         if original_text:
             normalized_output = normalize_text(original_text)
-    return render_template('debug.html', voices=voices, original_text=original_text, normalized_output=normalized_output)
+    
+    try:
+        with open(log_file, 'r') as f:
+            lines = f.readlines()
+            log_content = "".join(lines[-100:])
+    except FileNotFoundError:
+        app.logger.warning(f"Log file not found at {log_file} for debug page.")
+
+    return render_template('debug.html', voices=voices, original_text=original_text, normalized_output=normalized_output, log_content=log_content)

@@ -3,6 +3,7 @@ from unittest.mock import patch
 from io import BytesIO
 from app import app as flask_app # Import the Flask app instance
 from ebooklib import epub # Import for creating a test epub file
+from pathlib import Path
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
@@ -141,3 +142,37 @@ def test_upload_no_file_selected(mock_task_delay, client):
         assert b'No files selected' in response.data
 
     assert mock_task_delay.call_count == 0
+
+def test_delete_bulk(client, app):
+    """
+    Tests that the bulk delete endpoint correctly removes files.
+    """
+    generated_folder = Path(app.config['GENERATED_FOLDER'])
+    
+    # Create dummy files to be deleted
+    (generated_folder / "file1_abc.mp3").touch()
+    (generated_folder / "file1_abc.txt").touch()
+    (generated_folder / "file2_def.mp3").touch()
+    # Create a file that should NOT be deleted
+    (generated_folder / "file3_ghi.mp3").touch()
+
+    # Assert that files exist before deletion
+    assert (generated_folder / "file1_abc.mp3").exists()
+    assert (generated_folder / "file2_def.mp3").exists()
+    assert (generated_folder / "file3_ghi.mp3").exists()
+    
+    # Simulate a POST request to the delete endpoint
+    data = {
+        'files_to_delete': ['file1_abc', 'file2_def']
+    }
+    response = client.post('/delete-bulk', data=data, follow_redirects=True)
+
+    # Check that the request was successful and the flash message is correct
+    assert response.status_code == 200
+    assert b"Successfully deleted 3 file(s)." in response.data
+
+    # Assert that the correct files were deleted and the other one remains
+    assert not (generated_folder / "file1_abc.mp3").exists()
+    assert not (generated_folder / "file1_abc.txt").exists()
+    assert not (generated_folder / "file2_def.mp3").exists()
+    assert (generated_folder / "file3_ghi.mp3").exists()

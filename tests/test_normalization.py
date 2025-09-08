@@ -86,3 +86,25 @@ He leads me beside the [c]still waters.
     assert "not want" in result
     assert "in green pastures" in result
     assert "the still waters" in result
+
+def test_pdf_verse_and_footnote_removal():
+    """Tests the removal of artifacts from the Romans 3 PDF text."""
+
+    input_text = """³
+God’s Judgment Defended
+¹What advantage then has the Jew, or what is the profit of circumcision? ²Much in every way! Chiefly because ᵃto them were committed the ¹oracles of God. ³For what if ᵇsome did not believe? ᶜWill their unbelief make the faithfulness of God without effect? ⁴ᵈCertainly not! Indeed, let ᵉGod be ²true but ᶠevery man a liar. As it is written:"""
+    
+    result = normalize_text(input_text)
+
+    # Check that verse numbers are gone
+    assert "¹What" not in result
+    
+    # Check that footnote letters are gone
+    assert "ᵇsome" not in result
+    assert "ᵈCertainly" not in result
+    assert "ᵃto them" not in result
+
+    # Check that the text is preserved
+    assert "What advantage then has the Jew" in result
+    assert "Certainly not!" in result
+    assert "Indeed, let God be true but every man a liar" in result
