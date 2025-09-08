@@ -90,19 +90,19 @@ He leads me beside the [c]still waters.
 def test_pdf_verse_and_footnote_removal():
     """Tests the removal of artifacts from the Romans 3 PDF text."""
 
-    input_text = """3
+    input_text = """³
 God’s Judgment Defended
-1What advantage then has the Jew, or what is the profit of circumcision? 2Much in every way! Chiefly because ato them were committed the 1oracles of God. 3For what if bsome did not believe? cWill their unbelief make the faithfulness of God without effect? 4dCertainly not! Indeed, let eGod be 2true but fevery man a liar. As it is written:"""
+¹What advantage then has the Jew, or what is the profit of circumcision? ²Much in every way! Chiefly because ᵃto them were committed the ¹oracles of God. ³For what if ᵇsome did not believe? ᶜWill their unbelief make the faithfulness of God without effect? ⁴ᵈCertainly not! Indeed, let ᵉGod be ²true but ᶠevery man a liar. As it is written:"""
     
     result = normalize_text(input_text)
 
     # Check that verse numbers are gone
-    assert "1What" not in result
+    assert "¹What" not in result
     
     # Check that footnote letters are gone
-    assert "bsome" not in result
-    assert "dCertainly" not in result
-    assert "ato them" not in result
+    assert "ᵇsome" not in result
+    assert "ᵈCertainly" not in result
+    assert "ᵃto them" not in result
 
     # Check that the text is preserved
     assert "What advantage then has the Jew" in result
