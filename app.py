@@ -156,9 +156,6 @@ def extract_text_and_metadata(filepath):
     metadata = {'title': p_filepath.stem.replace('_', ' ').title(), 'author': 'Unknown'}
     try:
         if extension == '.pdf':
-            # --- COMBINED PDF EXTRACTION LOGIC ---
-            # This method checks for both superscript flags and smaller font sizes
-            # to reliably catch all types of footnotes before extraction.
             with fitz.open(filepath) as doc:
                 doc_meta = doc.metadata
                 if doc_meta:
@@ -169,31 +166,25 @@ def extract_text_and_metadata(filepath):
                 for page in doc:
                     blocks = page.get_text("dict").get("blocks", [])
                     for b in blocks:
-                        if b.get('type') == 0:  # This is a text block
+                        if b.get('type') == 0:
                             for l in b.get("lines", []):
-                                if not l.get("spans"):
+                                spans = l.get("spans", [])
+                                if not spans:
                                     continue
                                 
-                                # Determine the "normal" font size for the line
-                                font_sizes = [s["size"] for s in l["spans"]]
+                                font_sizes = [s["size"] for s in spans]
                                 if not font_sizes:
                                     continue
                                 normal_size = max(set(font_sizes), key=font_sizes.count)
 
-                                for s in l.get("spans", []):
-                                    # Check for EITHER the superscript flag OR a smaller font size.
-                                    is_superscript_flag = s['flags'] & 2**0
-                                    is_smaller_font = s['size'] < (normal_size - 1)
+                                for s in spans:
+                                    is_superscript = s['flags'] & 2**0
+                                    is_smaller = s['size'] < (normal_size * 0.95)
 
-                                    if is_superscript_flag or is_smaller_font:
-                                        # Get the bounding box of the footnote and add a redaction
-                                        r = fitz.Rect(s['bbox'])
-                                        page.add_redact_annot(r)
+                                    if is_superscript or is_smaller:
+                                        page.add_redact_annot(fitz.Rect(s['bbox']), fill=(1,1,1))
                     
-                    # Apply all redactions at once, which physically removes the text
-                    page.apply_redactions()
-                    
-                    # Now, extract text from the cleaned page
+                    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
                     page_texts.append(page.get_text())
                 
                 text = "\n".join(page_texts)

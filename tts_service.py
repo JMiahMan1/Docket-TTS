@@ -55,16 +55,10 @@ def remove_superscripts(text: str) -> str:
     def to_superscript(chars: str) -> str:
         return "".join(SUPERSCRIPT_MAP.get(c, c) for c in chars)
 
-    # Keep the safe logic for non-PDF cases like "God1" -> "God¹"
     text = re.sub(r'([A-Za-z]+)(\d+)\b',
                   lambda m: m.group(1) + to_superscript(m.group(2)),
                   text)
     
-    # The aggressive logic for finding leading-letter footnotes has been removed,
-    # as it's now handled robustly during PDF extraction. This prevents
-    # mangling clean text from the new PDF extractor.
-
-    # Final strip: remove all Unicode superscripts.
     if SUPERSCRIPTS:
         pattern = f"[{''.join(re.escape(c) for c in SUPERSCRIPTS)}]"
         text = re.sub(pattern, "", text)
@@ -190,6 +184,10 @@ def number_replacer(match):
         return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
+    # This rule was moved from later in the function to run first,
+    # ensuring verse numbers are removed before they can be converted to words.
+    text = re.sub(r'^\s*\d{1,3}\s', '', text, flags=re.MULTILINE)
+    
     text = remove_superscripts(text)
     text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
 
@@ -223,7 +221,6 @@ def normalize_text(text: str) -> str:
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
-    text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
     text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
     text = re.sub(r"\b\d+\b", number_replacer, text)
 
