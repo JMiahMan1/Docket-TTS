@@ -156,33 +156,36 @@ def extract_text_and_metadata(filepath):
     metadata = {'title': p_filepath.stem.replace('_', ' ').title(), 'author': 'Unknown'}
     try:
         if extension == '.pdf':
-            # --- UPDATED PDF EXTRACTION LOGIC ---
-            # This new method uses text flags to reliably detect superscripts
-            # and properly reconstructs the text to preserve spacing.
+            # --- DEFINITIVE PDF EXTRACTION LOGIC ---
+            # This method finds all superscripts, redacts (removes) them from the page,
+            # then extracts the perfectly formatted text from the cleaned page.
             with fitz.open(filepath) as doc:
                 doc_meta = doc.metadata
                 if doc_meta:
                     metadata['title'] = doc_meta.get('title') or metadata['title']
                     metadata['author'] = doc_meta.get('author') or metadata['author']
                 
-                full_text_parts = []
+                page_texts = []
                 for page in doc:
+                    # Find all spans that are superscripts and add a redaction
                     blocks = page.get_text("dict").get("blocks", [])
                     for b in blocks:
                         if b.get('type') == 0:  # This is a text block
                             for l in b.get("lines", []):
-                                line_text_parts = []
                                 for s in l.get("spans", []):
                                     # Check the flags for superscript. The 1st bit (2**0) is superscript.
-                                    is_superscript = s['flags'] & 2**0
-                                    if not is_superscript:
-                                        line_text_parts.append(s['text'])
-                                # Join spans with spaces and add a newline for each line
-                                full_text_parts.append(" ".join(line_text_parts))
+                                    if s['flags'] & 2**0:
+                                        # Get the bounding box of the superscript and add a redaction
+                                        r = fitz.Rect(s['bbox'])
+                                        page.add_redact_annot(r)
+                    
+                    # Apply all redactions at once, which physically removes the text
+                    page.apply_redactions()
+                    
+                    # Now, extract text from the cleaned page
+                    page_texts.append(page.get_text())
                 
-                # Join all parts and clean up whitespace
-                text = "\n".join(full_text_parts)
-                text = re.sub(r'\s+', ' ', text).strip()
+                text = "\n".join(page_texts)
 
         elif extension == '.docx':
             doc = docx.Document(filepath)
@@ -314,7 +317,7 @@ def create_generic_cover_image(title, author, save_path):
         for line in author_lines:
             bbox = draw.textbbox((0, 0), line, font=font_author)
             line_width, line_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            draw.text(((width - line_width) / 2, y_text), line, font=font_author, fill=(255, 255, 255))
+            draw.text(((width - line_width) / 2, y_text), line, font=author_font, fill=(255, 255, 255))
             y_text += line_height + 5
         image.save(save_path)
         return save_path
