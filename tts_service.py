@@ -6,6 +6,7 @@ import unicodedata
 from pathlib import Path
 from argostranslate import translate
 
+# --- Load Normalization Data ---
 NORMALIZATION_PATH = Path("normalization.json")
 if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
@@ -20,8 +21,8 @@ if NORMALIZATION_PATH.exists():
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
     SUPERSCRIPTS = NORMALIZATION.get("superscripts", [])
-    SUPERSCRIPT_MAP = NORMALIZATION.get("SUPERSCRIPT_MAP", {})
 else:
+    # Fallback to empty structures if the file doesn't exist
     ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION, SUPERSCRIPTS = {}, [], [], set(), {}, {}, {}, {}, {}, {}, []
 
 _inflect = inflect.engine()
@@ -46,20 +47,6 @@ def normalize_hebrew(text: str) -> str:
 
 def normalize_greek(text: str) -> str:
     return text.translate(str.maketrans(GREEK_TRANSLITERATION))
-
-def remove_superscripts(text: str) -> str:
-    def to_superscript(chars: str) -> str:
-        return "".join(SUPERSCRIPT_MAP.get(c, c) for c in chars)
-
-    text = re.sub(r'([A-Za-z]+)(\d+)\b',
-                  lambda m: m.group(1) + to_superscript(m.group(2)),
-                  text)
-    
-    if SUPERSCRIPTS:
-        pattern = f"[{''.join(re.escape(c) for c in SUPERSCRIPTS)}]"
-        text = re.sub(pattern, "", text)
-
-    return text
 
 def roman_to_int(s):
     roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
@@ -167,39 +154,36 @@ def normalize_scripture(text: str) -> str:
 
 def number_replacer(match):
     num_str = match.group(0)
-    if len(num_str) == 4 and 1100 <= int(num_str) <= 1999:
+    if len(num_str) == 4 and 1100 <= int(num_str) <= 2099:
+        # Handle years like 1984 -> "nineteen eighty-four"
+        if num_str.endswith("00"):
+             return _inflect.number_to_words(num_str)
         part1 = _inflect.number_to_words(num_str[:2])
         part2 = _inflect.number_to_words(num_str[2:])
         return f"{part1} {part2}"
-
+    
+    # Handle years like 2005 -> "two thousand five"
     num_int = int(num_str)
-    if len(num_str) == 4 and 1000 <= num_int <= 2099:
-        if 2000 <= num_int <= 2009: return _inflect.number_to_words(num_int, andword="")
-        else: return _inflect.number_to_words(num_int, group=2).replace(",", "")
-    else:
+    if len(num_str) == 4 and 2000 <= num_int <= 2099:
         return _inflect.number_to_words(num_int, andword="")
+    
+    # Default number to words
+    return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
-    # --- STAGE 1: RAW TEXT PRE-CLEANING ---
-    # This new pre-cleaning stage is designed to handle the messy, but now
-    # predictable, output from the simple PDF text extractor.
-
-    # Remove alphabetic footnotes attached to the beginning of words.
-    # Example: "fevery" -> "every", but won't affect "from".
-    # It looks for a single lowercase letter followed by a word of 4+ lowercase letters.
-    text = re.sub(r'\b([a-z])([a-z]{4,})\b', r'\2', text)
-
-    # Remove numeric verse markers attached to the beginning of capitalized words.
-    # Example: "11There" -> "There"
-    text = re.sub(r'\b(\d+)([A-Z])', r'\2', text)
+    # --- STAGE 1: Isolate and Remove Artifacts ---
+    # Replace all known superscript characters with an empty string.
+    if SUPERSCRIPTS:
+        text = text.translate(str.maketrans('', '', "".join(SUPERSCRIPTS)))
     
-    # Remove any remaining verse numbers at the start of a line.
-    text = re.sub(r'^\s*\d{1,3}\s', '', text, flags=re.MULTILINE)
+    # Remove bracketed alphabetic footnotes like [a], [b].
+    text = re.sub(r'\[[a-zA-Z]\]', '', text)
 
-    # --- STAGE 2: REGULAR NORMALIZATION ---
-    text = remove_superscripts(text)
-    text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
-
+    # Separate verse numbers from words. Example: "11There" -> "11 There", "God.12" -> "God. 12"
+    text = re.sub(r'(\d+)([a-zA-Z])', r'\1 \2', text)
+    text = re.sub(r'([a-zA-Z.,?!;])(\d+)', r'\1 \2', text)
+    
+    # --- STAGE 2: Convert Markers and Expand Complex Cases ---
     def _replace_leading_verse_marker(match):
         chapter, verse = match.groups()
         verse_words = _inflect.number_to_words(verse)
@@ -207,11 +191,17 @@ def normalize_text(text: str) -> str:
             chapter_words = _inflect.number_to_words(chapter)
             return f"chapter {chapter_words} verse {verse_words} "
         return f"verse {verse_words} "
-
-    text = re.sub(r'^\s*(?:(\d+))?:(\d+)\b', _replace_leading_verse_marker, text, flags=re.M)
+    
+    # Convert chapter:verse markers. Example: "2:5" -> "chapter two verse five"
+    text = re.sub(r'\b(\d+)?:(\d+)\b', _replace_leading_verse_marker, text)
+    
+    # Separate headers from verse markers. Example: "...PEOPLEfive:one" -> "...PEOPLE. verse one"
     text = re.sub(r"verse\s+([A-Z\s]+)([a-z]+):([a-z]+)", r"\1. verse \3", text)
-    text = normalize_scripture(text)
 
+    # Expand Scripture references (e.g., "Rom 3:21ff")
+    text = normalize_scripture(text)
+    
+    # --- STAGE 3: Expand Abbreviations and Phrases ---
     for phrase in sorted(LATIN_PHRASES.keys(), key=len, reverse=True):
         replacement = LATIN_PHRASES[phrase]
         text = re.sub(rf'\b{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
@@ -220,23 +210,29 @@ def normalize_text(text: str) -> str:
     text = normalize_hebrew(text)
     text = normalize_greek(text)
     text = expand_roman_numerals(text)
-
+    
     non_bible_abbrs = { k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS) }
     for abbr, expanded in non_bible_abbrs.items():
         flags = 0 if abbr in CASE_SENSITIVE_ABBRS else re.IGNORECASE
         text = re.sub(rf"\b{re.escape(abbr)}\b", expanded, text, flags=flags)
-
+        
     for contr, expanded in CONTRACTIONS.items(): text = text.replace(contr, expanded)
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
-    text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
-    text = re.sub(r"\b\d+\b", number_replacer, text)
+    # --- STAGE 4: Final Cleanup and Number Conversion ---
+    # Remove any remaining standalone verse numbers (now that they are isolated).
+    text = re.sub(r'\b\d{1,3}\b', '', text)
 
+    # Convert remaining multi-digit numbers to words, handling years correctly.
+    text = re.sub(r"\b\d+\b", number_replacer, text)
+    
+    # Format headers and paragraph breaks for TTS pacing.
     text = re.sub(r'^([A-Z][A-Z0-9\s,.-]{4,})$', r'. ... \1. ... ', text, flags=re.MULTILINE)
     text = re.sub(r'\n\s*\n', '. ... \n', text)
-
-    text = re.sub(r"\[|\]", " , ", text).replace("(", "").replace(")", "")
+    
+    # Clean up any remaining artifacts and excess whitespace.
+    text = re.sub(r"[\[\]()]", " , ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
