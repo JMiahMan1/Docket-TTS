@@ -6,9 +6,10 @@ services:
   web:
     build:
       context: .
+      # Provide default lowercase arguments for local builds
       args:
-        - GITHUB_REPOSITORY
-        - BASE_IMAGE_TAG
+        - GITHUB_REPOSITORY=jmiahman1/docket-tts
+        - BASE_IMAGE_TAG=latest
     ports:
       - "8000:5000"
     volumes:
@@ -22,9 +23,10 @@ services:
   worker:
     build:
       context: .
+      # Provide default lowercase arguments for local builds
       args:
-        - GITHUB_REPOSITORY
-        - BASE_IMAGE_TAG
+        - GITHUB_REPOSITORY=jmiahman1/docket-tts
+        - BASE_IMAGE_TAG=latest
     command: /opt/venv/bin/python -m celery -A app.celery worker --loglevel=info
     volumes:
       - generated_data:/app/generated
