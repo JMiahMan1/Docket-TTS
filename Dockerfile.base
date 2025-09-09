@@ -4,7 +4,7 @@ FROM fedora:${FEDORA_VERSION}
 
 # Install build tools and Python in a temporary layer
 RUN dnf install -y dnf-plugins-core && \
-    dnf install -y --installroot=/install_root \
+    dnf install -y --use-host-config --installroot=/install_root \
         python3 python3-pip python3-venv \
         poppler-utils \
         ffmpeg \
