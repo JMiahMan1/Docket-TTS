@@ -1,51 +1,37 @@
-# This is the base image for the Docket-TTS application.
-# It contains all the slow-moving system dependencies and ML models.
-FROM fedora:42
+# Dockerfile.base
+ARG FEDORA_VERSION=42
+FROM fedora:${FEDORA_VERSION}
 
-# Install system dependencies AND heavy Python binaries from DNF
-RUN dnf -y install \
-    python3 \
-    python3-pip \
-    poppler-utils \
-    ffmpeg \
-    espeak-ng \
-    python3-requests \
-    python3-onnxruntime \
-    python3-sentencepiece \
-    python3-flask \
-    python3-celery \
-    python3-redis \
-    python3-docx \
-    python3-ebooklib \
-    python3-PyMuPDF \
-    python3-beautifulsoup4 \
-    python3-inflect \
-    python3-mutagen \
-    python3-pillow \
-    wget \
-    && dnf clean all
+# Install build tools and Python in a temporary layer
+RUN dnf install -y dnf-plugins-core && \
+    dnf install -y --installroot=/install_root \
+        python3 python3-pip python3-venv \
+        poppler-utils \
+        ffmpeg \
+        espeak-ng \
+        python3-requests \
+        python3-onnxruntime \
+        python3-sentencepiece \
+        python3-flask \
+        python3-celery \
+        python3-redis \
+        python3-docx \
+        python3-ebooklib \
+        python3-PyMuPDF \
+        python3-beautifulsoup4 \
+        python3-inflect \
+        python3-mutagen \
+        python3-pillow \
+        wget \
+        gcc gcc-c++ make libffi-devel bzip2-devel zlib-devel xz-devel \
+        git curl wget unzip which && \
+    dnf clean all -y --installroot=/install_root
 
-# Install heavy Python dependencies using pip, including a CPU-only version of Torch
-# and pre-download the Argos Translate model.
-RUN python3 -m venv --system-site-packages /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
-    /opt/venv/bin/pip install --no-cache-dir onnxruntime sentencepiece argostranslate && \
-    /opt/venv/bin/python -c "\
-from argostranslate import package;\
-package.update_package_index();\
-available_packages = package.get_available_packages();\
-package_to_install = next(filter(lambda x: x.from_code == 'he' and x.to_code == 'en', available_packages));\
-package.install_from_path(package_to_install.download());\
-"
 
-# Download high-quality voice models
-WORKDIR /app/voices
-RUN wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx && \
-    wget -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx.json
 
-# Set up environment for subsequent images
-ENV PATH="/opt/venv/bin:$PATH"
-WORKDIR /app
+# Create a new minimal image and copy only the installed files
+FROM scratch
+COPY --from=0 /install_root/ /
+
+# Set the default command to bash for easier debugging
+CMD ["/bin/bash"]
