@@ -3,7 +3,7 @@
 # The GITHUB_REPOSITORY and BASE_IMAGE_TAG arguments are passed in by the GitHub Actions workflow.
 ARG GITHUB_REPOSITORY
 ARG BASE_IMAGE_TAG=latest
-FROM ghcr.io/${GITHUB_REPOSITORY}-base:${BASE_IMAGE_TAG} AS base
+FROM docket-tts-base:latest AS base
 
 # Create and activate a virtual environment
 RUN python3 -m venv /opt/venv
