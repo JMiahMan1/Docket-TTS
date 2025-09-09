@@ -2,6 +2,9 @@
 # Pull the pre-built base image from the GitHub Container Registry.
 # The GITHUB_REPOSITORY and BASE_IMAGE_TAG arguments are passed in by the GitHub Actions workflow.
 ARG GITHUB_REPOSITORY
+FROM ghcr.io/${GITHUB_REPOSITORY}-base:latest AS base
+
+ARG GITHUB_REPOSITORY
 ARG BASE_IMAGE_TAG=latest
 FROM docket-tts-base:latest AS base
 
