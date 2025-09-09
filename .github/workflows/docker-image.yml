@@ -47,7 +47,10 @@ jobs:
           cache-from: type=gha,scope=${{ github.workflow }}-app
           cache-to: type=gha,scope=${{ github.workflow }}-app,mode=max
 
-      - name: Start services
+      - name: Start services using Docker Compose
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BASE_IMAGE_TAG: latest
         run: docker-compose up -d --build
 
       - name: Wait for services to be healthy
