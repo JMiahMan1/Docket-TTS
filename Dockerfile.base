@@ -1,10 +1,10 @@
-# Dockerfile.base
-ARG FEDORA_VERSION=42
-FROM fedora:${FEDORA_VERSION} AS base
+# Stage 1: The Base Builder
+# Use a standard Fedora image as a build environment and name this stage "base".
+FROM fedora:42 AS base
 
-# Install build tools and Python in a temporary layer
+# Install all specified system dependencies, build tools, and Fedora-provided Python packages into the /install_root directory.
 RUN dnf install -y dnf-plugins-core && \
-    dnf install -y --use-host-config --installroot=/install_root \
+    dnf install -y --use-host-config --installroot=/install_root --releasever=42 \
         python3 python3-pip python3-virtualenv \
         poppler-utils \
         ffmpeg \
@@ -27,12 +27,13 @@ RUN dnf install -y dnf-plugins-core && \
         gcc-c++ \
         cmake \
         make libffi-devel bzip2-devel zlib-devel xz-devel \
-        git curl wget unzip which && \
+        git curl unzip which && \
     dnf clean all -y --installroot=/install_root
 
-# Create the virtual environment and install pip packages *inside* /install_root.
-# We use chroot to ensure the commands run as if /install_root were the root directory.
-RUN chroot /install_root python3 -m venv --system-site-packages /opt/venv && \
+# Copy the host's DNS config into the chroot jail to enable network access.
+# Then, create the venv and install pip packages inside /install_root.
+RUN cp /etc/resolv.conf /install_root/etc/resolv.conf && \
+    chroot /install_root python3 -m venv --system-site-packages /opt/venv && \
     chroot /install_root /opt/venv/bin/pip install --upgrade pip && \
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
         torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
@@ -42,10 +43,10 @@ RUN chroot /install_root python3 -m venv --system-site-packages /opt/venv && \
 # ---
 
 # Stage 2: The Final, Minimal Image
-# Start from a completely empty image.
+# Start from a completely empty image for security and size.
 FROM scratch
 
-# Copy the entire populated filesystem from /install_root in the builder stage.
+# Copy the entire populated filesystem from the "base" stage defined above.
 COPY --from=base /install_root/ /
 
 # Set the environment and working directory for any subsequent images that use this base.
