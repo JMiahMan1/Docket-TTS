@@ -5,6 +5,9 @@ FROM fedora:42 AS base
 # Install all specified system dependencies, build tools, and Fedora-provided Python packages into the /install_root directory.
 RUN dnf install -y dnf-plugins-core && \
     dnf install -y --use-host-config --installroot=/install_root --releasever=42 \
+        dnf \
+        rpm \
+        basesystem \
         python3 python3-pip python3-virtualenv \
         poppler-utils \
         ffmpeg \
