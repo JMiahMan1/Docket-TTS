@@ -1,6 +1,6 @@
 # Dockerfile.base
 ARG FEDORA_VERSION=42
-FROM fedora:${FEDORA_VERSION}
+FROM fedora:${FEDORA_VERSION} AS base
 
 # Install build tools and Python in a temporary layer
 RUN dnf install -y dnf-plugins-core && \
@@ -46,7 +46,7 @@ RUN chroot /install_root python3 -m venv --system-site-packages /opt/venv && \
 FROM scratch
 
 # Copy the entire populated filesystem from /install_root in the builder stage.
-COPY --from=builder /install_root/ /
+COPY --from=base /install_root/ /
 
 # Set the environment and working directory for any subsequent images that use this base.
 ENV PATH="/opt/venv/bin:$PATH"
