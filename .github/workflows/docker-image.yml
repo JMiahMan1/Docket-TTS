@@ -54,7 +54,7 @@ jobs:
       - name: Run tests
         id: tests
         run: |
-          docker compose exec -T web /bin/bash -c "sh run_tests.sh"
+          docker compose exec -T web /bin/bash -c "sh tests/run_tests.sh"
         continue-on-error: true
 
       - name: Show logs on failure
