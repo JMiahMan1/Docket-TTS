@@ -30,11 +30,27 @@ RUN dnf install -y dnf-plugins-core && \
         git curl wget unzip which && \
     dnf clean all -y --installroot=/install_root
 
+# Create the virtual environment and install pip packages *inside* /install_root.
+# We use chroot to ensure the commands run as if /install_root were the root directory.
+RUN chroot /install_root python3 -m venv --system-site-packages /opt/venv && \
+    chroot /install_root /opt/venv/bin/pip install --upgrade pip && \
+    chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
+        torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
+    chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
+        argostranslate piper-tts
 
+# ---
 
-# Create a new minimal image and copy only the installed files
+# Stage 2: The Final, Minimal Image
+# Start from a completely empty image.
 FROM scratch
-COPY --from=0 /install_root/ /
 
-# Set the default command to bash for easier debugging
+# Copy the entire populated filesystem from /install_root in the builder stage.
+COPY --from=builder /install_root/ /
+
+# Set the environment and working directory for any subsequent images that use this base.
+ENV PATH="/opt/venv/bin:$PATH"
+WORKDIR /app
+
+# Set a default command for easier debugging.
 CMD ["/bin/bash"]
