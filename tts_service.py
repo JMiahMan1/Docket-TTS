@@ -78,15 +78,13 @@ def expand_roman_numerals(text: str) -> str:
         try:
             integer_val = roman_to_int(roman_str)
             if int_to_roman(integer_val).lower() != roman_str.lower(): return roman_str
-            return f"Roman Numeral {_inflect.number_to_words(integer_val)}"
+            return _inflect.number_to_words(integer_val)
         except (KeyError, IndexError):
             return roman_str
     return pattern.sub(replacer, text)
 
 def _format_ref_segment(book_full, chapter, verses_str, last_book_was_same):
     chapter_words = _inflect.number_to_words(int(chapter))
-    
-    # Conditionally add the book name and always include the chapter
     book_segment = "" if last_book_was_same else f"{book_full} "
     
     if not verses_str:
@@ -104,31 +102,35 @@ def _format_ref_segment(book_full, chapter, verses_str, last_book_was_same):
     verses_str = verses_str.replace("–", "-").replace("-", " through ")
 
     prefix = "verses" if any(c in verses_str for c in ",-") else "verse"
-    
     verse_words = re.sub(r"\d+", lambda m: _inflect.number_to_words(int(m.group())), verses_str)
-    
-    chapter_segment = "chapter" if not last_book_was_same or book_segment else "chapter"
+    chapter_segment = "chapter "
 
-    return f"{book_segment}{chapter_segment} {chapter_words}, {prefix} {verse_words}{suffix}"
-
+    return f"{book_segment}{chapter_segment}{chapter_words}, {prefix} {verse_words}{suffix}"
 
 def normalize_scripture(text: str) -> str:
     all_books = {**ABBREVIATIONS, **{b: b for b in BIBLE_BOOKS}}
     book_keys = sorted(all_books.keys(), key=len, reverse=True)
     book_pattern_str = '|'.join(re.escape(k) for k in book_keys)
+    
+    # This regex handles multi-book references like "Genesis 50 to Exodus 1"
+    multi_book_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+)\s+to\s+(' + book_pattern_str + r')\s+(\d+)\b', re.IGNORECASE)
+    def multi_book_replacer(match):
+        book1_abbr, chap1, book2_abbr, chap2 = match.groups()
+        book1_full = all_books.get(book1_abbr.strip().rstrip('.'), book1_abbr)
+        book2_full = all_books.get(book2_abbr.strip().rstrip('.'), book2_abbr)
+        return f"{book1_full} chapter {_inflect.number_to_words(int(chap1))} to {book2_full} chapter {_inflect.number_to_words(int(chap2))}"
+    text = multi_book_pattern.sub(multi_book_replacer, text)
 
-    # Regex to handle multiple references inside parentheses
+    # This regex handles references inside parentheses
     def process_enclosed_refs(match):
         inner_text = match.group(1)
         last_book_full = None
-        parts = inner_text.split(';')
+        parts = re.split(';', inner_text)
         processed_parts = []
         for part in parts:
             part = part.strip()
-            # Regex for a full reference (Book Chapter:Verse)
-            full_ref_match = re.match(r'(' + book_pattern_str + r')\s*(\d+)[:\s]([\d\w\s,.\–-]+(?:ff|f)?)', part, re.IGNORECASE)
-            # Regex for a subsequent reference (Chapter:Verse)
-            subsequent_ref_match = re.match(r'(\d+)[:\s]([\d\w\s,.\–-]+(?:ff|f)?)', part)
+            full_ref_match = re.match(r'(' + book_pattern_str + r')\s*(\d+)[:\.](\d+[\w\s,.\–-]*(?:ff|f)?)', part, re.IGNORECASE)
+            subsequent_ref_match = re.match(r'(\d+)[:\.](\d+[\w\s,.\–-]*(?:ff|f)?)', part)
 
             if full_ref_match:
                 book_abbr, chapter, verses = full_ref_match.groups()
@@ -140,17 +142,14 @@ def normalize_scripture(text: str) -> str:
                 processed_parts.append(_format_ref_segment(last_book_full, chapter, verses, True))
         
         return f"({'; '.join(processed_parts)})"
-
-    # Process references inside parentheses first
     text = re.sub(r'\(([^)]+)\)', process_enclosed_refs, text)
     
-    # Process standalone references
-    standalone_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+)[:\s]([\d\w\s,.\–-]+(?:ff|f)?)\b', re.IGNORECASE)
+    # This regex handles standalone prose references
+    standalone_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+)[:\.](\d+[\w\s,.\–-]*(?:ff|f)?)\b', re.IGNORECASE)
     def standalone_replacer(match):
         book_abbr, chapter, verses = match.groups()
         book_full = all_books.get(book_abbr.strip().rstrip('.'), book_abbr)
         return _format_ref_segment(book_full, chapter, verses, False)
-        
     text = standalone_pattern.sub(standalone_replacer, text)
     return text
 
@@ -158,41 +157,49 @@ def number_replacer(match):
     num_str = match.group(0)
     num_int = int(num_str)
 
-    if len(num_str) == 4 and 1100 <= num_int <= 1999:
+    if len(num_str) == 4 and 1100 <= num_int <= 2099:
+        if num_int >= 2000:
+             return _inflect.number_to_words(num_int, group=0)
         part1 = _inflect.number_to_words(num_str[:2])
         part2 = _inflect.number_to_words(num_str[2:])
+        if part2 == "zero": return f"{part1} hundred"
         return f"{part1} {part2}"
-
-    if len(num_str) == 4 and 2000 <= num_int <= 2099:
-        return _inflect.number_to_words(num_int, andword="")
         
-    return _inflect.number_to_words(num_int, andword="")
+    return _inflect.number_to_words(num_int)
 
 def normalize_text(text: str) -> str:
-    # --- STAGE 1: Initial Cleanup and Artifact Removal ---
+    # --- STAGE 1: Pre-processing and Artifact Removal ---
     if SUPERSCRIPTS:
         text = text.translate(str.maketrans('', '', "".join(SUPERSCRIPTS)))
-    text = re.sub(r'\[[a-zA-Z]\]', '', text)
-    text = re.sub(r'(\d+)([a-zA-Z])', r'\1 \2', text)
-    text = re.sub(r'([a-zA-Z.,?!;])(\d+)', r'\1 \2', text)
+    text = re.sub(r'\[[a-zA-Z0-9]\]', '', text) # Remove footnote markers like [a], [1]
+
+    # Process line-by-line to strip unwanted leading numbers before anything else
+    lines = text.split('\n')
+    processed_lines = []
+    book_name_pattern = r'\b(?:[1-3]|First|Second|Third)\s+[A-Za-z]+'
+    for line in lines:
+        stripped_line = line.strip()
+        # Strip leading numbers (e.g., "11 Paul...") but not from book names (e.g., "1 Corinthians")
+        if re.match(r'^\d+\s+', stripped_line) and not re.match(book_name_pattern, stripped_line, re.IGNORECASE):
+            processed_lines.append(re.sub(r'^\d+\s+', '', stripped_line))
+        else:
+            processed_lines.append(line)
+    text = '\n'.join(processed_lines)
     
-    # --- STAGE 2: Convert Markers, Scripture, and Special Formats ---
-    def _replace_leading_verse_marker(match):
+    # --- STAGE 2: Convert Verse Markers and Scripture References ---
+    # Handles chapter:verse (e.g., "2:5") and :verse (e.g., ":83")
+    def _replace_verse_marker(match):
         chapter, verse = match.groups()
         chapter_words = _inflect.number_to_words(chapter) if chapter else ""
         verse_words = _inflect.number_to_words(verse)
-        if chapter_words:
-            return f"chapter {chapter_words} verse {verse_words}"
-        return f"verse {verse_words}"
+        return f"chapter {chapter_words} verse {verse_words}" if chapter else f"verse {verse_words}"
+    text = re.sub(r'\b(?:(\d+):)?(\d+)\b', _replace_verse_marker, text)
 
-    text = re.sub(r'\b(\d+)?:(\d+)\b', _replace_leading_verse_marker, text)
-    
-    text = re.sub(r"verse\s+([A-Z\s]+)([a-z]+):([a-z]+)", r"\1. verse \3", text)
     text = normalize_scripture(text)
-    
-    # --- STAGE 3: Expand Phrases and Abbreviations ---
+
+    # --- STAGE 3: Expand Phrases, Abbreviations, and Symbols ---
     for phrase, replacement in LATIN_PHRASES.items():
-        text = re.sub(rf'\b{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
+        text = re.sub(rf'\b{re.escape(phrase)}\b', replacement, text, flags=re.IGNORECASE)
 
     text = _strip_diacritics(text)
     text = normalize_hebrew(text)
@@ -212,17 +219,12 @@ def normalize_text(text: str) -> str:
         text = text.replace(p, repl)
 
     # --- STAGE 4: Final Number Conversion and Formatting ---
-    # Convert remaining numbers to words, but leave standalone verse numbers for now
+    # All semantic numbers (verses, etc.) are handled, now convert remaining numbers
     text = re.sub(r"\b\d+\b", number_replacer, text)
     
-    text = re.sub(r'^([A-Z][A-Z0-9\s,.-]{4,})$', r'. ... \1. ... ', text, flags=re.MULTILINE)
-    text = re.sub(r'\n\s*\n', '. ... \n', text)
-    
+    text = re.sub(r'\n\s*\n', '. \n', text)
     text = re.sub(r"[\[\]()]", " , ", text)
     text = re.sub(r"\s+", " ", text).strip()
-    
-    # Final pass to remove any leftover standalone numbers that were not part of a verse marker
-    text = re.sub(r'\b\d{1,3}\b', '', text)
 
     return text
 
