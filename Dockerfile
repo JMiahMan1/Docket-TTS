@@ -15,7 +15,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 COPY requirements.txt .
 # Install dependencies into the virtual environment
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --system-site-packages --no-cache-dir -r requirements.txt
 
 # Stage 3: Create the final application image
 FROM base
