@@ -32,7 +32,7 @@ RUN dnf install -y dnf-plugins-core && \
 
 # Copy the host's DNS config into the chroot jail to enable network access.
 # Then, create the venv and install pip packages inside /install_root.
-RUN cp /etc/resolv.conf /install_root/etc/resolv.conf && \
+RUN cp -f /etc/resolv.conf /install_root/etc/resolv.conf && \
     chroot /install_root python3 -m venv --system-site-packages /opt/venv && \
     chroot /install_root /opt/venv/bin/pip install --upgrade pip && \
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
