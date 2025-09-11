@@ -156,9 +156,6 @@ def extract_text_and_metadata(filepath):
     metadata = {'title': p_filepath.stem.replace('_', ' ').title(), 'author': 'Unknown'}
     try:
         if extension == '.pdf':
-            # Reverted to the simplest, most reliable extraction method.
-            # This preserves word integrity, passing the artifacts to the powerful
-            # new normalizer in tts_service.py.
             with fitz.open(filepath) as doc:
                 doc_meta = doc.metadata
                 if doc_meta:
