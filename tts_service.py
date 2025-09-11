@@ -6,7 +6,6 @@ import unicodedata
 from pathlib import Path
 from argostranslate import translate
 
-# --- Load Normalization Data ---
 NORMALIZATION_PATH = Path("normalization.json")
 if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
@@ -21,8 +20,8 @@ if NORMALIZATION_PATH.exists():
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
     SUPERSCRIPTS = NORMALIZATION.get("superscripts", [])
+    SUPERSCRIPT_MAP = NORMALIZATION.get("SUPERSCRIPT_MAP", {})
 else:
-    # Fallback to empty structures if the file doesn't exist
     ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION, SUPERSCRIPTS = {}, [], [], set(), {}, {}, {}, {}, {}, {}, []
 
 _inflect = inflect.engine()
@@ -47,6 +46,48 @@ def normalize_hebrew(text: str) -> str:
 
 def normalize_greek(text: str) -> str:
     return text.translate(str.maketrans(GREEK_TRANSLITERATION))
+
+def remove_superscripts(text: str) -> str:
+    """
+    Detect and remove likely footnotes:
+    - Converts edge-case letters/numbers into superscripts
+    - Strips them out cleanly
+    """
+    def to_superscript(chars: str) -> str:
+        return "".join(SUPERSCRIPT_MAP.get(c, c) for c in chars)
+
+    # Trailing footnote after a word (God1 -> God¹ -> God)
+    # This regex was too broad and corrupted words. It's now restricted to words ending in digits.
+    text = re.sub(r'([A-Za-z]+)(\d+)\b',
+                  lambda m: m.group(1) + to_superscript(m.group(2)),
+                  text)
+
+    # Leading footnote before a word (1What -> ¹What -> What)
+    if BIBLE_BOOKS:
+        bible_books_pattern = r'|'.join(map(re.escape, BIBLE_BOOKS))
+        text = re.sub(
+            rf'\b(\d+|[a-z])(?=(?:{bible_books_pattern}))',
+            lambda m: m.group(1),  # keep if Bible book
+            text
+        )
+        text = re.sub(
+            rf'\b(\d+|[a-z])(?=[A-Z][a-z])',
+            lambda m: to_superscript(m.group(1)),
+            text
+        )
+    else:
+        text = re.sub(
+            r'\b(\d+|[a-z])(?=[A-Z][a-z])',
+            lambda m: to_superscript(m.group(1)),
+            text
+        )
+
+    # Final strip: remove all superscripts defined in normalization.json
+    if SUPERSCRIPTS:
+        pattern = f"[{''.join(re.escape(c) for c in SUPERSCRIPTS)}]"
+        text = re.sub(pattern, "", text)
+
+    return text
 
 def roman_to_int(s):
     roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
@@ -78,18 +119,14 @@ def expand_roman_numerals(text: str) -> str:
         try:
             integer_val = roman_to_int(roman_str)
             if int_to_roman(integer_val).lower() != roman_str.lower(): return roman_str
-            return _inflect.number_to_words(integer_val)
+            return f"Roman Numeral {_inflect.number_to_words(integer_val)}"
         except (KeyError, IndexError):
             return roman_str
     return pattern.sub(replacer, text)
 
-def _format_ref_segment(book_full, chapter, verses_str, last_book_was_same):
+def _format_ref_segment(book_full, chapter, verses_str):
     chapter_words = _inflect.number_to_words(int(chapter))
-    book_segment = "" if last_book_was_same else f"{book_full} "
-    
-    if not verses_str:
-        return f"{book_segment}chapter {chapter_words}"
-    
+    if not verses_str: return f"{book_full} chapter {chapter_words}"
     suffix = ""
     verses_str = verses_str.strip().rstrip(".;,")
 
@@ -98,134 +135,122 @@ def _format_ref_segment(book_full, chapter, verses_str, last_book_was_same):
     elif verses_str.lower().endswith("f"):
         verses_str, suffix = verses_str[:-1].strip(), f" {BIBLE_REFS.get('f', 'and the following verse')}"
 
+    prefix = "verses" if any(c in verses_str for c in ",–-") else "verse"
     verses_str = re.sub(r"(\d)([a-z])", r"\1 \2", verses_str, flags=re.IGNORECASE)
     verses_str = verses_str.replace("–", "-").replace("-", " through ")
-
-    prefix = "verses" if any(c in verses_str for c in ",-") else "verse"
     verse_words = re.sub(r"\d+", lambda m: _inflect.number_to_words(int(m.group())), verses_str)
-    chapter_segment = "chapter "
-
-    return f"{book_segment}{chapter_segment}{chapter_words}, {prefix} {verse_words}{suffix}"
+    return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
 def normalize_scripture(text: str) -> str:
-    all_books = {**ABBREVIATIONS, **{b: b for b in BIBLE_BOOKS}}
-    book_keys = sorted(all_books.keys(), key=len, reverse=True)
-    book_pattern_str = '|'.join(re.escape(k) for k in book_keys)
-    
-    # This regex handles multi-book references like "Genesis 50 to Exodus 1"
-    multi_book_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+)\s+to\s+(' + book_pattern_str + r')\s+(\d+)\b', re.IGNORECASE)
-    def multi_book_replacer(match):
-        book1_abbr, chap1, book2_abbr, chap2 = match.groups()
-        book1_full = all_books.get(book1_abbr.strip().rstrip('.'), book1_abbr)
-        book2_full = all_books.get(book2_abbr.strip().rstrip('.'), book2_abbr)
-        return f"{book1_full} chapter {_inflect.number_to_words(int(chap1))} to {book2_full} chapter {_inflect.number_to_words(int(chap2))}"
-    text = multi_book_pattern.sub(multi_book_replacer, text)
+    bible_abbr_keys = {re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)}
+    full_book_names = {re.escape(book) for book in BIBLE_BOOKS}
+    book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
+    book_pattern_str = '|'.join(book_keys)
 
-    # This regex handles references inside parentheses
-    def process_enclosed_refs(match):
-        inner_text = match.group(1)
-        last_book_full = None
-        parts = re.split(';', inner_text)
-        processed_parts = []
-        for part in parts:
-            part = part.strip()
-            full_ref_match = re.match(r'(' + book_pattern_str + r')\s*(\d+)[:\.](\d+[\w\s,.\–-]*(?:ff|f)?)', part, re.IGNORECASE)
-            subsequent_ref_match = re.match(r'(\d+)[:\.](\d+[\w\s,.\–-]*(?:ff|f)?)', part)
+    ref_pattern = re.compile(
+        r'\b(' + book_pattern_str + r')?' +
+        r'\s*' +
+        r'(\d+)' +
+        r'[:\s]' +
+        r'([\d\w\s,.\–-]+(?:ff|f)?)',
+        re.IGNORECASE
+    )
 
-            if full_ref_match:
-                book_abbr, chapter, verses = full_ref_match.groups()
-                book_full = all_books.get(book_abbr.strip().rstrip('.'), book_abbr)
-                processed_parts.append(_format_ref_segment(book_full, chapter, verses, False))
-                last_book_full = book_full
-            elif subsequent_ref_match and last_book_full:
-                chapter, verses = subsequent_ref_match.groups()
-                processed_parts.append(_format_ref_segment(last_book_full, chapter, verses, True))
-        
-        return f"({'; '.join(processed_parts)})"
-    text = re.sub(r'\(([^)]+)\)', process_enclosed_refs, text)
-    
-    # This regex handles standalone prose references
-    standalone_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+)[:\.](\d+[\w\s,.\–-]*(?:ff|f)?)\b', re.IGNORECASE)
-    def standalone_replacer(match):
+    last_book_abbr = None
+
+    def replacer(match):
+        nonlocal last_book_abbr
         book_abbr, chapter, verses = match.groups()
-        book_full = all_books.get(book_abbr.strip().rstrip('.'), book_abbr)
-        return _format_ref_segment(book_full, chapter, verses, False)
-    text = standalone_pattern.sub(standalone_replacer, text)
+        if book_abbr:
+            last_book_abbr = book_abbr.strip()
+        if not last_book_abbr:
+            return match.group(0)
+        book_full = ABBREVIATIONS.get(last_book_abbr.replace('.',''), last_book_abbr)
+        return _format_ref_segment(book_full, chapter, verses or "")
+
+    def replacer_simple(match):
+        book_abbr, chapter, verses = match.groups()
+        book_full = ABBREVIATIONS.get(book_abbr.replace('.',''), book_abbr)
+        return _format_ref_segment(book_full, chapter, verses or "")
+
+    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+)[:\s]([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
+    enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
+
+    def enclosed_replacer(match):
+        nonlocal last_book_abbr
+        last_book_abbr = None
+        opener, inner_text, closer = match.groups()
+        last_end = 0
+        new_parts = []
+        for m in ref_pattern.finditer(inner_text):
+            new_parts.append(inner_text[last_end:m.start()])
+            new_parts.append(replacer(m))
+            last_end = m.end()
+        new_parts.append(inner_text[last_end:])
+        return opener + "".join(new_parts) + closer
+
+    text = enclosed_pattern.sub(enclosed_replacer, text)
+    text = prose_pattern.sub(replacer_simple, text)
     return text
 
 def number_replacer(match):
     num_str = match.group(0)
-    num_int = int(num_str)
-
-    if len(num_str) == 4 and 1100 <= num_int <= 2099:
-        if num_int >= 2000:
-             return _inflect.number_to_words(num_int, group=0)
+    if len(num_str) == 4 and 1100 <= int(num_str) <= 1999:
         part1 = _inflect.number_to_words(num_str[:2])
         part2 = _inflect.number_to_words(num_str[2:])
-        if part2 == "zero": return f"{part1} hundred"
         return f"{part1} {part2}"
-        
-    return _inflect.number_to_words(num_int)
+
+    num_int = int(num_str)
+    if len(num_str) == 4 and 1000 <= num_int <= 2099:
+        if 2000 <= num_int <= 2009: return _inflect.number_to_words(num_int, andword="")
+        else: return _inflect.number_to_words(num_int, group=2).replace(",", "")
+    else:
+        return _inflect.number_to_words(num_int, andword="")
 
 def normalize_text(text: str) -> str:
-    # --- STAGE 1: Pre-processing and Artifact Removal ---
-    if SUPERSCRIPTS:
-        text = text.translate(str.maketrans('', '', "".join(SUPERSCRIPTS)))
-    text = re.sub(r'\[[a-zA-Z0-9]\]', '', text) # Remove footnote markers like [a], [1]
+    # Removed call to the buggy and redundant convert_to_unicode_superscript function
+    text = remove_superscripts(text)
+    text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
 
-    # Process line-by-line to strip unwanted leading numbers before anything else
-    lines = text.split('\n')
-    processed_lines = []
-    book_name_pattern = r'\b(?:[1-3]|First|Second|Third)\s+[A-Za-z]+'
-    for line in lines:
-        stripped_line = line.strip()
-        # Strip leading numbers (e.g., "11 Paul...") but not from book names (e.g., "1 Corinthians")
-        if re.match(r'^\d+\s+', stripped_line) and not re.match(book_name_pattern, stripped_line, re.IGNORECASE):
-            processed_lines.append(re.sub(r'^\d+\s+', '', stripped_line))
-        else:
-            processed_lines.append(line)
-    text = '\n'.join(processed_lines)
-    
-    # --- STAGE 2: Convert Verse Markers and Scripture References ---
-    # Handles chapter:verse (e.g., "2:5") and :verse (e.g., ":83")
-    def _replace_verse_marker(match):
+    def _replace_leading_verse_marker(match):
         chapter, verse = match.groups()
-        chapter_words = _inflect.number_to_words(chapter) if chapter else ""
         verse_words = _inflect.number_to_words(verse)
-        return f"chapter {chapter_words} verse {verse_words}" if chapter else f"verse {verse_words}"
-    text = re.sub(r'\b(?:(\d+):)?(\d+)\b', _replace_verse_marker, text)
+        if chapter:
+            chapter_words = _inflect.number_to_words(chapter)
+            return f"chapter {chapter_words} verse {verse_words} "
+        return f"verse {verse_words} "
 
+    text = re.sub(r'^\s*(?:(\d+))?:(\d+)\b', _replace_leading_verse_marker, text, flags=re.M)
+    text = re.sub(r"verse\s+([A-Z\s]+)([a-z]+):([a-z]+)", r"\1. verse \3", text)
     text = normalize_scripture(text)
 
-    # --- STAGE 3: Expand Phrases, Abbreviations, and Symbols ---
-    for phrase, replacement in LATIN_PHRASES.items():
-        text = re.sub(rf'\b{re.escape(phrase)}\b', replacement, text, flags=re.IGNORECASE)
+    for phrase in sorted(LATIN_PHRASES.keys(), key=len, reverse=True):
+        replacement = LATIN_PHRASES[phrase]
+        text = re.sub(rf'\b{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
 
     text = _strip_diacritics(text)
     text = normalize_hebrew(text)
     text = normalize_greek(text)
     text = expand_roman_numerals(text)
-    
-    non_bible_abbrs = {k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS)}
+
+    non_bible_abbrs = { k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS) }
     for abbr, expanded in non_bible_abbrs.items():
-        flags = re.IGNORECASE if abbr not in CASE_SENSITIVE_ABBRS else 0
-        text = re.sub(rf"\b{re.escape(abbr)}\b(?!\.)", expanded, text, flags=flags)
+        flags = 0 if abbr in CASE_SENSITIVE_ABBRS else re.IGNORECASE
+        text = re.sub(rf"\b{re.escape(abbr)}\b", expanded, text, flags=flags)
 
-    for contr, expanded in CONTRACTIONS.items():
-        text = text.replace(contr, expanded)
-    for sym, expanded in SYMBOLS.items():
-        text = text.replace(sym, expanded)
-    for p, repl in PUNCTUATION.items():
-        text = text.replace(p, repl)
+    for contr, expanded in CONTRACTIONS.items(): text = text.replace(contr, expanded)
+    for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
+    for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
-    # --- STAGE 4: Final Number Conversion and Formatting ---
-    # All semantic numbers (verses, etc.) are handled, now convert remaining numbers
+    text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
+    text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
     text = re.sub(r"\b\d+\b", number_replacer, text)
-    
-    text = re.sub(r'\n\s*\n', '. \n', text)
-    text = re.sub(r"[\[\]()]", " , ", text)
-    text = re.sub(r"\s+", " ", text).strip()
 
+    text = re.sub(r'^([A-Z][A-Z0-9\s,.-]{4,})$', r'. ... \1. ... ', text, flags=re.MULTILINE)
+    text = re.sub(r'\n\s*\n', '. ... \n', text)
+
+    text = re.sub(r"\[|\]", " , ", text).replace("(", "").replace(")", "")
+    text = re.sub(r"\s+", " ", text).strip()
     return text
 
 class TTSService:
