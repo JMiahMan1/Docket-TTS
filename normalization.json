@@ -302,7 +302,6 @@
     "Supt.": "Superintendent",
     "TDNT": "Theological Dictionary of the New Testament",
     "TDNT.": "Theological Dictionary of the New Testament",
-    "Them": "Themelios",
     "Them.": "Themelios",
     "TheolBeitr": "Theologische Beiträge",
     "TheolBeitr.": "Theologische Beiträge",
@@ -357,7 +356,7 @@
     "⁺","⁻","⁼","⁽","⁾"
   ],
   "ambiguous_bible_abbrs": ["Is", "Rev", "Acts", "Job", "Song", "Amos"],
-  "case_sensitive_abbrs": ["Bib", "Di", "Enc", "Int", "Rev", "SE", "ST", "Them", "VE"],
+  "case_sensitive_abbrs": ["Bib", "Di", "Enc", "Int", "Rev", "SE", "ST", "VE"],
   "roman_numeral_exceptions": ["LXX", "I"],
   "bible_refs": {"ff": "and following", "f": "and the following verse"},
   "contractions": {
