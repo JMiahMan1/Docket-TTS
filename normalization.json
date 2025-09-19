@@ -362,7 +362,7 @@
   "bible_refs": {"ff": "and following", "f": "and the following verse"},
   "contractions": {
     "can't": "cannot", "won't": "will not", "n't": " not", "'re": " are", "'ll": " will",
-    "'ve": " have", "'d": " would", "'m": " am"
+    "'ve": " have", "'d": " would", "'m": " am", "lol": "ha-ha"
   },
   "symbols": {"%": " percent", "&": " and", "$": " dollars"},
   "punctuation": {"...": ". ", "—": ", ", "–": ", "},
