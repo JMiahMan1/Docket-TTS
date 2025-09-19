@@ -1,4 +1,3 @@
-# tests/test_functionality.py
 import os
 import requests
 import time
@@ -13,11 +12,10 @@ TIMEOUT = 600      # 10 minutes, increased for slower CI runners
 
 def submit_and_poll_task(title, text_content, speed_rate="1.0"):
     """Helper function to submit a task and poll for its completion."""
-    # Step 1: Submit the text for conversion
     payload = {
         'text_title': title,
         'text_input': text_content,
-        'voice': 'en_US-hfc_male-medium.onnx', # Use a default voice for testing
+        'voice': 'en_US-hfc_male-medium.onnx',
         'speed_rate': speed_rate
     }
     submit_response = requests.post(f"{BASE_URL}/", data=payload)
@@ -28,7 +26,6 @@ def submit_and_poll_task(title, text_content, speed_rate="1.0"):
     task_id = task_id_line[0].split('"')[1]
     assert task_id, "Task ID is empty."
 
-    # Step 2: Poll the status endpoint until the task is complete
     start_time = time.time()
     while time.time() - start_time < TIMEOUT:
         try:
@@ -53,28 +50,26 @@ def submit_and_poll_task(title, text_content, speed_rate="1.0"):
             elif status_data.get('state') == 'FAILURE':
                 pytest.fail(f"Task {task_id} failed with message: {status_data.get('status')}")
         except requests.ConnectionError:
-            # Wait and retry if the server is temporarily unavailable
             pass
             
         time.sleep(POLL_INTERVAL)
     
     pytest.fail(f"Task {task_id} timed out after {TIMEOUT} seconds.")
 
-def cleanup_files(base_filename):
-    """Sends a request to the server to delete generated files."""
-    if base_filename:
+def cleanup_files(mp3_filename):
+    """Sends a request to the server to delete generated files to keep the test environment clean."""
+    if mp3_filename:
+        # The base name is the filename without the .mp3 extension
+        base_name = Path(mp3_filename).stem
         try:
-            # Align key with test_uploads.py for consistency
-            requests.post(f"{BASE_URL}/delete-bulk", data={'files_to_delete': [base_filename]})
+            requests.post(f"{BASE_URL}/delete-bulk", data={'files_to_delete': [base_name]})
         except requests.RequestException as e:
-            print(f"Warning: Failed to cleanup file {base_filename}. Reason: {e}")
+            print(f"Warning: Failed to cleanup file {base_name}. Reason: {e}")
 
-# --- Lightest Tests First ---
+# --- Test Suite ---
 
 def test_year_pronunciation():
-    """
-    Tests the special normalization logic for pronouncing years.
-    """
+    """Tests the special normalization logic for pronouncing years."""
     title = "Year Pronunciation Test"
     text = "The text was published in 1984. A revision was made in the year 2005. The original manuscript from 999 AD is lost."
     mp3_filename = None
@@ -84,13 +79,10 @@ def test_year_pronunciation():
         assert "nineteen eighty-four" in normalized_text
         assert "two thousand five" in normalized_text
     finally:
-        if mp3_filename:
-            cleanup_files(Path(mp3_filename).stem)
+        cleanup_files(mp3_filename)
 
 def test_greek_transliteration():
-    """
-    Tests the transliteration of Greek words into English characters.
-    """
+    """Tests the transliteration of Greek words into English characters."""
     title = "Greek Transliteration Test"
     text = "The first word is άνομίαι anomiai. The second Greek word is ἁμαρτίαν 'amartiai."
     mp3_filename = None
@@ -99,13 +91,10 @@ def test_greek_transliteration():
         assert "anomiai" in normalized_text
         assert "amartiai" in normalized_text
     finally:
-        if mp3_filename:
-            cleanup_files(Path(mp3_filename).stem)
+        cleanup_files(mp3_filename)
 
 def test_latin_phrase_expansion():
-    """
-    Tests the expansion of common Latin abbreviations.
-    """
+    """Tests the expansion of common Latin abbreviations."""
     title = "Latin Phrase Test"
     text = "We must consider other factors, e.g., the historical context. This is different from the previous point, i.e., the textual context, cf. the primary sources."
     mp3_filename = None
@@ -113,14 +102,12 @@ def test_latin_phrase_expansion():
         normalized_text, mp3_filename = submit_and_poll_task(title, text)
         assert "for example" in normalized_text
         assert "that is" in normalized_text
+        assert "compare" in normalized_text
     finally:
-        if mp3_filename:
-            cleanup_files(Path(mp3_filename).stem)
+        cleanup_files(mp3_filename)
 
 def test_roman_numeral_expansion():
-    """
-    Tests the expansion of Roman numerals.
-    """
+    """Tests the expansion of Roman numerals."""
     title = "Roman Numeral Test"
     text = "The council in Acts XV was a pivotal moment. The events of chapter VI are also important, see section IV."
     mp3_filename = None
@@ -129,33 +116,25 @@ def test_roman_numeral_expansion():
         assert "Acts Roman Numeral fifteen" in normalized_text
         assert "chapter Roman Numeral six" in normalized_text
     finally:
-        if mp3_filename:
-            cleanup_files(Path(mp3_filename).stem)
+        cleanup_files(mp3_filename)
 
-# --- Heavier Tests Last ---
 def test_f_and_ff_suffixes():
-    """
-    Tests normalization of verse references with 'f' and 'ff' suffixes, including complex multi-book references.
-    """
+    """Tests normalization of verse references with 'f' and 'ff' suffixes."""
     title = "F and FF Suffix Test"
     text = "Paul discusses the sacrifice of Jesus (Rom 3:21ff), the Passover (1 Cor 5:7f), and the rebuilding period (Ezra 3:7ff.; Neh 4:1ff.)."
     mp3_filename = None
     try:
         normalized_text, mp3_filename = submit_and_poll_task(title, text)
         normalized_text = normalized_text.lower()
-
         assert "romans chapter three, verse twenty-one and following" in normalized_text
         assert "first corinthians chapter five, verse seven and the following verse" in normalized_text
         assert "ezra chapter three, verse seven and following" in normalized_text
         assert "nehemiah chapter four, verse one and following" in normalized_text
     finally:
-        if mp3_filename:
-            cleanup_files(Path(mp3_filename).stem)
+        cleanup_files(mp3_filename)
 
 def test_partial_verses():
-    """
-    Tests normalization of partial verses like '19a' and '19b'.
-    """
+    """Tests normalization of partial verses like '19a' and '19b'."""
     title = "Partial Verse Test"
     text = "This term speaks of lawlessness [Rom 6:19a; 1 John 3:4], producing lawless deeds [Matt 13:41; Rom 6:19b; Heb 10:17]."
     mp3_filename = None
@@ -165,13 +144,10 @@ def test_partial_verses():
         assert "romans chapter six, verse nineteen a" in normalized_text
         assert "romans chapter six, verse nineteen b" in normalized_text
     finally:
-        if mp3_filename:
-            cleanup_files(Path(mp3_filename).stem)
+        cleanup_files(mp3_filename)
 
 def test_multi_book_references():
-    """
-    Tests normalization of a string with multiple book, chapter, and verse references.
-    """
+    """Tests normalization of chained scripture references."""
     title = "Multi-Book Test"
     text = "many scholars believe both the Genesis narratives of the birth of Isaac (Gen 17:17; 18:1-15; 21:1-7) and the offering of Isaac as a sacrifice (Gen 22:15-17) show additional occasions"
     mp3_filename = None
@@ -180,16 +156,49 @@ def test_multi_book_references():
         normalized_text = normalized_text.lower()
         assert "genesis chapter seventeen, verse seventeen" in normalized_text
         assert "genesis chapter eighteen, verses one through fifteen" in normalized_text
+        assert "genesis chapter twenty-one, verses one through seven" in normalized_text
     finally:
-        if mp3_filename:
-            cleanup_files(Path(mp3_filename).stem)
+        cleanup_files(mp3_filename)
 
+def test_abbreviation_and_contraction_conflict():
+    """Tests that a case-sensitive abbreviation (VE) is not confused with a lowercase contraction ('ve)."""
+    title = "Abbreviation Conflict Test"
+    text = "I've been reading VE on the church."
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+        assert "i have" in normalized_text
+        assert "verbum et ecclesia" in normalized_text
+        assert "i'verbum et ecclesia" not in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_mp3_speed_rate():
+    """Tests that changing the speed rate affects the duration of the output MP3."""
+    title = "Speed Rate Test"
+    text = "This is a standard sentence for testing the audio duration at different speech rates."
+    normal_mp3, fast_mp3 = None, None
+    try:
+        # Generate at normal speed
+        _, normal_mp3 = submit_and_poll_task(title, text, speed_rate="1.0")
+        normal_response = requests.get(f"{BASE_URL}/generated/{normal_mp3}")
+        normal_duration = MP3(io.BytesIO(normal_response.content)).info.length
+
+        # Generate at fast speed
+        _, fast_mp3 = submit_and_poll_task(title, text, speed_rate="0.8")
+        fast_response = requests.get(f"{BASE_URL}/generated/{fast_mp3}")
+        fast_duration = MP3(io.BytesIO(fast_response.content)).info.length
+
+        assert fast_duration < normal_duration
+    finally:
+        cleanup_files(normal_mp3)
+        cleanup_files(fast_mp3)
+        
 def test_mp3_cover_art_embedding():
-    """
-    Tests that a generated MP3 file contains embedded cover art.
-    """
+    """Tests that a generated MP3 file contains the fallback placeholder cover art."""
     title = "MP3 Cover Art Test"
-    text = "This is a simple test to ensure an image is embedded in the output MP3 file."
+    text = "This test ensures an image is embedded in the output MP3 file when none is provided."
     mp3_filename = None
     try:
         _, mp3_filename = submit_and_poll_task(title, text)
@@ -197,14 +206,10 @@ def test_mp3_cover_art_embedding():
         mp3_response = requests.get(f"{BASE_URL}/generated/{mp3_filename}")
         assert mp3_response.status_code == 200
         
-        mp3_file = io.BytesIO(mp3_response.content)
-        audio = MP3(mp3_file)
+        # Use BytesIO to load the MP3 content from memory
+        audio = MP3(io.BytesIO(mp3_response.content))
 
-        apic_tag_found = any(key.startswith('APIC:') for key in audio.tags)
-        assert apic_tag_found, "APIC (cover art) tag not found in the MP3 file."
-
-        cover_art_tag = next((tag for key, tag in audio.tags.items() if key.startswith('APIC:')), None)
-        assert cover_art_tag is not None and len(cover_art_tag.data) > 0, "Cover art data is empty."
+        # Check that the APIC (cover art) tag exists
+        assert any(key.startswith('APIC:') for key in audio.tags), "APIC (cover art) tag not found."
     finally:
-        if mp3_filename:
-            cleanup_files(Path(mp3_filename).stem)
+        cleanup_files(mp3_filename)

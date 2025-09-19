@@ -161,7 +161,7 @@ def normalize_scripture(text: str) -> str:
             new_parts.append(replacer(m))
             last_end = m.end()
         new_parts.append(inner_text[last_end:])
-        return "".join(new_parts) # Keep opener/closer separate for now
+        return "".join(new_parts)
 
     text = enclosed_pattern.sub(lambda m: m.group(1) + enclosed_replacer(m) + m.group(3), text)
     text = prose_pattern.sub(replacer_simple, text)
@@ -172,14 +172,17 @@ def number_replacer(match):
     if not num_str.isdigit(): return num_str
     
     num_int = int(num_str)
+    
+    # Corrected year logic
     if len(num_str) == 4:
         if 1100 <= num_int <= 1999:
             part1 = _inflect.number_to_words(num_str[:2])
             part2 = _inflect.number_to_words(num_str[2:])
             return f"{part1} {part2}"
         elif 2000 <= num_int <= 2099:
-            return _inflect.number_to_words(num_int)
-    
+            # Converts "two thousand and five" to "two thousand five"
+            return _inflect.number_to_words(num_int).replace(" and ", " ")
+            
     return _inflect.number_to_words(num_int)
 
 def normalize_text(text: str) -> str:
@@ -198,9 +201,12 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"verse\s+([A-Z\s]+)([a-z]+):([a-z]+)", r"\1. verse \3", text)
     text = normalize_scripture(text)
 
+    # Corrected Latin phrase logic
     for phrase in sorted(LATIN_PHRASES.keys(), key=len, reverse=True):
         replacement = LATIN_PHRASES[phrase]
-        text = re.sub(rf'\b{re.escape(phrase)}\b', replacement, text, flags=re.IGNORECASE)
+        # Uses more robust negative lookarounds instead of \b
+        pattern = rf"(?<!\w){re.escape(phrase)}(?!\w)"
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
     text = _strip_diacritics(text)
     text = normalize_hebrew(text)
@@ -210,7 +216,7 @@ def normalize_text(text: str) -> str:
     non_bible_abbrs = { k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS) }
     for abbr, expanded in non_bible_abbrs.items():
         flags = 0 if abbr in CASE_SENSITIVE_ABBRS else re.IGNORECASE
-        text = re.sub(rf"\b{re.escape(abbr)}\b", expanded, text, flags=flags)
+        text = re.sub(rf"(?<![\w']){re.escape(abbr)}(?![\w'])", expanded, text, flags=flags)
 
     for contr, expanded in CONTRACTIONS.items(): text = text.replace(contr, expanded)
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
@@ -229,51 +235,32 @@ def normalize_text(text: str) -> str:
 
 class TTSService:
     def __init__(self, voice: str = "en_US-hfc_male-medium.onnx", speed_rate: str = "1.0"):
-        # This logic robustly finds the voice model relative to this file's location
+        self.speed_rate = speed_rate
         voices_dir = Path(__file__).parent / 'voices'
         self.voice_path = voices_dir / voice
-        self.speed_rate = speed_rate
-
         if not self.voice_path.exists():
-            # Fallback for environments where the script is not in the project root
             cwd_voices_path = Path.cwd() / "voices" / voice
             if cwd_voices_path.exists():
                 self.voice_path = cwd_voices_path
             else:
-                 raise ValueError(f"Voice model not found at {self.voice_path} or {cwd_voices_path}")
+                 raise ValueError(f"Voice model not found at {voices_dir} or {Path.cwd() / 'voices'}")
 
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)
-
-        piper_command = [
-            "piper", 
-            "--model", str(self.voice_path),
-            "--length_scale", str(self.speed_rate),
-            "--output_file", "-"
-        ]
-
-        ffmpeg_command = [
-            "ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1",
-            "-i", "-", "-acodec", "libmp3lame", "-q:a", "2", output_path
-        ]
-
+        piper_command = ["piper", "--model", str(self.voice_path), "--length_scale", str(self.speed_rate), "--output_file", "-"]
+        ffmpeg_command = ["ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1", "-i", "-", "-acodec", "libmp3lame", "-q:a", "2", output_path]
         try:
             piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
             piper_process.stdin.write(normalized_text.encode('utf-8'))
             piper_process.stdin.close()
             piper_process.stdout.close()
-
             _, ffmpeg_err = ffmpeg_process.communicate()
-
             if piper_process.wait() != 0:
                 piper_err = piper_process.stderr.read().decode()
                 raise RuntimeError(f"Piper process failed: {piper_err}")
-
             if ffmpeg_process.returncode != 0:
                 raise RuntimeError(f"FFmpeg encoding process failed: {ffmpeg_err.decode()}")
         except FileNotFoundError as e:
             raise RuntimeError(f"Command not found: {e.filename}. Ensure piper-tts and ffmpeg are installed.")
-
         return output_path, normalized_text

@@ -357,7 +357,7 @@
     "⁺","⁻","⁼","⁽","⁾"
   ],
   "ambiguous_bible_abbrs": ["Is", "Rev", "Acts", "Job", "Song", "Amos"],
-  "case_sensitive_abbrs": ["Bib", "Di", "Enc", "Int", "Rev", "SE", "ST", "Them"],
+  "case_sensitive_abbrs": ["Bib", "Di", "Enc", "Int", "Rev", "SE", "ST", "Them", "VE"],
   "roman_numeral_exceptions": ["LXX", "I"],
   "bible_refs": {"ff": "and following", "f": "and the following verse"},
   "contractions": {
