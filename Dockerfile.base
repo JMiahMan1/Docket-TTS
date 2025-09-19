@@ -26,6 +26,8 @@ RUN dnf install -y dnf-plugins-core && \
         gcc \
         gcc-c++ \
         cmake \
+        rpm \
+        dnf \
         make libffi-devel bzip2-devel zlib-devel xz-devel \
         git curl unzip which && \
     dnf clean all -y --installroot=/install_root
