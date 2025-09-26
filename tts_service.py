@@ -10,6 +10,8 @@ NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
     ABBREVIATIONS = NORMALIZATION.get("abbreviations", {})
+    # FIX: Create a case-insensitive dictionary for lookups.
+    CI_ABBREVIATIONS = {k.lower(): v for k, v in ABBREVIATIONS.items()}
     BIBLE_BOOKS = NORMALIZATION.get("bible_books", [])
     CASE_SENSITIVE_ABBRS = NORMALIZATION.get("case_sensitive_abbrs", [])
     ROMAN_EXCEPTIONS = set(NORMALIZATION.get("roman_numeral_exceptions", []))
@@ -22,7 +24,7 @@ if NORMALIZATION_PATH.exists():
     SUPERSCRIPTS = NORMALIZATION.get("superscripts", [])
     SUPERSCRIPT_MAP = NORMALIZATION.get("SUPERSCRIPT_MAP", {})
 else:
-    ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION, SUPERSCRIPTS, SUPERSCRIPT_MAP = {}, [], [], set(), {}, {}, {}, {}, {}, {}, [], {}
+    ABBREVIATIONS, CI_ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION, SUPERSCRIPTS, SUPERSCRIPT_MAP = {}, {}, [], [], set(), {}, {}, {}, {}, {}, {}, [], {}
 
 _inflect = inflect.engine()
 
@@ -123,6 +125,10 @@ def normalize_scripture(text: str) -> str:
     book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
 
+    book_chapter_pattern = re.compile(
+        r'^\s*(' + book_pattern_str + r')\s+(\d+)\s*$',
+        re.IGNORECASE | re.MULTILINE
+    )
     ref_pattern = re.compile(
         r'\b(' + book_pattern_str + r')?' +
         r'\s*' +
@@ -131,9 +137,16 @@ def normalize_scripture(text: str) -> str:
         r'([\d\w\s,.\–-]+(?:ff|f)?)',
         re.IGNORECASE
     )
-    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+)[:\s]([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
+    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
     enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
     last_book_abbr = None
+
+    def book_chapter_replacer(match):
+        book_abbr, chapter = match.groups()
+        # FIX: Use case-insensitive dictionary
+        book_full = CI_ABBREVIATIONS.get(book_abbr.replace('.','').lower(), book_abbr)
+        chapter_words = _inflect.number_to_words(int(chapter))
+        return f"{book_full} chapter {chapter_words}"
 
     def replacer(match):
         nonlocal last_book_abbr
@@ -142,28 +155,41 @@ def normalize_scripture(text: str) -> str:
             last_book_abbr = book_abbr.strip()
         if not last_book_abbr:
             return match.group(0)
-        book_full = ABBREVIATIONS.get(last_book_abbr.replace('.',''), last_book_abbr)
+        # FIX: Use case-insensitive dictionary
+        book_full = CI_ABBREVIATIONS.get(last_book_abbr.replace('.','').lower(), last_book_abbr)
         return _format_ref_segment(book_full, chapter, verses or "")
 
     def replacer_simple(match):
         book_abbr, chapter, verses = match.groups()
-        book_full = ABBREVIATIONS.get(book_abbr.replace('.',''), book_abbr)
+        # FIX: Use case-insensitive dictionary
+        book_full = CI_ABBREVIATIONS.get(book_abbr.replace('.','').lower(), book_abbr)
         return _format_ref_segment(book_full, chapter, verses or "")
 
     def enclosed_replacer(match):
         nonlocal last_book_abbr
         last_book_abbr = None
         opener, inner_text, closer = match.groups()
-        last_end = 0
-        new_parts = []
-        for m in ref_pattern.finditer(inner_text):
-            new_parts.append(inner_text[last_end:m.start()])
-            new_parts.append(replacer(m))
-            last_end = m.end()
-        new_parts.append(inner_text[last_end:])
-        return "".join(new_parts)
+        
+        parts = re.split(r'(;)', inner_text)
+        final_text_parts = []
+        for i, part in enumerate(parts):
+            if i % 2 == 1:
+                final_text_parts.append(part)
+                continue
 
-    text = enclosed_pattern.sub(lambda m: m.group(1) + enclosed_replacer(m) + m.group(3), text)
+            last_end = 0
+            new_chunk_parts = []
+            for m in ref_pattern.finditer(part):
+                new_chunk_parts.append(part[last_end:m.start()])
+                new_chunk_parts.append(replacer(m))
+                last_end = m.end()
+            new_chunk_parts.append(part[last_end:])
+            final_text_parts.append("".join(new_chunk_parts))
+        
+        return "".join(final_text_parts)
+
+    text = book_chapter_pattern.sub(book_chapter_replacer, text)
+    text = enclosed_pattern.sub(enclosed_replacer, text)
     text = prose_pattern.sub(replacer_simple, text)
     return text
 
@@ -211,9 +237,6 @@ def normalize_text(text: str) -> str:
     
     non_bible_abbrs = { k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS) }
     for abbr, expanded in non_bible_abbrs.items():
-        # *** THE FIX IS HERE ***
-        # Reverting to the standard and more reliable word boundary checker.
-        # Case-sensitivity is correctly handled by the data in normalization.json
         pattern = rf"\b{re.escape(abbr)}\b"
         flags = 0 if abbr in CASE_SENSITIVE_ABBRS else re.IGNORECASE
         text = re.sub(pattern, expanded, text, flags=flags)
@@ -223,7 +246,7 @@ def normalize_text(text: str) -> str:
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
     text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
-    text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
+    text = re.sub(r'([.?!;])\s*("?)\s*\d{1-3}\b', r'\1\2 ', text)
     text = re.sub(r"\b\d+\b", number_replacer, text)
 
     text = re.sub(r'^([A-Z][A-Z0-9\s,.-]{4,})$', r'. ... \1. ... ', text, flags=re.MULTILINE)
