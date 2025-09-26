@@ -29,7 +29,7 @@ from logging.handlers import RotatingFileHandler
 
 from tts_service import TTSService, normalize_text
 
-APP_VERSION = "0.0.3"
+APP_VERSION = "0.0.4"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
