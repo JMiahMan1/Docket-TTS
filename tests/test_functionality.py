@@ -59,7 +59,6 @@ def submit_and_poll_task(title, text_content, speed_rate="1.0"):
 def cleanup_files(mp3_filename):
     """Sends a request to the server to delete generated files to keep the test environment clean."""
     if mp3_filename:
-        # The base name is the filename without the .mp3 extension
         base_name = Path(mp3_filename).stem
         try:
             requests.post(f"{BASE_URL}/delete-bulk", data={'files_to_delete': [base_name]})
@@ -69,7 +68,6 @@ def cleanup_files(mp3_filename):
 # --- Test Suite ---
 
 def test_year_pronunciation():
-    """Tests the special normalization logic for pronouncing years."""
     title = "Year Pronunciation Test"
     text = "The text was published in 1984. A revision was made in the year 2005. The original manuscript from 999 AD is lost."
     mp3_filename = None
@@ -82,7 +80,6 @@ def test_year_pronunciation():
         cleanup_files(mp3_filename)
 
 def test_greek_transliteration():
-    """Tests the transliteration of Greek words into English characters."""
     title = "Greek Transliteration Test"
     text = "The first word is άνομίαι anomiai. The second Greek word is ἁμαρτίαν 'amartiai."
     mp3_filename = None
@@ -94,7 +91,6 @@ def test_greek_transliteration():
         cleanup_files(mp3_filename)
 
 def test_latin_phrase_expansion():
-    """Tests the expansion of common Latin abbreviations."""
     title = "Latin Phrase Test"
     text = "We must consider other factors, e.g., the historical context. This is different from the previous point, i.e., the textual context, cf. the primary sources."
     mp3_filename = None
@@ -107,7 +103,6 @@ def test_latin_phrase_expansion():
         cleanup_files(mp3_filename)
 
 def test_roman_numeral_expansion():
-    """Tests the expansion of Roman numerals."""
     title = "Roman Numeral Test"
     text = "The council in Acts XV was a pivotal moment. The events of chapter VI are also important, see section IV."
     mp3_filename = None
@@ -119,7 +114,6 @@ def test_roman_numeral_expansion():
         cleanup_files(mp3_filename)
 
 def test_f_and_ff_suffixes():
-    """Tests normalization of verse references with 'f' and 'ff' suffixes."""
     title = "F and FF Suffix Test"
     text = "Paul discusses the sacrifice of Jesus (Rom 3:21ff), the Passover (1 Cor 5:7f), and the rebuilding period (Ezra 3:7ff.; Neh 4:1ff.)."
     mp3_filename = None
@@ -134,7 +128,6 @@ def test_f_and_ff_suffixes():
         cleanup_files(mp3_filename)
 
 def test_partial_verses():
-    """Tests normalization of partial verses like '19a' and '19b'."""
     title = "Partial Verse Test"
     text = "This term speaks of lawlessness [Rom 6:19a; 1 John 3:4], producing lawless deeds [Matt 13:41; Rom 6:19b; Heb 10:17]."
     mp3_filename = None
@@ -147,7 +140,6 @@ def test_partial_verses():
         cleanup_files(mp3_filename)
 
 def test_multi_book_references():
-    """Tests normalization of chained scripture references."""
     title = "Multi-Book Test"
     text = "many scholars believe both the Genesis narratives of the birth of Isaac (Gen 17:17; 18:1-15; 21:1-7) and the offering of Isaac as a sacrifice (Gen 22:15-17) show additional occasions"
     mp3_filename = None
@@ -161,7 +153,6 @@ def test_multi_book_references():
         cleanup_files(mp3_filename)
 
 def test_abbreviation_and_contraction_conflict():
-    """Tests that a case-sensitive abbreviation (VE) is not confused with a lowercase contraction ('ve)."""
     title = "Abbreviation Conflict Test"
     text = "I've been reading VE on the church."
     mp3_filename = None
@@ -174,18 +165,27 @@ def test_abbreviation_and_contraction_conflict():
     finally:
         cleanup_files(mp3_filename)
 
+def test_case_sensitive_abbreviation():
+    title = "Case-Sensitive Abbreviation Test"
+    text = "We gave Them the scrolls, and they gave them to us."
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+        assert "themelios" in normalized_text
+        assert "gave them to us" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
 def test_mp3_speed_rate():
-    """Tests that changing the speed rate affects the duration of the output MP3."""
     title = "Speed Rate Test"
     text = "This is a standard sentence for testing the audio duration at different speech rates."
     normal_mp3, fast_mp3 = None, None
     try:
-        # Generate at normal speed
         _, normal_mp3 = submit_and_poll_task(title, text, speed_rate="1.0")
         normal_response = requests.get(f"{BASE_URL}/generated/{normal_mp3}")
         normal_duration = MP3(io.BytesIO(normal_response.content)).info.length
 
-        # Generate at fast speed
         _, fast_mp3 = submit_and_poll_task(title, text, speed_rate="0.8")
         fast_response = requests.get(f"{BASE_URL}/generated/{fast_mp3}")
         fast_duration = MP3(io.BytesIO(fast_response.content)).info.length
@@ -196,20 +196,33 @@ def test_mp3_speed_rate():
         cleanup_files(fast_mp3)
         
 def test_mp3_cover_art_embedding():
-    """Tests that a generated MP3 file contains the fallback placeholder cover art."""
     title = "MP3 Cover Art Test"
     text = "This test ensures an image is embedded in the output MP3 file when none is provided."
     mp3_filename = None
     try:
         _, mp3_filename = submit_and_poll_task(title, text)
-        
         mp3_response = requests.get(f"{BASE_URL}/generated/{mp3_filename}")
         assert mp3_response.status_code == 200
-        
-        # Use BytesIO to load the MP3 content from memory
         audio = MP3(io.BytesIO(mp3_response.content))
-
-        # Check that the APIC (cover art) tag exists
         assert any(key.startswith('APIC:') for key in audio.tags), "APIC (cover art) tag not found."
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_contraction_and_roman_numeral_conflict():
+    """
+    Tests that a contraction like "I'm" is not confused with a Roman numeral "M".
+    """
+    title = "Contraction Roman Numeral Test"
+    text = "I'm not sure what this means."
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+        
+        # Check that "I'm" was correctly expanded to "i am"
+        assert "i am" in normalized_text
+        
+        # Crucially, check that it was NOT expanded to a Roman numeral
+        assert "roman numeral one thousand" not in normalized_text
     finally:
         cleanup_files(mp3_filename)

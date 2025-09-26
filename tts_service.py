@@ -173,14 +173,12 @@ def number_replacer(match):
     
     num_int = int(num_str)
     
-    # Corrected year logic
     if len(num_str) == 4:
         if 1100 <= num_int <= 1999:
             part1 = _inflect.number_to_words(num_str[:2])
             part2 = _inflect.number_to_words(num_str[2:])
             return f"{part1} {part2}"
         elif 2000 <= num_int <= 2099:
-            # Converts "two thousand and five" to "two thousand five"
             return _inflect.number_to_words(num_int).replace(" and ", " ")
             
     return _inflect.number_to_words(num_int)
@@ -201,10 +199,8 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"verse\s+([A-Z\s]+)([a-z]+):([a-z]+)", r"\1. verse \3", text)
     text = normalize_scripture(text)
 
-    # Corrected Latin phrase logic
     for phrase in sorted(LATIN_PHRASES.keys(), key=len, reverse=True):
         replacement = LATIN_PHRASES[phrase]
-        # Uses more robust negative lookarounds instead of \b
         pattern = rf"(?<!\w){re.escape(phrase)}(?!\w)"
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
@@ -212,11 +208,15 @@ def normalize_text(text: str) -> str:
     text = normalize_hebrew(text)
     text = normalize_greek(text)
     text = expand_roman_numerals(text)
-
+    
     non_bible_abbrs = { k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS) }
     for abbr, expanded in non_bible_abbrs.items():
+        # *** THE FIX IS HERE ***
+        # Reverting to the standard and more reliable word boundary checker.
+        # Case-sensitivity is correctly handled by the data in normalization.json
+        pattern = rf"\b{re.escape(abbr)}\b"
         flags = 0 if abbr in CASE_SENSITIVE_ABBRS else re.IGNORECASE
-        text = re.sub(rf"(?<![\w']){re.escape(abbr)}(?![\w'])", expanded, text, flags=flags)
+        text = re.sub(pattern, expanded, text, flags=flags)
 
     for contr, expanded in CONTRACTIONS.items(): text = text.replace(contr, expanded)
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
@@ -247,20 +247,36 @@ class TTSService:
 
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)
-        piper_command = ["piper", "--model", str(self.voice_path), "--length_scale", str(self.speed_rate), "--output_file", "-"]
-        ffmpeg_command = ["ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1", "-i", "-", "-acodec", "libmp3lame", "-q:a", "2", output_path]
+
+        piper_command = [
+            "piper", 
+            "--model", str(self.voice_path),
+            "--length_scale", str(self.speed_rate),
+            "--output_file", "-"
+        ]
+
+        ffmpeg_command = [
+            "ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1",
+            "-i", "-", "-acodec", "libmp3lame", "-q:a", "2", output_path
+        ]
+
         try:
             piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
             piper_process.stdin.write(normalized_text.encode('utf-8'))
             piper_process.stdin.close()
             piper_process.stdout.close()
+
             _, ffmpeg_err = ffmpeg_process.communicate()
+
             if piper_process.wait() != 0:
                 piper_err = piper_process.stderr.read().decode()
                 raise RuntimeError(f"Piper process failed: {piper_err}")
+
             if ffmpeg_process.returncode != 0:
                 raise RuntimeError(f"FFmpeg encoding process failed: {ffmpeg_err.decode()}")
         except FileNotFoundError as e:
             raise RuntimeError(f"Command not found: {e.filename}. Ensure piper-tts and ffmpeg are installed.")
+
         return output_path, normalized_text
