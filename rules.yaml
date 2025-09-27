@@ -1,0 +1,95 @@
+# This file defines the sequence of normalization steps for the TTS service.
+# The rules are processed from top to bottom. Order is critical.
+
+normalization_rules:
+  # === STAGE 1: PRE-PROCESSING AND STRUCTURAL CLEANUP ===
+  - name: "Remove superscripts"
+    type: "function"
+    function_name: "remove_superscripts"
+  - name: "Remove footnotes and reference markers"
+    type: "regex"
+    pattern: '\[\d+\]|\[fn\]|\[[a-zA-Z]\]'
+    replacement: ''
+
+  # === STAGE 2: SCRIPTURE NORMALIZATION ===
+  # This stage is complex and handled by a dedicated function.
+  - name: "Normalize all scripture references (e.g., Romans 8, Rom 8:1, etc.)"
+    type: "function"
+    function_name: "normalize_scripture"
+  - name: "Normalize leading chapter:verse markers (e.g., '2:5 ...')"
+    type: "regex_callback"
+    pattern: '^\s*(?:(\d+))?:(\d+)\b'
+    function_name: "_replace_leading_verse_marker"
+    flags: ["MULTILINE"]
+  - name: "Fix embedded headers in verse calls"
+    type: "regex"
+    pattern: 'verse\s+([A-Z\s]+)([a-z]+):([a-z]+)'
+    replacement: '\1. verse \3'
+
+  # === STAGE 3: LANGUAGE AND PHRASE EXPANSION ===
+  - name: "Expand Latin phrases"
+    type: "dict_lookup"
+    dictionary_name: "latin_phrases"
+    options: { case_insensitive: true, word_boundary: true }
+  - name: "Strip diacritics from characters"
+    type: "function"
+    function_name: "_strip_diacritics"
+  - name: "Normalize Hebrew characters"
+    type: "function"
+    function_name: "normalize_hebrew"
+  - name: "Normalize Greek characters"
+    type: "function"
+    function_name: "normalize_greek"
+  - name: "Expand Roman numerals"
+    type: "function"
+    function_name: "expand_roman_numerals"
+  - name: "Expand non-Biblical abbreviations"
+    type: "dict_lookup"
+    dictionary_name: "non_bible_abbrs"
+    options: { use_case_sensitive_list: true, word_boundary: true }
+  - name: "Expand contractions"
+    type: "dict_lookup"
+    dictionary_name: "contractions"
+    options: { case_insensitive: false, word_boundary: false }
+
+  # === STAGE 4: SYMBOLS AND PUNCTUATION ===
+  - name: "Replace standalone symbols"
+    type: "dict_lookup"
+    dictionary_name: "symbols"
+    options: { case_insensitive: false, word_boundary: false }
+  - name: "Normalize punctuation"
+    type: "dict_lookup"
+    dictionary_name: "punctuation"
+    options: { case_insensitive: false, word_boundary: false }
+
+  # === STAGE 5: NUMERICAL AND FINAL FORMATTING ===
+  - name: "Strip verse numbers at start of lines"
+    type: "regex"
+    pattern: '^\s*\d{1,3}\b'
+    replacement: ''
+    flags: ["MULTILINE"]
+  - name: "Strip verse numbers after punctuation"
+    type: "regex"
+    pattern: '([.?!;])\s*("?)\s*\d{1,3}\b'
+    replacement: '\1\2 '
+  - name: "Expand all remaining numbers to words"
+    type: "regex_callback"
+    pattern: '\b\d+\b'
+    function_name: "number_replacer"
+  - name: "Format all-caps headings with pauses"
+    type: "regex"
+    pattern: '^([A-Z][A-Z0-9\s,.-]{4,})$'
+    replacement: '. ... \1. ... '
+    flags: ["MULTILINE"]
+  - name: "Replace double newlines with pauses"
+    type: "regex"
+    pattern: '\n\s*\n'
+    replacement: '. ... \n'
+  - name: "Replace remaining brackets/parentheses with commas"
+    type: "regex"
+    pattern: '\[|\]|\(|\)'
+    replacement: ' , '
+  - name: "Collapse all extra whitespace"
+    type: "regex"
+    pattern: '\s+'
+    replacement: ' '

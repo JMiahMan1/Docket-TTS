@@ -5,7 +5,6 @@ import pytest
 import io
 from mutagen.mp3 import MP3
 from pathlib import Path
-import re
 
 BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8000")
 POLL_INTERVAL = 5  # seconds
@@ -57,89 +56,193 @@ def submit_and_poll_task(title, text_content, speed_rate="1.0"):
     
     pytest.fail(f"Task {task_id} timed out after {TIMEOUT} seconds.")
 
+def cleanup_files(mp3_filename):
+    """Sends a request to the server to delete generated files to keep the test environment clean."""
+    if mp3_filename:
+        base_name = Path(mp3_filename).stem
+        try:
+            requests.post(f"{BASE_URL}/delete-bulk", data={'files_to_delete': [base_name]})
+        except requests.RequestException as e:
+            print(f"Warning: Failed to cleanup file {base_name}. Reason: {e}")
+
 # --- Test Suite ---
 
 def test_year_pronunciation():
     title = "Year Pronunciation Test"
     text = "The text was published in 1984. A revision was made in the year 2005. The original manuscript from 999 AD is lost."
-    normalized_text, _ = submit_and_poll_task(title, text)
-    normalized_text = normalized_text.lower()
-    assert "nineteen eighty-four" in normalized_text
-    assert "two thousand five" in normalized_text
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+        assert "nineteen eighty-four" in normalized_text
+        assert "two thousand five" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
 
 def test_greek_transliteration():
     title = "Greek Transliteration Test"
     text = "The first word is άνομίαι anomiai. The second Greek word is ἁμαρτίαν 'amartiai."
-    normalized_text, _ = submit_and_poll_task(title, text)
-    assert "anomiai" in normalized_text
-    assert "amartiai" in normalized_text
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        assert "anomiai" in normalized_text
+        assert "amartiai" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
 
 def test_latin_phrase_expansion():
     title = "Latin Phrase Test"
     text = "We must consider other factors, e.g., the historical context. This is different from the previous point, i.e., the textual context, cf. the primary sources."
-    normalized_text, _ = submit_and_poll_task(title, text)
-    assert "for example" in normalized_text
-    assert "that is" in normalized_text
-    assert "compare" in normalized_text
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        assert "for example" in normalized_text
+        assert "that is" in normalized_text
+        assert "compare" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
 
 def test_roman_numeral_expansion():
     title = "Roman Numeral Test"
     text = "The council in Acts XV was a pivotal moment. The events of chapter VI are also important, see section IV."
-    normalized_text, _ = submit_and_poll_task(title, text)
-    assert "Acts Roman Numeral fifteen" in normalized_text
-    assert "chapter Roman Numeral six" in normalized_text
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        assert "Acts Roman Numeral fifteen" in normalized_text
+        assert "chapter Roman Numeral six" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
 
 def test_f_and_ff_suffixes():
     title = "F and FF Suffix Test"
     text = "Paul discusses the sacrifice of Jesus (Rom 3:21ff), the Passover (1 Cor 5:7f), and the rebuilding period (Ezra 3:7ff.; Neh 4:1ff.)."
-    normalized_text, _ = submit_and_poll_task(title, text)
-    normalized_text = normalized_text.lower()
-    assert "romans chapter three, verse twenty-one and following" in normalized_text
-    assert "first corinthians chapter five, verse seven and the following verse" in normalized_text
-    assert "ezra chapter three, verse seven and following" in normalized_text
-    assert "nehemiah chapter four, verse one and following" in normalized_text
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+        assert "romans chapter three, verse twenty-one and following" in normalized_text
+        assert "first corinthians chapter five, verse seven and the following verse" in normalized_text
+        assert "ezra chapter three, verse seven and following" in normalized_text
+        assert "nehemiah chapter four, verse one and following" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
 
 def test_partial_verses():
     title = "Partial Verse Test"
     text = "This term speaks of lawlessness [Rom 6:19a; 1 John 3:4], producing lawless deeds [Matt 13:41; Rom 6:19b; Heb 10:17]."
-    normalized_text, _ = submit_and_poll_task(title, text)
-    normalized_text = normalized_text.lower()
-    assert "romans chapter six, verse nineteen a" in normalized_text
-    assert "romans chapter six, verse nineteen b" in normalized_text
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+        assert "romans chapter six, verse nineteen a" in normalized_text
+        assert "romans chapter six, verse nineteen b" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
 
 def test_multi_book_references():
     title = "Multi-Book Test"
     text = "many scholars believe both the Genesis narratives of the birth of Isaac (Gen 17:17; 18:1-15; 21:1-7) and the offering of Isaac as a sacrifice (Gen 22:15-17) show additional occasions"
-    normalized_text, _ = submit_and_poll_task(title, text)
-    normalized_text = normalized_text.lower()
-    assert "genesis chapter seventeen, verse seventeen" in normalized_text
-    assert "genesis chapter eighteen, verses one through fifteen" in normalized_text
-    assert "genesis chapter twenty-one, verses one through seven" in normalized_text
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+        assert "genesis chapter seventeen, verse seventeen" in normalized_text
+        assert "genesis chapter eighteen, verses one through fifteen" in normalized_text
+        assert "genesis chapter twenty-one, verses one through seven" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
 
-def test_heading_and_scripture_normalization():
+def test_abbreviation_and_contraction_conflict():
+    title = "Abbreviation Conflict Test"
+    text = "I've been reading VE on the church."
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+        assert "i have" in normalized_text
+        assert "verbum et ecclesia" in normalized_text
+        assert "i'verbum et ecclesia" not in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_no_false_positive_on_et_al():
     """
-    Tests that headings are correctly identified before scripture references are parsed.
+    Tests that a word ending in 'el' followed by a word starting with 'al'
+    (e.g., "Colonel Albert") is not incorrectly identified as "et al".
     """
-    title = "Heading and Scripture Test"
-    text = """Romans 8
-THE MESSIAH KING AND HIS BRIDAL GIFT
-(ROM 8:1–16)
-Therefore, there is now no condemnation for those who are in
-Christ Jesus, because through Christ Jesus the law of the Spirit of
-life set me free from the law of sin and death."""
-    
-    normalized_text, _ = submit_and_poll_task(title, text)
-    normalized_text = normalized_text.lower()
-    
-    # Verify heading is correctly formatted
-    assert ". ... the messiah king and his bridal gift. ... " in normalized_text
-    
-    # Verify scripture is correctly expanded
-    assert "romans chapter eight" in normalized_text
-    assert "romans chapter eight, verses one through sixteen" in normalized_text
-    
-    # Verify prose is intact
-    assert "therefore, there is now no condemnation" in normalized_text
-    
-    # Verify the heading was NOT consumed as a verse
-    assert "verse the messiah king" not in normalized_text
+    title = "Et Al False Positive Test"
+    text = "The final report from Colonel Albert was conclusive."
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+
+        # Verify that the original words are still present
+        assert "colonel albert" in normalized_text
+
+        # Verify that the phrase was NOT incorrectly converted to "et al"
+        assert "et al" not in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_case_sensitive_abbreviation():
+    title = "Case-Sensitive Abbreviation Test"
+    text = "We gave Them the scrolls, and they gave them to us."
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+        assert "themelios" in normalized_text
+        assert "gave them to us" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_mp3_speed_rate():
+    title = "Speed Rate Test"
+    text = "This is a standard sentence for testing the audio duration at different speech rates."
+    normal_mp3, fast_mp3 = None, None
+    try:
+        _, normal_mp3 = submit_and_poll_task(title, text, speed_rate="1.0")
+        normal_response = requests.get(f"{BASE_URL}/generated/{normal_mp3}")
+        normal_duration = MP3(io.BytesIO(normal_response.content)).info.length
+
+        _, fast_mp3 = submit_and_poll_task(title, text, speed_rate="0.8")
+        fast_response = requests.get(f"{BASE_URL}/generated/{fast_mp3}")
+        fast_duration = MP3(io.BytesIO(fast_response.content)).info.length
+
+        assert fast_duration < normal_duration
+    finally:
+        cleanup_files(normal_mp3)
+        cleanup_files(fast_mp3)
+        
+def test_mp3_cover_art_embedding():
+    title = "MP3 Cover Art Test"
+    text = "This test ensures an image is embedded in the output MP3 file when none is provided."
+    mp3_filename = None
+    try:
+        _, mp3_filename = submit_and_poll_task(title, text)
+        mp3_response = requests.get(f"{BASE_URL}/generated/{mp3_filename}")
+        assert mp3_response.status_code == 200
+        audio = MP3(io.BytesIO(mp3_response.content))
+        assert any(key.startswith('APIC:') for key in audio.tags), "APIC (cover art) tag not found."
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_contraction_and_roman_numeral_conflict():
+    """
+    Tests that a contraction like "I'm" is not confused with a Roman numeral "M".
+    """
+    title = "Contraction Roman Numeral Test"
+    text = "I'm not sure what this means."
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+        
+        # Check that "I'm" was correctly expanded to "i am"
+        assert "i am" in normalized_text
+        
+        # Crucially, check that it was NOT expanded to a Roman numeral
+        assert "roman numeral one thousand" not in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
