@@ -6,10 +6,12 @@ import unicodedata
 from pathlib import Path
 from argostranslate import translate
 
-NORMALIZATION_PATH = Path("normalization.json")
+NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
     ABBREVIATIONS = NORMALIZATION.get("abbreviations", {})
+    # FIX: Create a case-insensitive dictionary for lookups.
+    CI_ABBREVIATIONS = {k.lower(): v for k, v in ABBREVIATIONS.items()}
     BIBLE_BOOKS = NORMALIZATION.get("bible_books", [])
     CASE_SENSITIVE_ABBRS = NORMALIZATION.get("case_sensitive_abbrs", [])
     ROMAN_EXCEPTIONS = set(NORMALIZATION.get("roman_numeral_exceptions", []))
@@ -22,7 +24,7 @@ if NORMALIZATION_PATH.exists():
     SUPERSCRIPTS = NORMALIZATION.get("superscripts", [])
     SUPERSCRIPT_MAP = NORMALIZATION.get("SUPERSCRIPT_MAP", {})
 else:
-    ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION, SUPERSCRIPTS = {}, [], [], set(), {}, {}, {}, {}, {}, {}, []
+    ABBREVIATIONS, CI_ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION, SUPERSCRIPTS, SUPERSCRIPT_MAP = {}, {}, [], [], set(), {}, {}, {}, {}, {}, {}, [], {}
 
 _inflect = inflect.engine()
 
@@ -48,45 +50,21 @@ def normalize_greek(text: str) -> str:
     return text.translate(str.maketrans(GREEK_TRANSLITERATION))
 
 def remove_superscripts(text: str) -> str:
-    """
-    Detect and remove likely footnotes:
-    - Converts edge-case letters/numbers into superscripts
-    - Strips them out cleanly
-    """
     def to_superscript(chars: str) -> str:
         return "".join(SUPERSCRIPT_MAP.get(c, c) for c in chars)
 
-    # Trailing footnote after a word (God1 -> God¹ -> God)
-    # This regex was too broad and corrupted words. It's now restricted to words ending in digits.
-    text = re.sub(r'([A-Za-z]+)(\d+)\b',
-                  lambda m: m.group(1) + to_superscript(m.group(2)),
-                  text)
+    text = re.sub(r'([A-Za-z]+)(\d+)\b', lambda m: m.group(1) + to_superscript(m.group(2)), text)
 
-    # Leading footnote before a word (1What -> ¹What -> What)
     if BIBLE_BOOKS:
         bible_books_pattern = r'|'.join(map(re.escape, BIBLE_BOOKS))
-        text = re.sub(
-            rf'\b(\d+|[a-z])(?=(?:{bible_books_pattern}))',
-            lambda m: m.group(1),  # keep if Bible book
-            text
-        )
-        text = re.sub(
-            rf'\b(\d+|[a-z])(?=[A-Z][a-z])',
-            lambda m: to_superscript(m.group(1)),
-            text
-        )
+        text = re.sub(rf'\b(\d+|[a-z])(?=(?:{bible_books_pattern}))', lambda m: m.group(1), text)
+        text = re.sub(rf'\b(\d+|[a-z])(?=[A-Z][a-z])', lambda m: to_superscript(m.group(1)), text)
     else:
-        text = re.sub(
-            r'\b(\d+|[a-z])(?=[A-Z][a-z])',
-            lambda m: to_superscript(m.group(1)),
-            text
-        )
+        text = re.sub(r'\b(\d+|[a-z])(?=[A-Z][a-z])', lambda m: to_superscript(m.group(1)), text)
 
-    # Final strip: remove all superscripts defined in normalization.json
     if SUPERSCRIPTS:
         pattern = f"[{''.join(re.escape(c) for c in SUPERSCRIPTS)}]"
         text = re.sub(pattern, "", text)
-
     return text
 
 def roman_to_int(s):
@@ -147,6 +125,10 @@ def normalize_scripture(text: str) -> str:
     book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
 
+    book_chapter_pattern = re.compile(
+        r'^\s*(' + book_pattern_str + r')\s+(\d+)\s*$',
+        re.IGNORECASE | re.MULTILINE
+    )
     ref_pattern = re.compile(
         r'\b(' + book_pattern_str + r')?' +
         r'\s*' +
@@ -155,8 +137,16 @@ def normalize_scripture(text: str) -> str:
         r'([\d\w\s,.\–-]+(?:ff|f)?)',
         re.IGNORECASE
     )
-
+    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
+    enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
     last_book_abbr = None
+
+    def book_chapter_replacer(match):
+        book_abbr, chapter = match.groups()
+        # FIX: Use case-insensitive dictionary
+        book_full = CI_ABBREVIATIONS.get(book_abbr.replace('.','').lower(), book_abbr)
+        chapter_words = _inflect.number_to_words(int(chapter))
+        return f"{book_full} chapter {chapter_words}"
 
     def replacer(match):
         nonlocal last_book_abbr
@@ -165,50 +155,61 @@ def normalize_scripture(text: str) -> str:
             last_book_abbr = book_abbr.strip()
         if not last_book_abbr:
             return match.group(0)
-        book_full = ABBREVIATIONS.get(last_book_abbr.replace('.',''), last_book_abbr)
+        # FIX: Use case-insensitive dictionary
+        book_full = CI_ABBREVIATIONS.get(last_book_abbr.replace('.','').lower(), last_book_abbr)
         return _format_ref_segment(book_full, chapter, verses or "")
 
     def replacer_simple(match):
         book_abbr, chapter, verses = match.groups()
-        book_full = ABBREVIATIONS.get(book_abbr.replace('.',''), book_abbr)
+        # FIX: Use case-insensitive dictionary
+        book_full = CI_ABBREVIATIONS.get(book_abbr.replace('.','').lower(), book_abbr)
         return _format_ref_segment(book_full, chapter, verses or "")
-
-    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+)[:\s]([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
-    enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
 
     def enclosed_replacer(match):
         nonlocal last_book_abbr
         last_book_abbr = None
         opener, inner_text, closer = match.groups()
-        last_end = 0
-        new_parts = []
-        for m in ref_pattern.finditer(inner_text):
-            new_parts.append(inner_text[last_end:m.start()])
-            new_parts.append(replacer(m))
-            last_end = m.end()
-        new_parts.append(inner_text[last_end:])
-        return opener + "".join(new_parts) + closer
+        
+        parts = re.split(r'(;)', inner_text)
+        final_text_parts = []
+        for i, part in enumerate(parts):
+            if i % 2 == 1:
+                final_text_parts.append(part)
+                continue
 
+            last_end = 0
+            new_chunk_parts = []
+            for m in ref_pattern.finditer(part):
+                new_chunk_parts.append(part[last_end:m.start()])
+                new_chunk_parts.append(replacer(m))
+                last_end = m.end()
+            new_chunk_parts.append(part[last_end:])
+            final_text_parts.append("".join(new_chunk_parts))
+        
+        return "".join(final_text_parts)
+
+    text = book_chapter_pattern.sub(book_chapter_replacer, text)
     text = enclosed_pattern.sub(enclosed_replacer, text)
     text = prose_pattern.sub(replacer_simple, text)
     return text
 
 def number_replacer(match):
-    num_str = match.group(0)
-    if len(num_str) == 4 and 1100 <= int(num_str) <= 1999:
-        part1 = _inflect.number_to_words(num_str[:2])
-        part2 = _inflect.number_to_words(num_str[2:])
-        return f"{part1} {part2}"
-
+    num_str = match.group(0).strip()
+    if not num_str.isdigit(): return num_str
+    
     num_int = int(num_str)
-    if len(num_str) == 4 and 1000 <= num_int <= 2099:
-        if 2000 <= num_int <= 2009: return _inflect.number_to_words(num_int, andword="")
-        else: return _inflect.number_to_words(num_int, group=2).replace(",", "")
-    else:
-        return _inflect.number_to_words(num_int, andword="")
+    
+    if len(num_str) == 4:
+        if 1100 <= num_int <= 1999:
+            part1 = _inflect.number_to_words(num_str[:2])
+            part2 = _inflect.number_to_words(num_str[2:])
+            return f"{part1} {part2}"
+        elif 2000 <= num_int <= 2099:
+            return _inflect.number_to_words(num_int).replace(" and ", " ")
+            
+    return _inflect.number_to_words(num_int)
 
 def normalize_text(text: str) -> str:
-    # Removed call to the buggy and redundant convert_to_unicode_superscript function
     text = remove_superscripts(text)
     text = re.sub(r"\[\d+\]|\[fn\]|\[[a-zA-Z]\]", "", text)
 
@@ -226,41 +227,46 @@ def normalize_text(text: str) -> str:
 
     for phrase in sorted(LATIN_PHRASES.keys(), key=len, reverse=True):
         replacement = LATIN_PHRASES[phrase]
-        text = re.sub(rf'\b{re.escape(phrase)}(?!\w)', replacement, text, flags=re.IGNORECASE)
+        pattern = rf"(?<!\w){re.escape(phrase)}(?!\w)"
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
     text = _strip_diacritics(text)
     text = normalize_hebrew(text)
     text = normalize_greek(text)
     text = expand_roman_numerals(text)
-
+    
     non_bible_abbrs = { k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS) }
     for abbr, expanded in non_bible_abbrs.items():
+        pattern = rf"\b{re.escape(abbr)}\b"
         flags = 0 if abbr in CASE_SENSITIVE_ABBRS else re.IGNORECASE
-        text = re.sub(rf"\b{re.escape(abbr)}\b", expanded, text, flags=flags)
+        text = re.sub(pattern, expanded, text, flags=flags)
 
     for contr, expanded in CONTRACTIONS.items(): text = text.replace(contr, expanded)
     for sym, expanded in SYMBOLS.items(): text = text.replace(sym, expanded)
     for p, repl in PUNCTUATION.items(): text = text.replace(p, repl)
 
     text = re.sub(r'^\s*\d{1,3}\b', '', text, flags=re.M)
-    text = re.sub(r'([.?!;])\s*("?)\s*\d{1,3}\b', r'\1\2 ', text)
+    text = re.sub(r'([.?!;])\s*("?)\s*\d{1-3}\b', r'\1\2 ', text)
     text = re.sub(r"\b\d+\b", number_replacer, text)
 
     text = re.sub(r'^([A-Z][A-Z0-9\s,.-]{4,})$', r'. ... \1. ... ', text, flags=re.MULTILINE)
     text = re.sub(r'\n\s*\n', '. ... \n', text)
 
-    text = re.sub(r"\[|\]", " , ", text).replace("(", "").replace(")", "")
+    text = re.sub(r"\[|\]|\(|\)", " , ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 class TTSService:
     def __init__(self, voice: str = "en_US-hfc_male-medium.onnx", speed_rate: str = "1.0"):
-        self.voice_path = Path(f"/app/voices/{voice}")
         self.speed_rate = speed_rate
+        voices_dir = Path(__file__).parent / 'voices'
+        self.voice_path = voices_dir / voice
         if not self.voice_path.exists():
-            self.voice_path = Path(f"voices/{voice}")
-        if not self.voice_path.exists():
-            raise ValueError(f"Voice model not found at {self.voice_path}")
+            cwd_voices_path = Path.cwd() / "voices" / voice
+            if cwd_voices_path.exists():
+                self.voice_path = cwd_voices_path
+            else:
+                 raise ValueError(f"Voice model not found at {voices_dir} or {Path.cwd() / 'voices'}")
 
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)

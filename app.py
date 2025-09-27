@@ -29,7 +29,7 @@ from logging.handlers import RotatingFileHandler
 
 from tts_service import TTSService, normalize_text
 
-APP_VERSION = "0.0.3"
+APP_VERSION = "0.0.4"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
@@ -161,8 +161,9 @@ def extract_text_and_metadata(filepath):
                 if doc_meta:
                     metadata['title'] = doc_meta.get('title') or metadata['title']
                     metadata['author'] = doc_meta.get('author') or metadata['author']
-                for page in doc:
-                    text += page.get_text() + "\n"
+                
+                text = "\n".join([page.get_text() for page in doc])
+
         elif extension == '.docx':
             doc = docx.Document(filepath)
             if doc.core_properties:

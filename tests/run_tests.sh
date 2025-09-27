@@ -4,40 +4,27 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
-echo "--- Installing test dependencies ---"
-# Install app dependencies from requirements.txt and the pytest package
-pip install --no-cache-dir -r requirements.txt pytest Flask ebooklib gunicorn celery redis python-docx EbookLib PyMuPDF beautifulsoup4 inflect mutagen argostranslate requests pytest-xdist Pillow
+# The application environment is already set up by the Dockerfile.
+# We just need to install pytest and its plugins for the test run.
+echo "--- Installing test-specific dependencies ---"
+pip install --no-cache-dir pytest pytest-xdist
 
-echo "--- Downloading Argos Translate model for testing ---"
-# This step is crucial to ensure the test environment has the required model
-python -c "\
-from argostranslate import package;\
-package.update_package_index();\
-available_packages = package.get_available_packages();\
-package_to_install = next(filter(lambda x: x.from_code == 'he' and x.to_code == 'en', available_packages));\
-package.install_from_path(package_to_install.download());\
-"
-
-# Check if a custom URL is provided, otherwise use the default
-if [ -z "$APP_BASE_URL" ]; then
-  export APP_BASE_URL="http://localhost:8000"
-fi
-
-echo "--- Running tests against $APP_BASE_URL ---"
-
-# Add the project root to the Python path to allow tests to import app modules
+# Set the Python path to ensure app modules can be imported
 export PYTHONPATH=.
 
-# Run pytest against the /tests directory. It will find all test_*.py files.
-# Run pytest against the files in a specific order: fastest to slowest.
+# --- STAGE 1: Run critical integration tests first ---
+# These tests require a running server and verify core functionality.
+# If they fail, 'set -e' will stop the script here.
+echo "--- Running critical integration tests (deployment and functionality) ---"
+pytest -v -n auto tests/test_deployment.py tests/test_functionality.py
+
+# --- STAGE 2: Run remaining tests ---
+# These tests will only run if the critical tests in Stage 1 have passed.
+echo "--- Integration tests passed. Running remaining unit and component tests. ---"
 pytest -v -n auto \
-  tests/test_deployment.py \
   tests/test_normalization.py \
-  tests/test_functionality.py \
   tests/test_audiobook_creation.py \
   tests/test_uploads.py \
   tests/test_sample_generation.py
-
-pytest -v tests/
 
 echo "--- All tests passed successfully! ---"

@@ -357,12 +357,12 @@
     "⁺","⁻","⁼","⁽","⁾"
   ],
   "ambiguous_bible_abbrs": ["Is", "Rev", "Acts", "Job", "Song", "Amos"],
-  "case_sensitive_abbrs": ["Bib", "Di", "Enc", "Int", "Rev", "SE", "ST", "Them"],
-  "roman_numeral_exceptions": ["LXX", "I"],
+  "case_sensitive_abbrs": ["Bib", "Di", "Enc", "Int", "Rev", "SE", "ST", "VE", "Them"],
+  "roman_numeral_exceptions": ["LXX", "I", "M"],
   "bible_refs": {"ff": "and following", "f": "and the following verse"},
   "contractions": {
     "can't": "cannot", "won't": "will not", "n't": " not", "'re": " are", "'ll": " will",
-    "'ve": " have", "'d": " would", "'m": " am"
+    "'ve": " have", "'d": " would", "'m": " am", "lol": "ha-ha"
   },
   "symbols": {"%": " percent", "&": " and", "$": " dollars"},
   "punctuation": {"...": ". ", "—": ", ", "–": ", "},
