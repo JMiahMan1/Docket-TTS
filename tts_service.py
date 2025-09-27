@@ -23,15 +23,16 @@ if NORMALIZATION_PATH.exists():
     SYMBOLS = NORMALIZATION.get("symbols", {})
     PUNCTUATION = NORMALIZATION.get("punctuation", {})
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
+    GREEK_WORDS = NORMALIZATION.get("greek_words", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
     SUPERSCRIPTS = NORMALIZATION.get("superscripts", [])
     SUPERSCRIPT_MAP = NORMALIZATION.get("SUPERSCRIPT_MAP", {})
 
 else:
     # Define empty structures if file is missing
-    (ABBREVIATIONS, CI_ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS, 
-     BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_TRANSLITERATION, 
-     SUPERSCRIPTS, SUPERSCRIPT_MAP) = [{}, {}, [], [], set(), {}, {}, {}, {}, {}, {}, [], {}]
+    (ABBREVIATIONS, CI_ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS,
+     BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_WORDS, GREEK_TRANSLITERATION,
+     SUPERSCRIPTS, SUPERSCRIPT_MAP) = [{}, {}, [], [], set(), {}, {}, {}, {}, {}, {}, {}, [], {}]
 
 if RULES_PATH.exists():
     RULES = yaml.safe_load(RULES_PATH.read_text(encoding="utf-8"))['normalization_rules']
@@ -54,12 +55,19 @@ def normalize_hebrew(text: str) -> str:
     def translate_match(match):
         hebrew_text = match.group(0)
         if HEBREW_TO_ENGLISH:
-            return f" , translation from Hebrew: {HEBREW_TO_ENGLISH.translate(hebrew_text)} , "
+            translated_text = HEBREW_TO_ENGLISH.translate(hebrew_text)
+            return f" {translated_text} "
         return " [Hebrew text] "
     return re.sub(r'[\u0590-\u05FF]+', translate_match, text)
 
 def normalize_greek(text: str) -> str:
-    return text.translate(str.maketrans(GREEK_TRANSLITERATION))
+    # First, handle full words. Sort by length to match longer words first.
+    for greek_word, transliteration in sorted(GREEK_WORDS.items(), key=lambda item: len(item[0]), reverse=True):
+        text = text.replace(greek_word, transliteration)
+
+    # Then, transliterate any remaining individual characters as a fallback.
+    text = text.translate(str.maketrans(GREEK_TRANSLITERATION))
+    return text
 
 def remove_superscripts(text: str) -> str:
     def to_superscript(chars: str) -> str:
@@ -125,37 +133,66 @@ def normalize_scripture(text: str) -> str:
     book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
     book_chapter_pattern = re.compile(r'^\s*(' + book_pattern_str + r')\s+(\d+)\s*$', re.IGNORECASE | re.MULTILINE)
-    ref_pattern = re.compile(r'\b(' + book_pattern_str + r')?'+r'\s*'+r'(\d+)'+r'[:\s]'+r'([\d\w\s,.\–-]+(?:ff|f)?)', re.IGNORECASE)
+    ref_pattern = re.compile(r'\b(' + book_pattern_str + r')?\s*'+r'(\d+)'+r'[:\s]'+r'([\d\w\s,.\–-]+(?:ff|f)?)', re.IGNORECASE)
     prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
     enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
-    last_book_abbr = None
+    
+    last_context = {'book': None, 'chapter': None}
+    
     def book_chapter_replacer(match):
+        nonlocal last_context
         book_abbr, chapter = match.groups()
+        last_context['book'] = book_abbr.strip()
+        last_context['chapter'] = chapter.strip()
         book_full = CI_ABBREVIATIONS.get(book_abbr.replace('.','').lower(), book_abbr)
         return f"{book_full} chapter {_inflect.number_to_words(int(chapter))}"
+
     def replacer(match):
-        nonlocal last_book_abbr
+        nonlocal last_context
         book_abbr, chapter, verses = match.groups()
-        if book_abbr: last_book_abbr = book_abbr.strip()
-        if not last_book_abbr: return match.group(0)
-        book_full = CI_ABBREVIATIONS.get(last_book_abbr.replace('.','').lower(), last_book_abbr)
+        book_to_use = book_abbr.strip() if book_abbr else last_context.get('book')
+        
+        if book_abbr:
+            last_context['book'] = book_abbr.strip()
+            last_context['chapter'] = chapter.strip()
+        
+        if not book_to_use: return match.group(0)
+        
+        book_full = CI_ABBREVIATIONS.get(book_to_use.replace('.','').lower(), book_to_use)
         return _format_ref_segment(book_full, chapter, verses or "")
+
     def replacer_simple(match):
+        nonlocal last_context
         book_abbr, chapter, verses = match.groups()
+        last_context['book'] = book_abbr.strip()
+        last_context['chapter'] = chapter.strip()
         book_full = CI_ABBREVIATIONS.get(book_abbr.replace('.','').lower(), book_abbr)
         return _format_ref_segment(book_full, chapter, verses or "")
+
     def enclosed_replacer(match):
-        nonlocal last_book_abbr
-        last_book_abbr = None
+        nonlocal last_context
+        original_match_text = match.group(0)
         opener, inner_text, closer = match.groups()
+        
+        if inner_text.strip().isdigit() and last_context.get('book') and last_context.get('chapter'):
+            book_full = CI_ABBREVIATIONS.get(last_context['book'].replace('.','').lower(), last_context['book'])
+            return _format_ref_segment(book_full, last_context['chapter'], inner_text)
+
         parts, final_text_parts = re.split(r'(;)', inner_text), []
+        found_scripture = False
         for i, part in enumerate(parts):
             if i % 2 == 1: final_text_parts.append(part); continue
             last_end, new_chunk_parts = 0, []
             for m in ref_pattern.finditer(part):
+                found_scripture = True
                 new_chunk_parts.append(part[last_end:m.start()]); new_chunk_parts.append(replacer(m)); last_end = m.end()
             new_chunk_parts.append(part[last_end:]); final_text_parts.append("".join(new_chunk_parts))
+        
+        if not found_scripture:
+            return original_match_text
+            
         return "".join(final_text_parts)
+        
     text = book_chapter_pattern.sub(book_chapter_replacer, text)
     text = enclosed_pattern.sub(enclosed_replacer, text)
     text = prose_pattern.sub(replacer_simple, text)
@@ -170,13 +207,24 @@ def _replace_leading_verse_marker(match):
 
 def number_replacer(match):
     num_str = match.group(0).strip()
-    if not num_str.isdigit(): return num_str
-    num_int = int(num_str)
-    if len(num_str) == 4 and 1100 <= num_int <= 1999:
-        return f"{_inflect.number_to_words(num_str[:2])} {_inflect.number_to_words(num_str[2:])}"
-    elif len(num_str) == 4 and 2000 <= num_int <= 2099:
-        return _inflect.number_to_words(num_int).replace(" and ", " ")
-    return _inflect.number_to_words(num_int)
+    try:
+        words = _inflect.number_to_words(num_str)
+        
+        is_ordinal = any(num_str.endswith(s) for s in ['st', 'nd', 'rd', 'th'])
+        if not is_ordinal and len(num_str) == 4 and num_str.isdigit():
+            num_int = int(num_str)
+            if 1100 <= num_int <= 1999:
+                return f"{_inflect.number_to_words(num_str[:2])} {_inflect.number_to_words(num_str[2:])}"
+            elif 2000 <= num_int <= 2099:
+                return words.replace(" and ", " ")
+        return words
+    except:
+        return num_str
+
+def currency_replacer(match):
+    num_str = match.group(1)
+    num_words = _inflect.number_to_words(num_str)
+    return f"{num_words} dollars"
 
 # --- REGISTRIES FOR THE RULES ENGINE ---
 FUNCTION_REGISTRY = {
@@ -188,7 +236,9 @@ FUNCTION_REGISTRY = {
     "expand_roman_numerals": expand_roman_numerals,
     "_replace_leading_verse_marker": _replace_leading_verse_marker,
     "number_replacer": number_replacer,
+    "currency_replacer": currency_replacer,
 }
+SYMBOLS.pop('$', None)
 DICTIONARY_REGISTRY = {
     "latin_phrases": LATIN_PHRASES,
     "non_bible_abbrs": {k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS)},

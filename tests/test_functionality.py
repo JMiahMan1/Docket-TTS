@@ -165,26 +165,6 @@ def test_abbreviation_and_contraction_conflict():
     finally:
         cleanup_files(mp3_filename)
 
-def test_no_false_positive_on_et_al():
-    """
-    Tests that a word ending in 'el' followed by a word starting with 'al'
-    (e.g., "Colonel Albert") is not incorrectly identified as "et al".
-    """
-    title = "Et Al False Positive Test"
-    text = "The final report from Colonel Albert was conclusive."
-    mp3_filename = None
-    try:
-        normalized_text, mp3_filename = submit_and_poll_task(title, text)
-        normalized_text = normalized_text.lower()
-
-        # Verify that the original words are still present
-        assert "colonel albert" in normalized_text
-
-        # Verify that the phrase was NOT incorrectly converted to "et al"
-        assert "et al" not in normalized_text
-    finally:
-        cleanup_files(mp3_filename)
-
 def test_case_sensitive_abbreviation():
     title = "Case-Sensitive Abbreviation Test"
     text = "We gave Them the scrolls, and they gave them to us."
@@ -239,10 +219,136 @@ def test_contraction_and_roman_numeral_conflict():
         normalized_text, mp3_filename = submit_and_poll_task(title, text)
         normalized_text = normalized_text.lower()
         
-        # Check that "I'm" was correctly expanded to "i am"
         assert "i am" in normalized_text
-        
-        # Crucially, check that it was NOT expanded to a Roman numeral
         assert "roman numeral one thousand" not in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_no_false_positive_on_et_al():
+    """
+    Tests that a word ending in 'el' followed by a word starting with 'al'
+    (e.g., "Colonel Albert") is not incorrectly identified as "et al".
+    """
+    title = "Et Al False Positive Test"
+    text = "The final report from Colonel Albert was conclusive."
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+
+        assert "colonel albert" in normalized_text
+        assert "et al" not in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_contextual_verse_normalization_prevents_mangling():
+    """
+    Tests the specific bug where a chapter context was not carried over,
+    leading to later rules mangling unprocessed verses (e.g., '1:1' -> 'one:one').
+    """
+    title = "Contextual Verse Test"
+    text = """
+John 11
+An important event. (35)
+"""
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+
+        assert "john chapter eleven" in normalized_text
+        assert "john chapter eleven, verse thirty-five" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_header_with_parenthetical_scripture():
+    """
+    Tests that a line with a header and a parenthetical scripture reference
+    is parsed correctly, applying the book context from the previous line.
+    """
+    title = "Header With Scripture Test"
+    text = """
+Romans 1
+THE MESSIAH KING AND HIS SERVANT (1:1–4)
+Paul, a servant of Christ Jesus, was called to be an apostle.
+"""
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+
+        assert "romans chapter one" in normalized_text
+        assert "the messiah king and his servant" in normalized_text
+        assert "romans chapter one, verses one through four" in normalized_text
+        assert ". ... the messiah king and his servant. ... " not in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_ordinal_number_expansion():
+    """
+    Tests that ordinal numbers are correctly expanded to words.
+    """
+    title = "Ordinal Number Test"
+    text = "The 1st point is valid, but the 2nd is not. See the 23rd paragraph for details."
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+
+        assert "first point" in normalized_text
+        assert "second is not" in normalized_text
+        assert "twenty-third paragraph" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_currency_symbol_expansion():
+    """
+    Tests that currency symbols are correctly expanded.
+    """
+    title = "Currency Symbol Test"
+    text = "The total cost was $50, which was paid in full."
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+
+        assert "fifty dollars" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_ambiguous_roman_numeral_i():
+    """
+    Tests that the pronoun 'I' is not incorrectly converted to a Roman numeral.
+    """
+    title = "Ambiguous Roman Numeral I Test"
+    text = "When I read about King Henry VIII, I wonder what happened before him."
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+
+        assert "when i read" in normalized_text
+        assert "henry roman numeral eight, i wonder" in normalized_text
+        assert "roman numeral one" not in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_complex_paragraph_from_pdf():
+    """
+    Runs an end-to-end test on a complex paragraph from the provided PDF.
+    This text includes Greek, Hebrew, and an excepted Roman Numeral (LXX).
+    """
+    title = "Complex PDF Paragraph Test"
+    text = """The term Paul uses to describe himself is δοῦλος (doulos) "servant." This term has been the cause of a great deal of confusion. In classical Greek, it means "slave" and many commentators have assumed that Paul intended to describe himself as one who, without any rights of his own, was owned by Christ. [40] We can begin to identify the confusion when we realize that the term was very important in the LXX. It was used to translate the Hebrew word ebed."""
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+
+        assert "doulos , doulos ," in normalized_text
+        assert "hebrew word ebed" in normalized_text
+        assert "[40]" not in normalized_text
+        assert "lxx" in normalized_text
+        assert "roman numeral" not in normalized_text
     finally:
         cleanup_files(mp3_filename)

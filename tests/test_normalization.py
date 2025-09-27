@@ -108,3 +108,43 @@ God’s Judgment Defended
     assert "What advantage then has the Jew" in result
     assert "Certainly not!" in result
     assert "Indeed, let God be true but every man a liar" in result
+
+def test_bracketed_numeric_footnote_removal():
+    """
+    Tests that bracketed numeric footnotes, common in academic PDFs, are removed.
+    This pattern is found throughout the provided PDF.
+    """
+    input_text = "This gives Paul the opportunity to establish his message.[39] The term was very important in the LXX.[40]"
+    result = normalize_text(input_text)
+
+    assert "[39]" not in result
+    assert "[40]" not in result
+    assert "his message. The term" in result
+
+def test_hebrew_and_inline_greek_normalization():
+    """
+    Tests that Hebrew text is translated and Greek text is transliterated correctly.
+    """
+    input_text = 'The term Paul uses is δοῦλος (doulos) "servant." The Hebrew is מִשִׁיחַ (māsaḥ) "Messiah."'
+    result = normalize_text(input_text)
+    
+    # Check that the Greek is transliterated correctly to 'doulos'
+    assert "doulos , doulos" in result
+
+    # Check that the verbose "translation from" text is gone
+    assert "translation from Hebrew:" not in result.lower()
+    
+    # Check that the Hebrew translation is present
+    assert "Messiah" in result
+
+def test_hebrew_translation_simple():
+    """
+    Provides a focused test for Hebrew translation without verbose text.
+    """
+    input_text = "The Hebrew word is מִשִׁיחַ."
+    # The final space-collapsing rule will clean this up
+    expected = "The Hebrew word is Messiah ."
+    
+    result = normalize_text(input_text)
+    
+    assert result == expected
