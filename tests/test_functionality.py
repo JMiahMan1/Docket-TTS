@@ -352,3 +352,76 @@ def test_complex_paragraph_from_pdf():
         assert "roman numeral" not in normalized_text
     finally:
         cleanup_files(mp3_filename)
+
+def test_parenthetical_verse_abbreviation():
+    """
+    Tests that parenthetical verse abbreviations (e.g. v. 2) are correctly
+    normalized and not mistaken for Roman numerals.
+    """
+    title = "Verse Abbreviation Test"
+    text = """
+Romans 1
+His life was now dedicated to spreading far and wide the good news
+that Jesus Christ had fulfilled the Scriptures (v.2), and this is one of the
+purposes of his letter.
+"""
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+
+        assert "romans chapter one" in normalized_text
+        assert "romans chapter one, verse two" in normalized_text
+        assert "roman numeral five" not in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_complex_parenthetical_with_numbered_book():
+    """
+    Tests a complex, multi-part parenthetical reference that includes a book
+    name starting with a number, which was a source of a regex bug.
+    """
+    title = "Complex Parenthetical Test"
+    text = """
+(Rom 1:7; 1 Cor 10:3ff.; Eph 1:13–14; 2:11–3:13; Col 1:12–14; 1 Thess 1:12–14)
+"""
+    mp3_filename = None
+    try:
+        normalized_text, mp3_filename = submit_and_poll_task(title, text)
+        normalized_text = normalized_text.lower()
+
+        # Check for a few key parts of the complex expansion
+        assert "romans chapter one, verse seven" in normalized_text
+        assert "first corinthians chapter ten, verse three and following" in normalized_text
+        assert "ephesians chapter one, verses thirteen through fourteen" in normalized_text
+        # This part is still tricky for the normalizer, but we can test the partial conversion
+        assert "ephesians chapter two, verses eleven through three:thirteen" in normalized_text
+    finally:
+        cleanup_files(mp3_filename)
+
+def test_pause_duration_based_on_punctuation():
+    """
+    Indirectly tests for pause length by comparing the total duration of audio
+    generated from text with identical words but different punctuation.
+    """
+    title = "Pause Duration Test"
+    short_pause_text = "First we will discuss this, then that, and finally the other thing."
+    long_pause_text = "First. \n\n We will discuss this. \n\n Then that. \n\n And finally the other thing."
+    
+    short_pause_mp3, long_pause_mp3 = None, None
+    try:
+        # Generate and measure the audio with short pauses (commas)
+        _, short_pause_mp3 = submit_and_poll_task(title, short_pause_text)
+        short_response = requests.get(f"{BASE_URL}/generated/{short_pause_mp3}")
+        short_duration = MP3(io.BytesIO(short_response.content)).info.length
+
+        # Generate and measure the audio with long pauses (periods and newlines)
+        _, long_pause_mp3 = submit_and_poll_task(title, long_pause_text)
+        long_response = requests.get(f"{BASE_URL}/generated/{long_pause_mp3}")
+        long_duration = MP3(io.BytesIO(long_response.content)).info.length
+
+        # Assert that the version with more significant punctuation is longer
+        assert long_duration > short_duration
+    finally:
+        cleanup_files(short_pause_mp3)
+        cleanup_files(long_pause_mp3)

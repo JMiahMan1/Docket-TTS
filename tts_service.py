@@ -133,7 +133,8 @@ def normalize_scripture(text: str) -> str:
     book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
     book_chapter_pattern = re.compile(r'^\s*(' + book_pattern_str + r')\s+(\d+)\s*$', re.IGNORECASE | re.MULTILINE)
-    ref_pattern = re.compile(r'\b(' + book_pattern_str + r')?\s*'+r'(\d+)'+r'[:\s]'+r'([\d\w\s,.\–-]+(?:ff|f)?)', re.IGNORECASE)
+    # FIX: Grouped the optional book name with its trailing space to resolve ambiguity
+    ref_pattern = re.compile(r'\b(?:(' + book_pattern_str + r')\s+)?(\d+)[:\s]([\d\w\s,.\–-]+(?:ff|f)?)', re.IGNORECASE)
     prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
     enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
     
@@ -174,6 +175,12 @@ def normalize_scripture(text: str) -> str:
         original_match_text = match.group(0)
         opener, inner_text, closer = match.groups()
         
+        verse_abbr_match = re.match(r'^\s*v{1,2}\.\s*([\d\w\s,.\–-]+)\s*$', inner_text, re.IGNORECASE)
+        if verse_abbr_match and last_context.get('book') and last_context.get('chapter'):
+            verse_part = verse_abbr_match.group(1)
+            book_full = CI_ABBREVIATIONS.get(last_context['book'].lower().replace('.', ''), last_context['book'])
+            return _format_ref_segment(book_full, last_context['chapter'], verse_part)
+
         if inner_text.strip().isdigit() and last_context.get('book') and last_context.get('chapter'):
             book_full = CI_ABBREVIATIONS.get(last_context['book'].replace('.','').lower(), last_context['book'])
             return _format_ref_segment(book_full, last_context['chapter'], inner_text)

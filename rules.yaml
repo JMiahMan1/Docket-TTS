@@ -86,12 +86,12 @@ normalization_rules:
   - name: "Format all-caps headings with pauses"
     type: "regex"
     pattern: '^([A-Z][A-Z0-9\s,.-]{4,})$'
-    replacement: '. ... \1. ... '
+    replacement: ', \1, '
     flags: ["MULTILINE"]
   - name: "Replace double newlines with pauses"
     type: "regex"
     pattern: '\n\s*\n'
-    replacement: '. ... \n'
+    replacement: ', \n'
   - name: "Replace remaining brackets/parentheses with commas"
     type: "regex"
     pattern: '\[|\]|\(|\)'
