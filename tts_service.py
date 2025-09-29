@@ -7,7 +7,6 @@ import yaml
 from pathlib import Path
 from argostranslate import translate
 
-# --- DATA LOADING ---
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 RULES_PATH = Path(__file__).parent / "rules.yaml"
 
@@ -29,7 +28,6 @@ if NORMALIZATION_PATH.exists():
     SUPERSCRIPT_MAP = NORMALIZATION.get("SUPERSCRIPT_MAP", {})
 
 else:
-    # Define empty structures if file is missing
     (ABBREVIATIONS, CI_ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS,
      BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_WORDS, GREEK_TRANSLITERATION,
      SUPERSCRIPTS, SUPERSCRIPT_MAP) = [{}, {}, [], [], set(), {}, {}, {}, {}, {}, {}, {}, [], {}]
@@ -44,8 +42,6 @@ try:
     HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
 except Exception:
     HEBREW_TO_ENGLISH = None
-
-# --- HELPER & NORMALIZATION FUNCTIONS (to be called by the rules engine) ---
 
 def _strip_diacritics(text: str) -> str:
     normalized = unicodedata.normalize('NFD', text)
@@ -233,7 +229,6 @@ def currency_replacer(match):
     num_words = _inflect.number_to_words(num_str)
     return f"{num_words} dollars"
 
-# --- REGISTRIES FOR THE RULES ENGINE ---
 FUNCTION_REGISTRY = {
     "remove_superscripts": remove_superscripts,
     "normalize_scripture": normalize_scripture,
@@ -254,7 +249,6 @@ DICTIONARY_REGISTRY = {
     "punctuation": PUNCTUATION,
 }
 
-# --- PRIMARY NORMALIZATION FUNCTION (RULES ENGINE) ---
 def normalize_text(text: str) -> str:
     for rule in RULES:
         rule_type = rule.get("type")
@@ -298,18 +292,13 @@ def normalize_text(text: str) -> str:
 
     return text.strip()
 
-# --- TTS SERVICE CLASS (UNCHANGED) ---
 class TTSService:
-    def __init__(self, voice: str = "en_US-hfc_male-medium.onnx", speed_rate: str = "1.0"):
+    def __init__(self, voice_path: str, speed_rate: str = "1.0"):
         self.speed_rate = speed_rate
-        voices_dir = Path(__file__).parent / 'voices'
-        self.voice_path = voices_dir / voice
+        self.voice_path = Path(voice_path)
+        
         if not self.voice_path.exists():
-            cwd_voices_path = Path.cwd() / "voices" / voice
-            if cwd_voices_path.exists():
-                self.voice_path = cwd_voices_path
-            else:
-                 raise ValueError(f"Voice model not found at {voices_dir} or {Path.cwd() / 'voices'}")
+            raise FileNotFoundError(f"Voice model file not found at the provided path: {self.voice_path}")
 
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)

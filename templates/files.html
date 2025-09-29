@@ -53,7 +53,7 @@
                                         {% else %}<span class="text-muted">N/A</span>{% endif %}
                                     </td>
                                     <td>{{ file.date }}</td>
-                                    <td><input class="form-check-input delete-checkbox" type="checkbox" name="files_to_delete" value="{{ file.base_name }}"></td>
+                                    <td><input class="form-check-input delete-checkbox" type="checkbox" name="files_to_delete" value="{{ file.book_base_name or file.base_name }}"></td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
@@ -187,7 +187,7 @@
                 alert('Please select at least one item to delete.');
                 return;
             }
-            if (confirm(`Are you sure you want to delete the selected ${checkedDeleteBoxes.length} item(s) and their associated files?`)) {
+            if (confirm(`Are you sure you want to delete the selected item(s) and their associated files? This may delete entire books if chapters are selected.`)) {
                 document.querySelectorAll('input.file-checkbox').forEach(cb => cb.disabled = true);
                 mainForm.action = "{{ url_for('delete_bulk') }}";
                 mainForm.submit();

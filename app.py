@@ -5,6 +5,7 @@ import re
 import json
 from pathlib import Path
 from datetime import datetime
+import time
 from flask import (
     Flask, request, render_template, send_from_directory,
     flash, redirect, url_for, jsonify, current_app
@@ -29,6 +30,8 @@ from logging.handlers import RotatingFileHandler
 from huggingface_hub import list_repo_files, hf_hub_download
 
 from tts_service import TTSService, normalize_text
+import text_cleaner
+import chapterizer
 
 APP_VERSION = "0.0.4"
 UPLOAD_FOLDER = '/app/uploads'
@@ -44,7 +47,6 @@ app.config.from_mapping(
     SECRET_KEY='a-secure-and-random-secret-key'
 )
 
-# --- Logging Setup ---
 try:
     if not app.debug and not app.testing:
         os.makedirs(GENERATED_FOLDER, exist_ok=True)
@@ -113,44 +115,71 @@ def get_piper_voices():
         return CACHED_PIPER_VOICES
     except Exception as e:
         app.logger.error(f"Could not fetch voices from Hugging Face Hub: {e}")
-        return list_available_voices() # Fallback to local voices
+        return list_available_voices()
 
 def ensure_voice_available(voice_name):
-    voice_path = Path(VOICES_FOLDER) / voice_name
-    config_path = voice_path.with_suffix(voice_path.suffix + ".json")
-
-    if voice_path.exists() and config_path.exists():
-        app.logger.info(f"Voice '{voice_name}' found locally.")
-        return True
-
-    app.logger.warning(f"Voice '{voice_name}' not found locally. Attempting to download...")
+    """
+    Checks if a voice model is available locally, and if not, downloads it.
+    This function now returns the full, correct path to the voice model file.
+    Includes a Redis lock to prevent race conditions from parallel workers.
+    """
     all_voices = get_piper_voices()
     voice_info = next((v for v in all_voices if v['id'] == voice_name), None)
     
     if not voice_info:
-        app.logger.error(f"Could not find metadata for voice '{voice_name}' to download.")
-        raise ValueError(f"Voice {voice_name} not found in remote list.")
+        raise ValueError(f"Could not find metadata for voice '{voice_name}' to download.")
+
+    full_voice_path = Path(VOICES_FOLDER) / voice_info['repo_path']
+    full_config_path = full_voice_path.with_suffix(full_voice_path.suffix + ".json")
+
+    if full_voice_path.exists() and full_config_path.exists():
+        app.logger.info(f"Voice '{voice_name}' found locally at {full_voice_path}")
+        return str(full_voice_path)
+
+    if not redis_client:
+        app.logger.warning("Redis client not available. Proceeding without lock. This may cause issues with parallel downloads.")
+    
+    lock_key = f"lock:voice-download:{voice_name}"
+    lock_acquired = False
     
     try:
-        # Download model
-        hf_hub_download(
-            repo_id=PIPER_VOICES_REPO,
-            filename=voice_info['repo_path'],
-            local_dir=VOICES_FOLDER,
-            local_dir_use_symlinks=False
-        )
-        # Download config
-        hf_hub_download(
-            repo_id=PIPER_VOICES_REPO,
-            filename=voice_info['repo_path'] + ".json",
-            local_dir=VOICES_FOLDER,
-            local_dir_use_symlinks=False
-        )
+        wait_start_time = time.time()
+        while time.time() - wait_start_time < 120:
+            if redis_client:
+                lock_acquired = redis_client.set(lock_key, "1", nx=True, ex=60)
+            
+            if lock_acquired:
+                app.logger.info(f"Acquired lock for downloading voice '{voice_name}'.")
+                break
+            else:
+                app.logger.info(f"Waiting for lock on voice '{voice_name}'...")
+                time.sleep(2)
+        else:
+            raise RuntimeError(f"Could not acquire lock for voice '{voice_name}' after 2 minutes.")
+
+        # --- CRITICAL SECTION: Only one worker can be here at a time ---
+        # Double-check if the file was downloaded by the process that held the lock
+        if full_voice_path.exists() and full_config_path.exists():
+            app.logger.info(f"Voice '{voice_name}' was downloaded by another worker while waiting for lock.")
+            return str(full_voice_path)
+
+        app.logger.warning(f"Voice '{voice_name}' not found locally. Starting download...")
+        
+        hf_hub_download(repo_id=PIPER_VOICES_REPO, filename=voice_info['repo_path'], local_dir=VOICES_FOLDER, local_dir_use_symlinks=False)
+        hf_hub_download(repo_id=PIPER_VOICES_REPO, filename=voice_info['repo_path'] + ".json", local_dir=VOICES_FOLDER, local_dir_use_symlinks=False)
+        
         app.logger.info(f"Successfully downloaded voice: {voice_name}")
-        return True
+        return str(full_voice_path)
+
     except Exception as e:
-        app.logger.error(f"Failed to download voice {voice_name} from Hugging Face Hub: {e}")
+        app.logger.error(f"Failed to ensure voice {voice_name} is available: {e}")
         raise
+    finally:
+        # Ensure the lock is always released
+        if lock_acquired and redis_client:
+            redis_client.delete(lock_key)
+            app.logger.info(f"Released lock for voice '{voice_name}'.")
+
 
 def human_readable_size(size, decimal_places=2):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -261,7 +290,6 @@ def extract_text_and_metadata(filepath):
     return text, metadata
 
 def list_available_voices():
-    # This is now a fallback for when the Hugging Face Hub is unreachable
     voices = []
     voice_dir = Path(VOICES_FOLDER)
     if voice_dir.is_dir():
@@ -270,13 +298,52 @@ def list_available_voices():
     return sorted(voices, key=lambda v: v['name'])
 
 @celery.task(bind=True)
+def process_chapter_task(self, chapter_content, chapter_title, chapter_number, base_filename, voice_name, speed_rate):
+    generated_folder = Path(current_app.config['GENERATED_FOLDER'])
+    try:
+        status_msg = f'Processing: {base_filename} - Ch. {chapter_number} "{chapter_title[:30]}..."'
+        self.update_state(state='PROGRESS', meta={'status': status_msg})
+        app.logger.info(f"Starting task {self.request.id}: {status_msg}")
+
+        full_voice_path = ensure_voice_available(voice_name)
+        tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
+
+        # The text_cleaner can be run here to catch any chapter-specific artifacts
+        cleaned_content = text_cleaner.clean_text(chapter_content)
+        
+        safe_title = re.sub(r'[^a-zA-Z0-9]+', '_', chapter_title)
+        output_filename = f"{base_filename}_chap_{chapter_number:03d}_{safe_title[:25]}.mp3"
+        safe_output_filename = secure_filename(output_filename)
+        output_filepath = generated_folder / safe_output_filename
+        
+        _, normalized_text = tts.synthesize(cleaned_content, str(output_filepath))
+        
+        # Note: Cover art is not handled here, as it's part of the audiobook assembly process
+        tag_mp3_file(
+            str(output_filepath),
+            metadata={'title': chapter_title, 'author': 'Unknown'},
+            voice_name=voice_name
+        )
+
+        text_filename = output_filepath.with_suffix('.txt').name
+        (generated_folder / text_filename).write_text(normalized_text, encoding="utf-8")
+
+        app.logger.info(f"Task {self.request.id} completed successfully. Output: {safe_output_filename}")
+        return {'status': 'Success', 'filename': safe_output_filename, 'textfile': text_filename}
+
+    except Exception as e:
+        app.logger.error(f"Chapter processing failed in task {self.request.id}: {e}", exc_info=True)
+        self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
+        raise e
+
+@celery.task(bind=True)
 def convert_to_speech_task(self, input_filepath, original_filename, voice_name=None, speed_rate='1.0'):
     temp_cover_path = None
     unique_id = str(uuid.uuid4().hex[:8])
     generated_folder = current_app.config['GENERATED_FOLDER']
     try:
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Checking voice model...'})
-        ensure_voice_available(voice_name)
+        full_voice_path = ensure_voice_available(voice_name)
 
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Extracting text...'})
         text_content, metadata = extract_text_and_metadata(input_filepath)
@@ -288,7 +355,8 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         base_name = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(original_filename).stem)
         output_filename = f"{base_name}_{unique_id}.mp3"
         output_filepath = os.path.join(generated_folder, output_filename)
-        tts = TTSService(voice=voice_name, speed_rate=speed_rate)
+        
+        tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
         _, normalized_text = tts.synthesize(text_content, output_filepath)
         
         title = metadata.get('title', '')
@@ -452,6 +520,8 @@ def upload_file():
         voice_name = request.form.get("voice")
         speed_rate = request.form.get("speed_rate", "1.0")
         text_input = request.form.get('text_input')
+        book_mode = 'book_mode' in request.form
+        
         if not voice_name:
              flash('No voice selected. Please choose a voice.', 'error')
              return redirect(request.url)
@@ -472,21 +542,55 @@ def upload_file():
         if not files or all(f.filename == '' for f in files):
             flash('No files selected.', 'error')
             return redirect(request.url)
+        
         tasks_created = 0
         for file in files:
-            if file and allowed_file(file.filename):
-                original_filename = secure_filename(file.filename)
-                unique_internal_filename = f"{uuid.uuid4().hex}{Path(original_filename).suffix}"
-                input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
-                file.save(input_filepath)
+            if not file or not allowed_file(file.filename):
+                flash(f'Invalid file type: {file.filename}. Allowed types are: {", ".join(ALLOWED_EXTENSIONS)}.', 'error')
+                continue
+
+            original_filename = secure_filename(file.filename)
+            unique_internal_filename = f"{uuid.uuid4().hex}{Path(original_filename).suffix}"
+            input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
+            file.save(input_filepath)
+
+            if book_mode:
+                try:
+                    app.logger.info(f"Starting Book Mode processing for {original_filename}")
+                    text_content_for_chapterizer, _ = extract_text_and_metadata(input_filepath)
+                    chapters = chapterizer.chapterize(filepath=input_filepath, text_content=text_content_for_chapterizer)
+                    
+                    if not chapters:
+                        flash(f"Could not split '{original_filename}' into chapters. Processing as a single file.", "warning")
+                        convert_to_speech_task.delay(input_filepath, original_filename, voice_name, speed_rate)
+                        tasks_created += 1
+                        continue
+
+                    base_name = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(original_filename).stem)
+                    for chapter in chapters:
+                        process_chapter_task.delay(
+                            chapter.content, chapter.title, chapter.number, base_name, voice_name, speed_rate
+                        )
+                        tasks_created += 1
+                    
+                    os.remove(input_filepath)
+                    app.logger.info(f"Successfully queued {len(chapters)} chapter tasks for {original_filename}.")
+                    
+                except Exception as e:
+                    app.logger.error(f"Failed to chapterize {original_filename}: {e}", exc_info=True)
+                    flash(f"Error processing '{original_filename}' in book mode: {e}", "error")
+                    convert_to_speech_task.delay(input_filepath, original_filename, voice_name, speed_rate)
+                    tasks_created += 1
+            else:
                 convert_to_speech_task.delay(input_filepath, original_filename, voice_name, speed_rate)
                 tasks_created += 1
+        
         if tasks_created > 0:
-            flash(f'Successfully queued {tasks_created} files for processing.', 'success')
+            flash(f'Successfully queued {tasks_created} job(s) for processing.', 'success')
             return redirect(url_for('jobs_page'))
         else:
-            flash(f'Invalid file type. Allowed types are: {", ".join(ALLOWED_EXTENSIONS)}.', 'error')
             return redirect(request.url)
+
     voices = get_piper_voices()
     return render_template('index.html', voices=voices)
 
@@ -498,12 +602,26 @@ def list_files():
         if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
             continue
         
-        match = re.match(r'^(.*?)_([a-f0-9]{8})$', entry.stem)
-        
-        base_name_for_delete = match.group(1) if match else entry.stem
+        key = entry.stem
+        file_map[key] = {}
 
-        if (key := f"{base_name_for_delete}_{match.group(2)}" if match else base_name_for_delete) not in file_map:
-            file_map[key] = {'base_name': base_name_for_delete}
+        single_file_match = re.match(r'^(.*?)_([a-f0-9]{8})$', entry.stem)
+        chapter_match = re.match(r'^(.*?)_chap_(\d{3,})_.*$', entry.stem)
+
+        if single_file_match:
+            base_name = single_file_match.group(1)
+            unique_id = single_file_match.group(2)
+            key = f"{base_name}_{unique_id}"
+            file_map[key] = {'base_name': base_name}
+        elif chapter_match:
+            book_base_name = chapter_match.group(1)
+            file_map[key]['base_name'] = entry.stem 
+            file_map[key]['book_base_name'] = book_base_name 
+        else:
+            file_map[key]['base_name'] = entry.stem
+
+        if (existing_data := file_map.get(key)) is None:
+            file_map[key] = {}
         
         if entry.suffix in ['.mp3', '.m4b']:
             file_map[key].update({
@@ -513,17 +631,42 @@ def list_files():
             })
         elif entry.suffix == '.txt':
             file_map[key]['txt_name'] = entry.name
-            
-    audio_files = [data for data in file_map.values() if 'audio_name' in data]
+
+        if 'base_name' not in file_map[key]:
+             file_map[key]['base_name'] = (single_file_match.group(1) if single_file_match 
+                                           else chapter_match.group(1) if chapter_match 
+                                           else entry.stem)
+
+    final_map = {}
+    for key, data in file_map.items():
+        if single_file_match := re.match(r'^(.*?)_([a-f0-9]{8})$', key):
+            final_map.setdefault(key, {}).update(data)
+            final_map[key]['base_name'] = single_file_match.group(1)
+        elif chapter_match := re.match(r'^(.*?)_chap_(\d{3,})_.*$', key):
+             final_map.setdefault(key, {}).update(data)
+             final_map[key]['base_name'] = key
+             final_map[key]['book_base_name'] = chapter_match.group(1)
+        elif 'audio_name' in data: 
+             final_map.setdefault(key, {}).update(data)
+             final_map[key]['base_name'] = key
+
+
+    audio_files = [data for data in final_map.values() if 'audio_name' in data]
     return render_template('files.html', audio_files=audio_files)
 
 @app.route('/get-book-metadata', methods=['POST'])
 def get_book_metadata():
     filenames = request.json.get('filenames', [])
     if not filenames: return jsonify({'error': 'No filenames provided'}), 400
-    match = re.match(r'^(.*?)_([a-f0-9]{8})$', Path(filenames[0]).stem)
-    first_file_path_stem = match.group(1) if match else Path(filenames[0]).stem
-    title_from_name = first_file_path_stem.replace('_', ' ').replace('-', ' ').title()
+    
+    first_filename_stem = Path(filenames[0]).stem
+    chapter_match = re.match(r'^(.*?)_chap_\d{3,}_.*$', first_filename_stem)
+    if chapter_match:
+        title_from_name = chapter_match.group(1).replace('_', ' ').replace('-', ' ').title()
+    else: 
+        single_file_match = re.match(r'^(.*?)_[a-f0-9]{8}$', first_filename_stem)
+        title_from_name = (single_file_match.group(1) if single_file_match else first_filename_stem).replace('_', ' ').replace('-', ' ').title()
+
     metadata = {'title': title_from_name, 'author': 'Unknown'}
     txt_filename = next((f.replace('.mp3', '.txt') for f in filenames if f.endswith('.mp3')), None)
     if txt_filename and (txt_path := Path(app.config['GENERATED_FOLDER']) / txt_filename).exists():
@@ -569,14 +712,20 @@ def jobs_page():
             for task in tasks:
                 original_filename = "N/A"
                 if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
-                    original_filename = Path(task_args[1]).name
+                    if 'process_chapter_task' in task.get('name', ''):
+                         original_filename = f"{task_args[3]} - Ch. {task_args[2]}"
+                    else:
+                         original_filename = Path(task_args[1]).name
                 running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker})
         reserved_tasks = inspector.reserved() or {}
         for worker, tasks in reserved_tasks.items():
             for task in tasks:
                 original_filename = "N/A"
                 if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
-                    original_filename = Path(task_args[1]).name
+                    if 'process_chapter_task' in task.get('name', ''):
+                         original_filename = f"{task_args[3]} - Ch. {task_args[2]}"
+                    else:
+                         original_filename = Path(task_args[1]).name
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
         if redis_client:
             try:
@@ -633,7 +782,7 @@ def speak_sample(voice_name):
     speed_rate = request.args.get('speed', '1.0')
 
     try:
-        ensure_voice_available(voice_name)
+        full_voice_path = ensure_voice_available(voice_name)
     except Exception as e:
         return f"Error preparing voice sample: {e}", 500
 
@@ -643,7 +792,7 @@ def speak_sample(voice_name):
     filepath = os.path.join(app.config["GENERATED_FOLDER"], filename)
     if not os.path.exists(filepath):
         try:
-            tts = TTSService(voice=voice_name, speed_rate=speed_rate)
+            tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
             tts.synthesize(sample_text, filepath)
         except Exception as e:
             return f"Error generating sample: {e}", 500
@@ -671,7 +820,6 @@ def health_check():
     """A simple health check endpoint."""
     return jsonify({"status": "healthy"}), 200
 
-# New debug route
 @app.route('/debug', methods=['GET', 'POST'])
 def debug_page():
     voices = get_piper_voices()
