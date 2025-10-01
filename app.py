@@ -157,8 +157,6 @@ def ensure_voice_available(voice_name):
         else:
             raise RuntimeError(f"Could not acquire lock for voice '{voice_name}' after 2 minutes.")
 
-        # --- CRITICAL SECTION: Only one worker can be here at a time ---
-        # Double-check if the file was downloaded by the process that held the lock
         if full_voice_path.exists() and full_config_path.exists():
             app.logger.info(f"Voice '{voice_name}' was downloaded by another worker while waiting for lock.")
             return str(full_voice_path)
@@ -175,7 +173,6 @@ def ensure_voice_available(voice_name):
         app.logger.error(f"Failed to ensure voice {voice_name} is available: {e}")
         raise
     finally:
-        # Ensure the lock is always released
         if lock_acquired and redis_client:
             redis_client.delete(lock_key)
             app.logger.info(f"Released lock for voice '{voice_name}'.")
@@ -308,7 +305,6 @@ def process_chapter_task(self, chapter_content, chapter_title, chapter_number, b
         full_voice_path = ensure_voice_available(voice_name)
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
 
-        # The text_cleaner can be run here to catch any chapter-specific artifacts
         cleaned_content = text_cleaner.clean_text(chapter_content)
         
         safe_title = re.sub(r'[^a-zA-Z0-9]+', '_', chapter_title)
@@ -318,7 +314,6 @@ def process_chapter_task(self, chapter_content, chapter_title, chapter_number, b
         
         _, normalized_text = tts.synthesize(cleaned_content, str(output_filepath))
         
-        # Note: Cover art is not handled here, as it's part of the audiobook assembly process
         tag_mp3_file(
             str(output_filepath),
             metadata={'title': chapter_title, 'author': 'Unknown'},
@@ -482,7 +477,7 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
     chapters_meta_path.write_text(chapters_meta_content, encoding='utf-8')
     update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Merging and encoding audio...'})
     temp_audio_path = build_dir / "temp_audio.aac"
-    concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-c:a', 'aac', '-b:a', '128k', str(temp_audio_path)]
+    concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-threads', '0', '-c:a', 'aac', '-b:a', '128k', str(temp_audio_path)]
     subprocess.run(concat_command, check=True, capture_output=True)
     update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Assembling audiobook...'})
     timestamp = build_dir.name.replace('audiobook_build_', '')
@@ -497,7 +492,12 @@ def _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_
         mux_command.extend(['-map', '0:v', '-disposition:v', 'attached_pic'])
     mux_command.extend(['-c:a', 'copy', '-c:v', 'copy', str(output_filepath)])
     subprocess.run(mux_command, check=True, capture_output=True)
-    return {'status': 'Success', 'filename': output_filename}
+
+    text_filepath = output_filepath.with_suffix('.txt')
+    text_filepath.write_text(merged_text_content, encoding='utf-8')
+    text_filename = text_filepath.name
+
+    return {'status': 'Success', 'filename': output_filename, 'textfile': text_filename}
 
 @celery.task(bind=True)
 def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, cover_url=None):
@@ -598,61 +598,41 @@ def upload_file():
 def list_files():
     file_map = {}
     all_files = sorted(Path(app.config['GENERATED_FOLDER']).iterdir(), key=os.path.getmtime, reverse=True)
+
     for entry in all_files:
         if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
             continue
-        
-        key = entry.stem
-        file_map[key] = {}
 
-        single_file_match = re.match(r'^(.*?)_([a-f0-9]{8})$', entry.stem)
-        chapter_match = re.match(r'^(.*?)_chap_(\d{3,})_.*$', entry.stem)
+        key = entry.stem
+        file_data = file_map.setdefault(key, {})
+
+        if entry.suffix in ['.mp3', '.m4b']:
+            file_data['audio_name'] = entry.name
+            file_data['size'] = human_readable_size(entry.stat().st_size)
+            file_data['date'] = datetime.fromtimestamp(entry.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+        elif entry.suffix == '.txt':
+            file_data['txt_name'] = entry.name
+
+    processed_files = []
+    for key, data in file_map.items():
+        if 'audio_name' not in data:
+            continue
+
+        single_file_match = re.match(r'^(.*?)_([a-f0-9]{8})$', key)
+        chapter_match = re.match(r'^(.*?)_chap_(\d{3,})_.*$', key)
 
         if single_file_match:
-            base_name = single_file_match.group(1)
-            unique_id = single_file_match.group(2)
-            key = f"{base_name}_{unique_id}"
-            file_map[key] = {'base_name': base_name}
+            data['base_name'] = single_file_match.group(1)
         elif chapter_match:
-            book_base_name = chapter_match.group(1)
-            file_map[key]['base_name'] = entry.stem 
-            file_map[key]['book_base_name'] = book_base_name 
+            data['base_name'] = key
+            data['book_base_name'] = chapter_match.group(1)
         else:
-            file_map[key]['base_name'] = entry.stem
-
-        if (existing_data := file_map.get(key)) is None:
-            file_map[key] = {}
+            data['base_name'] = key
         
-        if entry.suffix in ['.mp3', '.m4b']:
-            file_map[key].update({
-                'audio_name': entry.name,
-                'size': human_readable_size(entry.stat().st_size),
-                'date': datetime.fromtimestamp(entry.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
-            })
-        elif entry.suffix == '.txt':
-            file_map[key]['txt_name'] = entry.name
+        processed_files.append(data)
 
-        if 'base_name' not in file_map[key]:
-             file_map[key]['base_name'] = (single_file_match.group(1) if single_file_match 
-                                           else chapter_match.group(1) if chapter_match 
-                                           else entry.stem)
+    return render_template('files.html', audio_files=processed_files)
 
-    final_map = {}
-    for key, data in file_map.items():
-        if single_file_match := re.match(r'^(.*?)_([a-f0-9]{8})$', key):
-            final_map.setdefault(key, {}).update(data)
-            final_map[key]['base_name'] = single_file_match.group(1)
-        elif chapter_match := re.match(r'^(.*?)_chap_(\d{3,})_.*$', key):
-             final_map.setdefault(key, {}).update(data)
-             final_map[key]['base_name'] = key
-             final_map[key]['book_base_name'] = chapter_match.group(1)
-        elif 'audio_name' in data: 
-             final_map.setdefault(key, {}).update(data)
-             final_map[key]['base_name'] = key
-
-
-    audio_files = [data for data in final_map.values() if 'audio_name' in data]
-    return render_template('files.html', audio_files=audio_files)
 
 @app.route('/get-book-metadata', methods=['POST'])
 def get_book_metadata():
@@ -668,7 +648,7 @@ def get_book_metadata():
         title_from_name = (single_file_match.group(1) if single_file_match else first_filename_stem).replace('_', ' ').replace('-', ' ').title()
 
     metadata = {'title': title_from_name, 'author': 'Unknown'}
-    txt_filename = next((f.replace('.mp3', '.txt') for f in filenames if f.endswith('.mp3')), None)
+    txt_filename = next((f.replace('.mp3', '.txt').replace('.m4b', '.txt') for f in filenames if f.endswith(('.mp3', '.m4b'))), None)
     if txt_filename and (txt_path := Path(app.config['GENERATED_FOLDER']) / txt_filename).exists():
         text = txt_path.read_text(encoding='utf-8')
         parsed_meta = parse_metadata_from_text(text)

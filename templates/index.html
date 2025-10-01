@@ -57,7 +57,7 @@
                                     <select class="form-select" id="voice" name="voice">
                                         {% if voices %}
                                             {% for v in voices %}
-                                                <option value="{{ v.id }}">{{ v.name }}</option>
+                                                <option value="{{ v.id }}" {% if 'hfc_male' in v.id %}selected{% endif %}>{{ v.name }}</option>
                                             {% endfor %}
                                         {% else %}
                                             <option value="" disabled>Loading voices...</option>

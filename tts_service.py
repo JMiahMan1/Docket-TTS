@@ -57,11 +57,9 @@ def normalize_hebrew(text: str) -> str:
     return re.sub(r'[\u0590-\u05FF]+', translate_match, text)
 
 def normalize_greek(text: str) -> str:
-    # First, handle full words. Sort by length to match longer words first.
     for greek_word, transliteration in sorted(GREEK_WORDS.items(), key=lambda item: len(item[0]), reverse=True):
         text = text.replace(greek_word, transliteration)
 
-    # Then, transliterate any remaining individual characters as a fallback.
     text = text.translate(str.maketrans(GREEK_TRANSLITERATION))
     return text
 
@@ -118,7 +116,7 @@ def _format_ref_segment(book_full, chapter, verses_str):
     elif verses_str.lower().endswith("f"):
         verses_str, suffix = verses_str[:-1].strip(), f" {BIBLE_REFS.get('f', 'and the following verse')}"
     prefix = "verses" if any(c in verses_str for c in ",–-") else "verse"
-    verses_str = re.sub(r"(\d)([a-z])", r"\1 \2", verses_str, flags=re.IGNORECASE)
+    verses_str = re.sub(r"(\d)([a-z])", r"\1 \2", flags=re.IGNORECASE)
     verses_str = verses_str.replace("–", "-").replace("-", " through ")
     verse_words = re.sub(r"\d+", lambda m: _inflect.number_to_words(int(m.group())), verses_str)
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
@@ -303,7 +301,7 @@ class TTSService:
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)
         piper_command = ["piper", "--model", str(self.voice_path), "--length_scale", str(self.speed_rate), "--output_file", "-"]
-        ffmpeg_command = ["ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1", "-i", "-", "-acodec", "libmp3lame", "-q:a", "2", output_path]
+        ffmpeg_command = ["ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1", "-i", "-", "-threads", "0", "-acodec", "libmp3lame", "-q:a", "2", output_path]
         try:
             piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
