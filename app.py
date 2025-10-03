@@ -39,6 +39,7 @@ GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'epub'}
 PIPER_VOICES_REPO = "rhasspy/piper-voices"
+LARGE_FILE_WORD_THRESHOLD = 8000 # Files with more words will auto-trigger book mode
 
 app = Flask(__name__)
 app.config.from_mapping(
@@ -118,11 +119,6 @@ def get_piper_voices():
         return list_available_voices()
 
 def ensure_voice_available(voice_name):
-    """
-    Checks if a voice model is available locally, and if not, downloads it.
-    This function now returns the full, correct path to the voice model file.
-    Includes a Redis lock to prevent race conditions from parallel workers.
-    """
     all_voices = get_piper_voices()
     voice_info = next((v for v in all_voices if v['id'] == voice_name), None)
     
@@ -176,7 +172,6 @@ def ensure_voice_available(voice_name):
         if lock_acquired and redis_client:
             redis_client.delete(lock_key)
             app.logger.info(f"Released lock for voice '{voice_name}'.")
-
 
 def human_readable_size(size, decimal_places=2):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -275,7 +270,7 @@ def extract_text_and_metadata(filepath):
             text = p_filepath.read_text(encoding='utf-8')
     except Exception as e:
         app.logger.error(f"Error extracting from {filepath}: {e}")
-        return None, None
+        return "", {}
     if text:
         parsed_meta = parse_metadata_from_text(text)
         if metadata['title'] == p_filepath.stem.replace('_', ' ').title() and 'title' in parsed_meta:
@@ -340,9 +335,12 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Checking voice model...'})
         full_voice_path = ensure_voice_available(voice_name)
 
-        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Extracting text...'})
+        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Extracting and cleaning text...'})
         text_content, metadata = extract_text_and_metadata(input_filepath)
         if not text_content or not metadata: raise ValueError('Could not extract text.')
+        
+        cleaned_text = text_cleaner.clean_text(text_content)
+        
         if Path(original_filename).suffix == '.txt' and 'title' in metadata:
             metadata['title'] = Path(original_filename).stem.replace('_', ' ').title()
         
@@ -352,7 +350,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
         output_filepath = os.path.join(generated_folder, output_filename)
         
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
-        _, normalized_text = tts.synthesize(text_content, output_filepath)
+        _, normalized_text = tts.synthesize(cleaned_text, output_filepath)
         
         title = metadata.get('title', '')
         author = metadata.get('author', 'Unknown')
@@ -527,6 +525,9 @@ def upload_file():
              return redirect(request.url)
 
         if text_input and text_input.strip():
+            if len(text_input.split()) > LARGE_FILE_WORD_THRESHOLD:
+                flash("Pasted text is too long for single processing. Please use Book Mode with a file upload.", "warning")
+                return redirect(request.url)
             title = request.form.get('text_title')
             if not title or not title.strip():
                 flash('Title is required for pasted text.', 'error')
@@ -554,11 +555,13 @@ def upload_file():
             input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
             file.save(input_filepath)
 
-            if book_mode:
+            text_content, _ = extract_text_and_metadata(input_filepath)
+            word_count = len(text_content.split()) if text_content else 0
+
+            if book_mode or word_count > LARGE_FILE_WORD_THRESHOLD:
                 try:
-                    app.logger.info(f"Starting Book Mode processing for {original_filename}")
-                    text_content_for_chapterizer, _ = extract_text_and_metadata(input_filepath)
-                    chapters = chapterizer.chapterize(filepath=input_filepath, text_content=text_content_for_chapterizer)
+                    app.logger.info(f"Processing '{original_filename}' in Book Mode (Word count: {word_count})")
+                    chapters = chapterizer.chapterize(filepath=input_filepath, text_content=text_content)
                     
                     if not chapters:
                         flash(f"Could not split '{original_filename}' into chapters. Processing as a single file.", "warning")
@@ -582,6 +585,7 @@ def upload_file():
                     convert_to_speech_task.delay(input_filepath, original_filename, voice_name, speed_rate)
                     tasks_created += 1
             else:
+                app.logger.info(f"Processing '{original_filename}' in Single File Mode (Word count: {word_count})")
                 convert_to_speech_task.delay(input_filepath, original_filename, voice_name, speed_rate)
                 tasks_created += 1
         

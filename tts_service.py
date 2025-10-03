@@ -98,6 +98,10 @@ def expand_roman_numerals(text: str) -> str:
         return roman_str
     def replacer(match):
         roman_str = match.group(1)
+        
+        if len(roman_str) == 1 and match.end() < len(text) and text[match.end()] == '.':
+            return roman_str
+
         if roman_str.upper() in ROMAN_EXCEPTIONS: return roman_str
         try:
             integer_val = roman_to_int(roman_str)
@@ -116,7 +120,7 @@ def _format_ref_segment(book_full, chapter, verses_str):
     elif verses_str.lower().endswith("f"):
         verses_str, suffix = verses_str[:-1].strip(), f" {BIBLE_REFS.get('f', 'and the following verse')}"
     prefix = "verses" if any(c in verses_str for c in ",–-") else "verse"
-    verses_str = re.sub(r"(\d)([a-z])", r"\1 \2", flags=re.IGNORECASE)
+    verses_str = re.sub(r"(\d)([a-z])", r"\1 \2", verses_str, flags=re.IGNORECASE)
     verses_str = verses_str.replace("–", "-").replace("-", " through ")
     verse_words = re.sub(r"\d+", lambda m: _inflect.number_to_words(int(m.group())), verses_str)
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
@@ -127,7 +131,6 @@ def normalize_scripture(text: str) -> str:
     book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
     book_chapter_pattern = re.compile(r'^\s*(' + book_pattern_str + r')\s+(\d+)\s*$', re.IGNORECASE | re.MULTILINE)
-    # FIX: Grouped the optional book name with its trailing space to resolve ambiguity
     ref_pattern = re.compile(r'\b(?:(' + book_pattern_str + r')\s+)?(\d+)[:\s]([\d\w\s,.\–-]+(?:ff|f)?)', re.IGNORECASE)
     prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
     enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
@@ -300,17 +303,41 @@ class TTSService:
 
     def synthesize(self, text: str, output_path: str):
         normalized_text = normalize_text(text)
+
+        if not normalized_text or not normalized_text.strip():
+            print(f"WARNING: No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
+            silence_command = [
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
+                "-t", "0.5", "-acodec", "libmp3lame", "-q:a", "9", output_path
+            ]
+            try:
+                subprocess.run(silence_command, check=True, capture_output=True)
+                return output_path, ""
+            except Exception as e:
+                raise RuntimeError(f"FFmpeg failed to generate silent audio: {e}")
+
         piper_command = ["piper", "--model", str(self.voice_path), "--length_scale", str(self.speed_rate), "--output_file", "-"]
         ffmpeg_command = ["ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1", "-i", "-", "-threads", "0", "-acodec", "libmp3lame", "-q:a", "2", output_path]
         try:
+            # Add logging for the text being sent to Piper
+            print(f"DEBUG: Text sent to Piper for {output_path}: '{normalized_text[:500]}...'")
+
             piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
             piper_process.stdin.write(normalized_text.encode('utf-8'))
             piper_process.stdin.close()
+            
             piper_process.stdout.close()
+            
             _, ffmpeg_err = ffmpeg_process.communicate()
-            if piper_process.wait() != 0:
-                raise RuntimeError(f"Piper process failed: {piper_process.stderr.read().decode()}")
+
+            piper_exit_code = piper_process.wait()
+
+            if piper_exit_code != 0:
+                # Decode stderr with error replacement for better debugging
+                piper_err_output = piper_process.stderr.read().decode(errors='replace')
+                raise RuntimeError(f"Piper process failed with exit code {piper_exit_code}: {piper_err_output}")
             if ffmpeg_process.returncode != 0:
                 raise RuntimeError(f"FFmpeg encoding process failed: {ffmpeg_err.decode()}")
         except FileNotFoundError as e:
