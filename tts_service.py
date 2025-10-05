@@ -79,7 +79,6 @@ def remove_superscripts(text: str) -> str:
     return text
 
 def expand_roman_numerals(text: str) -> str:
-    # This regex checks for valid roman numeral syntax. It prevents matching words like "did".
     valid_roman_pattern = re.compile(
         r"^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$", re.IGNORECASE)
     
@@ -96,7 +95,6 @@ def expand_roman_numerals(text: str) -> str:
         return num
 
     def _convert_to_words(s):
-        """Helper to safely convert a roman numeral string to words."""
         if s.upper() in ROMAN_EXCEPTIONS:
             return s
         try:
@@ -108,11 +106,9 @@ def expand_roman_numerals(text: str) -> str:
     def replacer(match):
         roman_str = match.group(1)
 
-        # Step 1: Check if it's a syntactically valid Roman numeral. This disqualifies "did".
         if not valid_roman_pattern.match(roman_str):
             return roman_str
         
-        # Step 2: Check for strong contextual clues that it IS a numeral.
         keywords = {'chapter', 'part', 'book', 'section', 'act', 'unit', 'volume'}
         preceding_text = text[:match.start()]
         preceding_words = preceding_text.split()
@@ -123,11 +119,9 @@ def expand_roman_numerals(text: str) -> str:
             if last_word.lower() in keywords or (last_word.istitle() and len(last_word) > 1):
                 has_strong_clue = True
         
-        # Step 3: If it's a common English word, it MUST have a strong clue to be converted.
         if roman_str.lower() in common_words_to_exclude and not has_strong_clue:
             return roman_str
         
-        # If it passes all checks, convert it.
         return _convert_to_words(roman_str)
             
     return re.sub(r'\b([IVXLCDMivxlcdm]+)\b', replacer, text)

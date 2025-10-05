@@ -272,13 +272,16 @@ def extract_text_and_metadata(filepath):
         app.logger.error(f"Error extracting from {filepath}: {e}")
         return "", {}
     if text:
+        if re.match(r'^[a-f0-9]{8,}', metadata.get('title', '')):
+            metadata['title'] = "Untitled"
         parsed_meta = parse_metadata_from_text(text)
-        if metadata['title'] == p_filepath.stem.replace('_', ' ').title() and 'title' in parsed_meta:
-            metadata['title'] = parsed_meta['title']
+        if metadata['title'] == p_filepath.stem.replace('_', ' ').title() or metadata['title'] == "Untitled":
+             if 'title' in parsed_meta:
+                metadata['title'] = parsed_meta['title']
         if metadata['author'] == 'Unknown' and 'author' in parsed_meta:
             metadata['author'] = parsed_meta['author']
-    if not metadata['title']: metadata['title'] = p_filepath.stem.replace('_', ' ').title()
-    if not metadata['author']: metadata['author'] = 'Unknown'
+    if not metadata.get('title'): metadata['title'] = p_filepath.stem.replace('_', ' ').title()
+    if not metadata.get('author'): metadata['author'] = 'Unknown'
     return text, metadata
 
 def list_available_voices():
@@ -289,29 +292,40 @@ def list_available_voices():
             voices.append({"id": voice_file.name, "name": voice_file.stem})
     return sorted(voices, key=lambda v: v['name'])
 
+def clean_filename_part(name_part):
+    s_name = re.sub(r'[^\w\s-]', '', name_part)
+    s_name = re.sub(r'[-\s]+', ' ', s_name).strip()
+    return s_name[:40]
+
 @celery.task(bind=True)
-def process_chapter_task(self, chapter_content, chapter_title, chapter_number, base_filename, voice_name, speed_rate):
+def process_chapter_task(self, chapter_content, book_title, chapter_details, voice_name, speed_rate):
     generated_folder = Path(current_app.config['GENERATED_FOLDER'])
     try:
-        status_msg = f'Processing: {base_filename} - Ch. {chapter_number} "{chapter_title[:30]}..."'
+        status_msg = f'Processing: {book_title} - Ch. {chapter_details["number"]} "{chapter_details["title"][:20]}..."'
         self.update_state(state='PROGRESS', meta={'status': status_msg})
         app.logger.info(f"Starting task {self.request.id}: {status_msg}")
 
         full_voice_path = ensure_voice_available(voice_name)
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
-
-        cleaned_content = text_cleaner.clean_text(chapter_content)
         
-        safe_title = re.sub(r'[^a-zA-Z0-9]+', '_', chapter_title)
-        output_filename = f"{base_filename}_chap_{chapter_number:03d}_{safe_title[:25]}.mp3"
+        s_book_title = clean_filename_part(book_title)
+        s_chapter_title = clean_filename_part(chapter_details['title'])
+
+        part_str = ""
+        if " - Part " in chapter_details['title']:
+            parts = chapter_details['title'].rsplit(" - Part ", 1)
+            s_chapter_title = clean_filename_part(parts[0])
+            part_str = f" - Part {parts[1]}"
+
+        output_filename = f"{chapter_details['number']:02d} - {s_book_title} - {s_chapter_title}{part_str}.mp3"
         safe_output_filename = secure_filename(output_filename)
         output_filepath = generated_folder / safe_output_filename
         
-        _, normalized_text = tts.synthesize(cleaned_content, str(output_filepath))
+        _, normalized_text = tts.synthesize(chapter_content, str(output_filepath))
         
         tag_mp3_file(
             str(output_filepath),
-            metadata={'title': chapter_title, 'author': 'Unknown'},
+            metadata={'title': chapter_details['title'], 'author': 'Unknown'},
             voice_name=voice_name
         )
 
@@ -327,37 +341,35 @@ def process_chapter_task(self, chapter_content, chapter_title, chapter_number, b
         raise e
 
 @celery.task(bind=True)
-def convert_to_speech_task(self, input_filepath, original_filename, voice_name=None, speed_rate='1.0'):
+def convert_to_speech_task(self, input_filepath, original_filename, book_title, voice_name=None, speed_rate='1.0'):
     temp_cover_path = None
-    unique_id = str(uuid.uuid4().hex[:8])
     generated_folder = current_app.config['GENERATED_FOLDER']
     try:
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Checking voice model...'})
         full_voice_path = ensure_voice_available(voice_name)
 
-        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Extracting and cleaning text...'})
+        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Reading and cleaning text...'})
         text_content, metadata = extract_text_and_metadata(input_filepath)
-        if not text_content or not metadata: raise ValueError('Could not extract text.')
+        if not text_content: raise ValueError('Could not extract text from file.')
         
         cleaned_text = text_cleaner.clean_text(text_content)
         
-        if Path(original_filename).suffix == '.txt' and 'title' in metadata:
-            metadata['title'] = Path(original_filename).stem.replace('_', ' ').title()
-        
         self.update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Synthesizing audio...'})
-        base_name = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(original_filename).stem)
-        output_filename = f"{base_name}_{unique_id}.mp3"
-        output_filepath = os.path.join(generated_folder, output_filename)
+        s_book_title = clean_filename_part(book_title)
+        output_filename = f"01 - {s_book_title}.mp3"
+        safe_output_filename = secure_filename(output_filename)
+        output_filepath = os.path.join(generated_folder, safe_output_filename)
         
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
         _, normalized_text = tts.synthesize(cleaned_text, output_filepath)
         
-        title = metadata.get('title', '')
+        tag_title = metadata.get('title', book_title)
         author = metadata.get('author', 'Unknown')
+        
         cover_url = ''
-        if title:
+        if tag_title:
             try:
-                query = f"intitle:{title}"
+                query = f"intitle:{tag_title}"
                 if author and author != 'Unknown': query += f"+inauthor:{author}"
                 response = requests.get(f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=1")
                 response.raise_for_status()
@@ -368,6 +380,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
             except requests.RequestException as e:
                 app.logger.error(f"Google Books API request failed during TTS task: {e}")
         
+        unique_id = str(uuid.uuid4().hex[:8])
         temp_cover_path = os.path.join(generated_folder, f"cover_{unique_id}.jpg")
         cover_path_to_use = None
         if cover_url:
@@ -381,18 +394,17 @@ def convert_to_speech_task(self, input_filepath, original_filename, voice_name=N
                 app.logger.error(f"Failed to download cover art: {e}")
 
         if not cover_path_to_use:
-            if create_generic_cover_image(title, author, temp_cover_path):
+            if create_generic_cover_image(tag_title, author, temp_cover_path):
                 cover_path_to_use = temp_cover_path
-
-        self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Tagging audio...'})
-        tag_mp3_file(output_filepath, metadata, cover_image_path=cover_path_to_use, voice_name=voice_name)
+        
+        self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Tagging and Saving...'})
+        tag_mp3_file(output_filepath, {'title': tag_title, 'author': author}, cover_image_path=cover_path_to_use, voice_name=voice_name)
         
         self.update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Saving text file...'})
-        text_filename = f"{base_name}_{unique_id}.txt"
-        text_filepath = os.path.join(generated_folder, text_filename)
-        Path(text_filepath).write_text(normalized_text, encoding="utf-8")
+        text_filename = Path(output_filepath).with_suffix('.txt').name
+        Path(os.path.join(generated_folder, text_filename)).write_text(normalized_text, encoding="utf-8")
 
-        return {'status': 'Success', 'filename': output_filename, 'textfile': text_filename}
+        return {'status': 'Success', 'filename': safe_output_filename, 'textfile': text_filename}
     except Exception as e:
         app.logger.error(f"TTS Conversion failed in task {self.request.id}: {e}")
         self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
@@ -525,19 +537,21 @@ def upload_file():
              return redirect(request.url)
 
         if text_input and text_input.strip():
-            if len(text_input.split()) > LARGE_FILE_WORD_THRESHOLD:
-                flash("Pasted text is too long for single processing. Please use Book Mode with a file upload.", "warning")
-                return redirect(request.url)
-            title = request.form.get('text_title')
-            if not title or not title.strip():
+            book_title = request.form.get('text_title')
+            if not book_title or not book_title.strip():
                 flash('Title is required for pasted text.', 'error')
                 return redirect(request.url)
-            original_filename = f"{secure_filename(title.strip())}.txt"
+            if len(text_input.split()) > LARGE_FILE_WORD_THRESHOLD:
+                flash("Pasted text is too long for single processing and must be split. Please use a file upload with Book Mode.", "warning")
+                return redirect(request.url)
+            
+            original_filename = f"{secure_filename(book_title.strip())}.txt"
             unique_internal_filename = f"{uuid.uuid4().hex}.txt"
             input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
             Path(input_filepath).write_text(text_input, encoding='utf-8')
-            task = convert_to_speech_task.delay(input_filepath, original_filename, voice_name, speed_rate)
-            return render_template('result.html', task_id=task.id)
+            convert_to_speech_task.delay(input_filepath, original_filename, book_title, voice_name, speed_rate)
+            flash('Successfully queued 1 job for processing.', 'success')
+            return redirect(url_for('jobs_page'))
         
         files = request.files.getlist('file')
         if not files or all(f.filename == '' for f in files):
@@ -547,7 +561,7 @@ def upload_file():
         tasks_created = 0
         for file in files:
             if not file or not allowed_file(file.filename):
-                flash(f'Invalid file type: {file.filename}. Allowed types are: {", ".join(ALLOWED_EXTENSIONS)}.', 'error')
+                flash(f"Invalid file type: {file.filename}. Allowed types are: {', '.join(ALLOWED_EXTENSIONS)}.", 'error')
                 continue
 
             original_filename = secure_filename(file.filename)
@@ -555,7 +569,8 @@ def upload_file():
             input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
             file.save(input_filepath)
 
-            text_content, _ = extract_text_and_metadata(input_filepath)
+            text_content, metadata = extract_text_and_metadata(input_filepath)
+            book_title = metadata.get('title', Path(original_filename).stem)
             word_count = len(text_content.split()) if text_content else 0
 
             if book_mode or word_count > LARGE_FILE_WORD_THRESHOLD:
@@ -565,15 +580,13 @@ def upload_file():
                     
                     if not chapters:
                         flash(f"Could not split '{original_filename}' into chapters. Processing as a single file.", "warning")
-                        convert_to_speech_task.delay(input_filepath, original_filename, voice_name, speed_rate)
+                        convert_to_speech_task.delay(input_filepath, original_filename, book_title, voice_name, speed_rate)
                         tasks_created += 1
                         continue
 
-                    base_name = re.sub(r'[^a-zA-Z0-9_-]', '_', Path(original_filename).stem)
                     for chapter in chapters:
-                        process_chapter_task.delay(
-                            chapter.content, chapter.title, chapter.number, base_name, voice_name, speed_rate
-                        )
+                        chapter_details = {'number': chapter.number, 'title': chapter.title}
+                        process_chapter_task.delay(chapter.content, book_title, chapter_details, voice_name, speed_rate)
                         tasks_created += 1
                     
                     os.remove(input_filepath)
@@ -582,11 +595,11 @@ def upload_file():
                 except Exception as e:
                     app.logger.error(f"Failed to chapterize {original_filename}: {e}", exc_info=True)
                     flash(f"Error processing '{original_filename}' in book mode: {e}", "error")
-                    convert_to_speech_task.delay(input_filepath, original_filename, voice_name, speed_rate)
+                    convert_to_speech_task.delay(input_filepath, original_filename, book_title, voice_name, speed_rate)
                     tasks_created += 1
             else:
                 app.logger.info(f"Processing '{original_filename}' in Single File Mode (Word count: {word_count})")
-                convert_to_speech_task.delay(input_filepath, original_filename, voice_name, speed_rate)
+                convert_to_speech_task.delay(input_filepath, original_filename, book_title, voice_name, speed_rate)
                 tasks_created += 1
         
         if tasks_created > 0:
@@ -635,9 +648,9 @@ def get_book_metadata():
     if not filenames: return jsonify({'error': 'No filenames provided'}), 400
     
     first_filename_stem = Path(filenames[0]).stem
-    chapter_match = re.match(r'^(.*?)_chap_\d{3,}_.*$', first_filename_stem)
+    chapter_match = re.match(r'^\d{2,}\s-\s(.*?)\s-.*$', first_filename_stem)
     if chapter_match:
-        title_from_name = chapter_match.group(1).replace('_', ' ').replace('-', ' ').title()
+        title_from_name = chapter_match.group(1).replace('_', ' ')
     else: 
         single_file_match = re.match(r'^(.*?)_[a-f0-9]{8}$', first_filename_stem)
         title_from_name = (single_file_match.group(1) if single_file_match else first_filename_stem).replace('_', ' ').replace('-', ' ').title()
@@ -686,9 +699,9 @@ def jobs_page():
         for worker, tasks in active_tasks.items():
             for task in tasks:
                 original_filename = "N/A"
-                if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
+                if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 0:
                     if 'process_chapter_task' in task.get('name', ''):
-                         original_filename = f"{task_args[3]} - Ch. {task_args[2]}"
+                         original_filename = f"{task_args[1]} - Ch. {task_args[2]['number']}"
                     else:
                          original_filename = Path(task_args[1]).name
                 running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker})
@@ -696,9 +709,9 @@ def jobs_page():
         for worker, tasks in reserved_tasks.items():
             for task in tasks:
                 original_filename = "N/A"
-                if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 1:
+                if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 0:
                     if 'process_chapter_task' in task.get('name', ''):
-                         original_filename = f"{task_args[3]} - Ch. {task_args[2]}"
+                         original_filename = f"{task_args[1]} - Ch. {task_args[2]['number']}"
                     else:
                          original_filename = Path(task_args[1]).name
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
