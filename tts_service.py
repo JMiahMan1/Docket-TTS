@@ -79,6 +79,12 @@ def remove_superscripts(text: str) -> str:
     return text
 
 def expand_roman_numerals(text: str) -> str:
+    # This regex checks for valid roman numeral syntax. It prevents matching words like "did".
+    valid_roman_pattern = re.compile(
+        r"^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$", re.IGNORECASE)
+    
+    common_words_to_exclude = {'i', 'a', 'v', 'x', 'l', 'c', 'd', 'm', 'did', 'mix', 'civil', 'mid', 'dim', 'lid', 'ill'}
+
     def roman_to_int(s):
         roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
         s, i, num = s.upper(), 0, 0
@@ -88,26 +94,42 @@ def expand_roman_numerals(text: str) -> str:
             else:
                 num += roman_map[s[i]]; i += 1
         return num
-    def int_to_roman(num):
-        val_map = [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"), (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")]
-        roman_str = ""
-        while num > 0:
-            for i, r in val_map:
-                while num >= i:
-                    roman_str += r; num -= i
-        return roman_str
+
+    def _convert_to_words(s):
+        """Helper to safely convert a roman numeral string to words."""
+        if s.upper() in ROMAN_EXCEPTIONS:
+            return s
+        try:
+            integer_val = roman_to_int(s)
+            return f"Roman Numeral {_inflect.number_to_words(integer_val)}"
+        except (KeyError, IndexError):
+            return s
+
     def replacer(match):
         roman_str = match.group(1)
-        
-        if len(roman_str) == 1 and match.end() < len(text) and text[match.end()] == '.':
-            return roman_str
 
-        if roman_str.upper() in ROMAN_EXCEPTIONS: return roman_str
-        try:
-            integer_val = roman_to_int(roman_str)
-            if int_to_roman(integer_val).lower() != roman_str.lower(): return roman_str
-            return f"Roman Numeral {_inflect.number_to_words(integer_val)}"
-        except (KeyError, IndexError): return roman_str
+        # Step 1: Check if it's a syntactically valid Roman numeral. This disqualifies "did".
+        if not valid_roman_pattern.match(roman_str):
+            return roman_str
+        
+        # Step 2: Check for strong contextual clues that it IS a numeral.
+        keywords = {'chapter', 'part', 'book', 'section', 'act', 'unit', 'volume'}
+        preceding_text = text[:match.start()]
+        preceding_words = preceding_text.split()
+        
+        has_strong_clue = False
+        if preceding_words:
+            last_word = preceding_words[-1].strip('.,:;()[]')
+            if last_word.lower() in keywords or (last_word.istitle() and len(last_word) > 1):
+                has_strong_clue = True
+        
+        # Step 3: If it's a common English word, it MUST have a strong clue to be converted.
+        if roman_str.lower() in common_words_to_exclude and not has_strong_clue:
+            return roman_str
+        
+        # If it passes all checks, convert it.
+        return _convert_to_words(roman_str)
+            
     return re.sub(r'\b([IVXLCDMivxlcdm]+)\b', replacer, text)
 
 def _format_ref_segment(book_full, chapter, verses_str):
@@ -319,7 +341,6 @@ class TTSService:
         piper_command = ["piper", "--model", str(self.voice_path), "--length_scale", str(self.speed_rate), "--output_file", "-"]
         ffmpeg_command = ["ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1", "-i", "-", "-threads", "0", "-acodec", "libmp3lame", "-q:a", "2", output_path]
         try:
-            # Add logging for the text being sent to Piper
             print(f"DEBUG: Text sent to Piper for {output_path}: '{normalized_text[:500]}...'")
 
             piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -335,7 +356,6 @@ class TTSService:
             piper_exit_code = piper_process.wait()
 
             if piper_exit_code != 0:
-                # Decode stderr with error replacement for better debugging
                 piper_err_output = piper_process.stderr.read().decode(errors='replace')
                 raise RuntimeError(f"Piper process failed with exit code {piper_exit_code}: {piper_err_output}")
             if ffmpeg_process.returncode != 0:

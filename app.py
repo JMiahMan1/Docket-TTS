@@ -4,7 +4,7 @@ import uuid
 import re
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 from flask import (
     Flask, request, render_template, send_from_directory,
@@ -39,7 +39,7 @@ GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'epub'}
 PIPER_VOICES_REPO = "rhasspy/piper-voices"
-LARGE_FILE_WORD_THRESHOLD = 8000 # Files with more words will auto-trigger book mode
+LARGE_FILE_WORD_THRESHOLD = 8000
 
 app = Flask(__name__)
 app.config.from_mapping(
@@ -613,7 +613,7 @@ def list_files():
         if entry.suffix in ['.mp3', '.m4b']:
             file_data['audio_name'] = entry.name
             file_data['size'] = human_readable_size(entry.stat().st_size)
-            file_data['date'] = datetime.fromtimestamp(entry.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+            file_data['date'] = datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc).isoformat()
         elif entry.suffix == '.txt':
             file_data['txt_name'] = entry.name
 
@@ -621,17 +621,8 @@ def list_files():
     for key, data in file_map.items():
         if 'audio_name' not in data:
             continue
-
-        single_file_match = re.match(r'^(.*?)_([a-f0-9]{8})$', key)
-        chapter_match = re.match(r'^(.*?)_chap_(\d{3,})_.*$', key)
-
-        if single_file_match:
-            data['base_name'] = single_file_match.group(1)
-        elif chapter_match:
-            data['base_name'] = key
-            data['book_base_name'] = chapter_match.group(1)
-        else:
-            data['base_name'] = key
+        
+        data['base_name'] = key
         
         processed_files.append(data)
 
