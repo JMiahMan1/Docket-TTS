@@ -29,7 +29,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from huggingface_hub import list_repo_files, hf_hub_download
 
-from tts_service import TTSService, normalize_text
+from tts_service import TTSService
 import text_cleaner
 import chapterizer
 
@@ -242,35 +242,37 @@ def extract_text_and_metadata(filepath):
     text = ""
     metadata = {'title': p_filepath.stem.replace('_', ' ').title(), 'author': 'Unknown'}
     try:
+        # For PDF and EPUB, we only extract metadata here.
+        # Text extraction is deferred to the chapterizer for more intelligent processing.
         if extension == '.pdf':
             with fitz.open(filepath) as doc:
                 doc_meta = doc.metadata
                 if doc_meta:
                     metadata['title'] = doc_meta.get('title') or metadata['title']
                     metadata['author'] = doc_meta.get('author') or metadata['author']
-                
-                text = "\n".join([page.get_text() for page in doc])
-
-        elif extension == '.docx':
-            doc = docx.Document(filepath)
-            if doc.core_properties:
-                metadata['title'] = doc.core_properties.title or metadata['title']
-                metadata['author'] = doc.core_properties.author or metadata['author']
-            text = "\n".join([para.text for para in doc.paragraphs])
+        
         elif extension == '.epub':
             book = epub.read_epub(filepath)
             titles = book.get_metadata('DC', 'title')
             if titles: metadata['title'] = titles[0][0]
             creators = book.get_metadata('DC', 'creator')
             if creators: metadata['author'] = creators[0][0]
-            for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
-                soup = BeautifulSoup(item.get_body_content(), 'html.parser')
-                text += soup.get_text() + "\n\n"
+
+        # For DOCX and TXT, we extract the full text content.
+        elif extension == '.docx':
+            doc = docx.Document(filepath)
+            if doc.core_properties:
+                metadata['title'] = doc.core_properties.title or metadata['title']
+                metadata['author'] = doc.core_properties.author or metadata['author']
+            text = "\n".join([para.text for para in doc.paragraphs])
+        
         elif extension == '.txt':
             text = p_filepath.read_text(encoding='utf-8')
     except Exception as e:
-        app.logger.error(f"Error extracting from {filepath}: {e}")
+        app.logger.error(f"Error extracting metadata from {filepath}: {e}")
         return "", {}
+
+    # Heuristic metadata parsing from text content (for TXT, DOCX)
     if text:
         if re.match(r'^[a-f0-9]{8,}', metadata.get('title', '')):
             metadata['title'] = "Untitled"
@@ -280,8 +282,10 @@ def extract_text_and_metadata(filepath):
                 metadata['title'] = parsed_meta['title']
         if metadata['author'] == 'Unknown' and 'author' in parsed_meta:
             metadata['author'] = parsed_meta['author']
+    
     if not metadata.get('title'): metadata['title'] = p_filepath.stem.replace('_', ' ').title()
     if not metadata.get('author'): metadata['author'] = 'Unknown'
+    
     return text, metadata
 
 def list_available_voices():
@@ -321,6 +325,7 @@ def process_chapter_task(self, chapter_content, book_title, chapter_details, voi
         safe_output_filename = secure_filename(output_filename)
         output_filepath = generated_folder / safe_output_filename
         
+        # Text is now pre-normalized by the chapterizer, so we pass it directly to TTS
         _, normalized_text = tts.synthesize(chapter_content, str(output_filepath))
         
         tag_mp3_file(
@@ -348,12 +353,28 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Checking voice model...'})
         full_voice_path = ensure_voice_available(voice_name)
 
-        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Reading and cleaning text...'})
+        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Reading, cleaning, and normalizing text...'})
         text_content, metadata = extract_text_and_metadata(input_filepath)
-        if not text_content: raise ValueError('Could not extract text from file.')
+        if not text_content: 
+             # For single-file mode, we might need to extract text if not already done
+            if Path(input_filepath).suffix.lower() in ['.pdf', '.epub']:
+                 # Simplified extraction for single-file mode
+                if Path(input_filepath).suffix.lower() == '.pdf':
+                    with fitz.open(input_filepath) as doc:
+                        text_content = "\n".join([page.get_text() for page in doc])
+                else: # EPUB
+                    book = epub.read_epub(input_filepath)
+                    for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+                        soup = BeautifulSoup(item.get_body_content(), 'html.parser')
+                        text_content += soup.get_text() + "\n\n"
         
+        if not text_content:
+            raise ValueError('Could not extract text from file.')
+
+        # In single file mode, we must clean and normalize here.
         cleaned_text = text_cleaner.clean_text(text_content)
-        
+        normalized_text = chapterizer.normalize_text(cleaned_text)
+
         self.update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Synthesizing audio...'})
         s_book_title = clean_filename_part(book_title)
         output_filename = f"01 - {s_book_title}.mp3"
@@ -361,7 +382,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         output_filepath = os.path.join(generated_folder, safe_output_filename)
         
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
-        _, normalized_text = tts.synthesize(cleaned_text, output_filepath)
+        _, _ = tts.synthesize(normalized_text, output_filepath)
         
         tag_title = metadata.get('title', book_title)
         author = metadata.get('author', 'Unknown')
@@ -369,7 +390,9 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         cover_url = ''
         if tag_title:
             try:
-                query = f"intitle:{tag_title}"
+                # Remove subtitle from Google Books query for better results
+                query_title = tag_title.split(':')[0].strip()
+                query = f"intitle:{query_title}"
                 if author and author != 'Unknown': query += f"+inauthor:{author}"
                 response = requests.get(f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=1")
                 response.raise_for_status()
@@ -527,87 +550,110 @@ def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, co
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
+        # This will hold the single task ID to be returned
+        task = None
+        
+        # --- Form Data Retrieval ---
         voice_name = request.form.get("voice")
         speed_rate = request.form.get("speed_rate", "1.0")
         text_input = request.form.get('text_input')
         book_mode = 'book_mode' in request.form
+        debug_mode = 'debug_mode' in request.form
         
         if not voice_name:
              flash('No voice selected. Please choose a voice.', 'error')
              return redirect(request.url)
 
+        # --- Logic for Pasted Text ---
         if text_input and text_input.strip():
             book_title = request.form.get('text_title')
             if not book_title or not book_title.strip():
                 flash('Title is required for pasted text.', 'error')
                 return redirect(request.url)
+            
+            if ':' in book_title:
+                book_title = book_title.split(':')[0].strip()
+
             if len(text_input.split()) > LARGE_FILE_WORD_THRESHOLD:
-                flash("Pasted text is too long for single processing and must be split. Please use a file upload with Book Mode.", "warning")
+                flash("Pasted text is too long for single processing. Please use a file upload with Book Mode.", "warning")
                 return redirect(request.url)
             
             original_filename = f"{secure_filename(book_title.strip())}.txt"
             unique_internal_filename = f"{uuid.uuid4().hex}.txt"
             input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
             Path(input_filepath).write_text(text_input, encoding='utf-8')
-            convert_to_speech_task.delay(input_filepath, original_filename, book_title, voice_name, speed_rate)
+            
+            task = convert_to_speech_task.delay(input_filepath, original_filename, book_title, voice_name, speed_rate)
             flash('Successfully queued 1 job for processing.', 'success')
-            return redirect(url_for('jobs_page'))
-        
-        files = request.files.getlist('file')
-        if not files or all(f.filename == '' for f in files):
-            flash('No files selected.', 'error')
-            return redirect(request.url)
-        
-        tasks_created = 0
-        for file in files:
-            if not file or not allowed_file(file.filename):
-                flash(f"Invalid file type: {file.filename}. Allowed types are: {', '.join(ALLOWED_EXTENSIONS)}.", 'error')
-                continue
 
-            original_filename = secure_filename(file.filename)
-            unique_internal_filename = f"{uuid.uuid4().hex}{Path(original_filename).suffix}"
-            input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
-            file.save(input_filepath)
+        # --- Logic for File Uploads ---
+        else:
+            files = request.files.getlist('file')
+            if not files or all(f.filename == '' for f in files):
+                flash('No files selected.', 'error')
+                return redirect(request.url)
+            
+            tasks_created_count = 0
+            # Note: For simplicity, we'll return the ID of the *first* task created in a multi-file upload
+            first_task_id = None
 
-            text_content, metadata = extract_text_and_metadata(input_filepath)
-            book_title = metadata.get('title', Path(original_filename).stem)
-            word_count = len(text_content.split()) if text_content else 0
+            for file in files:
+                if not file or not allowed_file(file.filename):
+                    flash(f"Invalid file type: {file.filename}. Allowed types are: {', '.join(ALLOWED_EXTENSIONS)}.", 'error')
+                    continue
 
-            if book_mode or word_count > LARGE_FILE_WORD_THRESHOLD:
-                try:
-                    app.logger.info(f"Processing '{original_filename}' in Book Mode (Word count: {word_count})")
-                    chapters = chapterizer.chapterize(filepath=input_filepath, text_content=text_content)
+                original_filename = secure_filename(file.filename)
+                unique_internal_filename = f"{uuid.uuid4().hex}{Path(original_filename).suffix}"
+                input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
+                file.save(input_filepath)
+
+                text_content, metadata = extract_text_and_metadata(input_filepath)
+                book_title = metadata.get('title', Path(original_filename).stem)
+
+                if ':' in book_title:
+                    book_title = book_title.split(':')[0].strip()
+
+                word_count = len(text_content.split()) if text_content else 0
+
+                if book_mode or word_count > LARGE_FILE_WORD_THRESHOLD or Path(input_filepath).suffix.lower() in ['.pdf', '.epub']:
+                    app.logger.info(f"Processing '{original_filename}' in Book Mode (or EPUB/PDF)")
+                    chapters = chapterizer.chapterize(filepath=input_filepath, text_content=text_content, debug=debug_mode)
                     
                     if not chapters:
                         flash(f"Could not split '{original_filename}' into chapters. Processing as a single file.", "warning")
-                        convert_to_speech_task.delay(input_filepath, original_filename, book_title, voice_name, speed_rate)
-                        tasks_created += 1
-                        continue
+                        task = convert_to_speech_task.delay(input_filepath, original_filename, book_title, voice_name, speed_rate)
+                        tasks_created_count += 1
+                    else:
+                        for chapter in chapters:
+                            chapter_details = {'number': chapter.number, 'title': chapter.title}
+                            task = process_chapter_task.delay(chapter.content, book_title, chapter_details, voice_name, speed_rate)
+                        tasks_created_count += len(chapters)
+                        os.remove(input_filepath)
+                else:
+                    app.logger.info(f"Processing '{original_filename}' in Single File Mode")
+                    task = convert_to_speech_task.delay(input_filepath, original_filename, book_title, voice_name, speed_rate)
+                    tasks_created_count += 1
 
-                    for chapter in chapters:
-                        chapter_details = {'number': chapter.number, 'title': chapter.title}
-                        process_chapter_task.delay(chapter.content, book_title, chapter_details, voice_name, speed_rate)
-                        tasks_created += 1
-                    
-                    os.remove(input_filepath)
-                    app.logger.info(f"Successfully queued {len(chapters)} chapter tasks for {original_filename}.")
-                    
-                except Exception as e:
-                    app.logger.error(f"Failed to chapterize {original_filename}: {e}", exc_info=True)
-                    flash(f"Error processing '{original_filename}' in book mode: {e}", "error")
-                    convert_to_speech_task.delay(input_filepath, original_filename, book_title, voice_name, speed_rate)
-                    tasks_created += 1
-            else:
-                app.logger.info(f"Processing '{original_filename}' in Single File Mode (Word count: {word_count})")
-                convert_to_speech_task.delay(input_filepath, original_filename, book_title, voice_name, speed_rate)
-                tasks_created += 1
+                if task and not first_task_id:
+                    first_task_id = task.id
+            
+            if tasks_created_count > 0:
+                flash(f'Successfully queued {tasks_created_count} job(s) for processing.', 'success')
+                task = celery.AsyncResult(first_task_id) # Ensure 'task' is the first created task object
+
+        # --- MODIFIED RESPONSE LOGIC ---
+        # If the client is a script asking for JSON (like our test runner), give it the task ID.
+        wants_json = request.headers.get('Accept') == 'application/json'
+        if wants_json and task:
+            return jsonify({'status': 'queued', 'task_id': task.id})
         
-        if tasks_created > 0:
-            flash(f'Successfully queued {tasks_created} job(s) for processing.', 'success')
-            return redirect(url_for('jobs_page'))
+        # Otherwise, for a regular browser user, render the result page or redirect.
+        if task:
+            return render_template('result.html', task_id=task.id)
         else:
             return redirect(request.url)
 
+    # This is for GET requests
     voices = get_piper_voices()
     return render_template('index.html', voices=voices)
 
@@ -766,7 +812,7 @@ def delete_bulk():
 
 @app.route('/speak_sample/<voice_name>')
 def speak_sample(voice_name):
-    sample_text = "The Lord is my shepherd; I shall not want. He makes me to lie down in green pastures; He leads me beside the still waters. He restores my soul; He leads me in the paths of righteousness For His name’s sake."
+    sample_text = "The Lord is my shepherd; I shall not want. He makes me to lie down in green pastures; He leads me beside the still waters. He restores my soul; He leads me in the paths of righteousness For His name’s sake."
     speed_rate = request.args.get('speed', '1.0')
 
     try:
@@ -778,10 +824,14 @@ def speak_sample(voice_name):
     safe_voice_name = secure_filename(Path(voice_name).stem)
     filename = f"sample_{safe_voice_name}_speed_{safe_speed}.mp3"
     filepath = os.path.join(app.config["GENERATED_FOLDER"], filename)
+    
+    # Normalization must now be done manually for samples
+    normalized_sample_text = chapterizer.normalize_text(sample_text)
+
     if not os.path.exists(filepath):
         try:
             tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
-            tts.synthesize(sample_text, filepath)
+            tts.synthesize(normalized_sample_text, filepath)
         except Exception as e:
             return f"Error generating sample: {e}", 500
     return send_from_directory(app.config["GENERATED_FOLDER"], filename)
@@ -819,7 +869,7 @@ def debug_page():
     if request.method == 'POST':
         original_text = request.form.get('text_to_normalize', '')
         if original_text:
-            normalized_output = normalize_text(original_text)
+            normalized_output = chapterizer.normalize_text(original_text)
     
     try:
         with open(log_file, 'r') as f:
