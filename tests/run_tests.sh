@@ -28,7 +28,7 @@ pytest -v -n auto \
   tests/test_sample_generation.py \
   tests/test_chapter_processing.py \
   tests/test_text_cleaner.py \
-  tests/tests/test_normalization_edge_cases.py \
+  tests/test_normalization_edge_cases.py \
   tests/test_task_logic.py
 
 echo "--- All tests passed successfully! ---"

@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, ANY
 from io import BytesIO
 from app import app as flask_app
 from chapterizer import Chapter
@@ -42,8 +42,8 @@ def test_book_mode_upload_creates_multiple_jobs(
     ]
     mock_chapterize.return_value = mock_chapters
     
-    # Mock text extraction as chapterizer needs it for non-epubs
-    mock_extract_text.return_value = ("dummy text", {})
+    # Mock text extraction; return a dummy title
+    mock_extract_text.return_value = ("dummy text", {'title': 'book'})
 
     # 2. Prepare the form data for a file upload with the 'book_mode' flag
     file_data = {
@@ -66,9 +66,13 @@ def test_book_mode_upload_creates_multiple_jobs(
     # The key assertion: one task should be created for each chapter
     assert mock_task_delay.call_count == 3
     
-    # Check that the arguments for the first task call are correct
-    first_call_args = mock_task_delay.call_args_list[0].args
-    assert first_call_args[0] == "Once upon a time." # chapter.content
-    assert first_call_args[1] == "The Beginning"     # chapter.title
-    assert first_call_args[2] == 1                   # chapter.number
-    assert first_call_args[3] == "book"              # base_filename
+    # --- UPDATED ASSERTIONS ---
+    # Check that the arguments for the first task call are correct based on the app.py signature:
+    # process_chapter_task.delay(chapter.content, book_title, chapter_details, voice_name, speed_rate)
+    first_call_args, _ = mock_task_delay.call_args_list[0]
+    
+    assert first_call_args[0] == "Once upon a time."  # chapter.content
+    assert first_call_args[1] == "book"               # book_title
+    assert first_call_args[2] == {'number': 1, 'title': 'The Beginning'} # chapter_details dict
+    assert first_call_args[3] == 'en_US-hfc_male-medium.onnx' # voice_name
+    assert first_call_args[4] == '1.0'                # speed_rate
