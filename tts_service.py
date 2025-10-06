@@ -318,7 +318,9 @@ class TTSService:
             raise FileNotFoundError(f"Voice model file not found at the provided path: {self.voice_path}")
 
     def synthesize(self, text: str, output_path: str):
-        normalized_text = normalize_text(text)
+        # NORMALIZATION IS NO LONGER DONE HERE. IT'S DONE IN THE CHAPTERIZER.
+        # The 'text' parameter is now assumed to be pre-normalized.
+        normalized_text = text
 
         if not normalized_text or not normalized_text.strip():
             print(f"WARNING: No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
