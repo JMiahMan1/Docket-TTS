@@ -123,8 +123,12 @@ def expand_roman_numerals(text: str) -> str:
             return roman_str
         
         return _convert_to_words(roman_str)
-            
-    return re.sub(r'\b([IVXLCDMivxlcdm]+)\b', replacer, text)
+
+    # --- CORRECTED REGEX ---
+    # The (?!\.) is a "negative lookahead" that ensures the match is NOT followed by a period.
+    # This prevents it from matching initials like "D." or "C.".
+    return re.sub(r'\b([IVXLCDMivxlcdm]+)(?!\.)\b', replacer, text)
+
 
 def _format_ref_segment(book_full, chapter, verses_str):
     chapter_words = _inflect.number_to_words(int(chapter))
@@ -318,8 +322,7 @@ class TTSService:
             raise FileNotFoundError(f"Voice model file not found at the provided path: {self.voice_path}")
 
     def synthesize(self, text: str, output_path: str):
-        # NORMALIZATION IS NO LONGER DONE HERE. IT'S DONE IN THE CHAPTERIZER.
-        # The 'text' parameter is now assumed to be pre-normalized.
+        # Text is now assumed to be pre-normalized.
         normalized_text = text
 
         if not normalized_text or not normalized_text.strip():
