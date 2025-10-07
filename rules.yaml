@@ -11,6 +11,12 @@ normalization_rules:
     pattern: '\[\d+\]|\[fn\]|\[[a-zA-Z]\]'
     replacement: ''
 
+  - name: "Add a period for a longer pause after chapter headings"
+    type: "regex"
+    pattern: '^((?:Chapter|Part|Book|Section|Prologue|Epilogue|Introduction)\s+.*)$'
+    replacement: '\g<1>.'
+    flags: ["MULTILINE"]
+
   # === STAGE 2: SCRIPTURE NORMALIZATION ===
   - name: "Normalize all scripture references (e.g., Romans 8, Rom 8:1, etc.)"
     type: "function"

@@ -32,12 +32,10 @@ NUMBERED_CHAPTER_PATTERN = re.compile(
     re.IGNORECASE | re.MULTILINE
 )
 NAMED_CHAPTER_PATTERN = re.compile(
-    r'^\s*(prologue|epilogue|introduction|appendix|acknowledgments|dedication|foreword|preface)\s*[:.\-]?\s*(.*)\s*$',
+    r'^\s*(prologue|epilogue|introduction|appendix|acknowledgments|dedication|foreword|preface|title page)\s*[:.\-]?\s*(.*)\s*$',
     re.IGNORECASE | re.MULTILINE
 )
 
-# --- CORRECTED REGEX ---
-# "Title Page" has been REMOVED from this pattern to ensure it is preserved.
 DISALLOWED_TITLES_PATTERN = re.compile(
     r'^(Table of Contents|Contents|Copyright|Index|Bibliography|Glossary|Also by|List of|Appendix)',
     re.IGNORECASE
@@ -78,7 +76,7 @@ def _split_large_chapter_into_parts(chapter: Chapter, max_words: int) -> List[Ch
     return [p._replace(part_info=(i + 1, total_parts)) for i, p in enumerate(parts)]
 
 def _find_raw_chapters(text: str) -> List[Chapter]:
-    """Finds potential chapter breaks in raw, unaltered text and includes the heading in the content."""
+    """Finds potential chapter breaks and includes the heading in the content to prevent empty chapters."""
     logger.info("Finding raw chapter breaks in text.")
     chapters = []
     
@@ -98,6 +96,7 @@ def _find_raw_chapters(text: str) -> List[Chapter]:
             chapters.append(Chapter(0, "Title Page", "Title Page", intro_content, len(intro_content.split())))
     
     for i, match in enumerate(matches):
+        # The content of this chapter is the text from the start of this heading to the start of the next one.
         start_index = match.start()
         end_index = matches[i + 1].start() if (i + 1) < len(matches) else len(text)
         content = text[start_index:end_index].strip()
