@@ -19,18 +19,20 @@ def submit_and_poll_task(title, text_content, speed_rate="1.0"):
         'speed_rate': speed_rate
     }
     
-    # --- MODIFIED LOGIC ---
-    # Send a header to tell the app we want a JSON response, not a redirect.
-    headers = {
-        'Accept': 'application/json'
-    }
-    submit_response = requests.post(f"{BASE_URL}/", data=payload, headers=headers)
+    # --- FIX: Submit data as multipart/form-data instead of urlencoded ---
+    # This aligns the text submission with the file submission format,
+    # which is likely the new intended behavior of the application.
+    # The 'requests' library requires a specific format for non-file multipart fields.
+    multipart_payload = {key: (None, value) for key, value in payload.items()}
+    submit_response = requests.post(f"{BASE_URL}/", files=multipart_payload)
+    # --- END FIX ---
+    
     assert submit_response.status_code == 200, f"Failed to submit task. Status: {submit_response.status_code}"
     
-    # Get the task ID directly from the JSON response
-    response_json = submit_response.json()
-    task_id = response_json.get('task_id')
-    assert task_id, "Task ID not found in JSON response."
+    task_id_line = [line for line in submit_response.text.split('\n') if "const taskId = " in line]
+    assert task_id_line, "Could not find task ID in the response. The submission likely failed silently."
+    task_id = task_id_line[0].split('"')[1]
+    assert task_id, "Task ID is empty."
 
     start_time = time.time()
     while time.time() - start_time < TIMEOUT:
@@ -71,7 +73,7 @@ def cleanup_files(mp3_filename):
         except requests.RequestException as e:
             print(f"Warning: Failed to cleanup file {base_name}. Reason: {e}")
 
-# --- Test Suite (No changes needed below this line) ---
+# --- Test Suite ---
 
 def test_year_pronunciation():
     title = "Year Pronunciation Test"
