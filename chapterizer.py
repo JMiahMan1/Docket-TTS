@@ -27,15 +27,22 @@ DEFAULT_CONFIG = {
     "min_chapter_word_count": 100,
 }
 
-# This regex is the stable foundation for finding chapter breaks
-RAW_CHAPTER_PATTERN = re.compile(
-    r'^\s*(chapter|part|book|section|prologue|epilogue|introduction|appendix)\s+([0-9]+|[IVXLCDM]+|[A-Z\s]+)?\s*[:.\-]?\s*(.*)\s*$',
+# --- CORRECTED REGEX LOGIC ---
+# Pattern 1: For numbered sections like "Chapter 1", "Part II". This is the key fix.
+NUMBERED_CHAPTER_PATTERN = re.compile(
+    r'^\s*(chapter|part|book|section)\s+([0-9]+|[IVXLCDM]+)\s*[:.\-]?\s*(.*)\s*$',
+    re.IGNORECASE | re.MULTILINE
+)
+# Pattern 2: For named sections that don't need a number, like "Prologue". "Part" is NOT in this list.
+NAMED_CHAPTER_PATTERN = re.compile(
+    r'^\s*(prologue|epilogue|introduction|appendix|acknowledgments|dedication|foreword|preface)\s*[:.\-]?\s*(.*)\s*$',
     re.IGNORECASE | re.MULTILINE
 )
 
-# Titles that will be explicitly discarded after chapterization
+
+# Titles that will be explicitly discarded after raw chapterization
 DISALLOWED_TITLES_PATTERN = re.compile(
-    r'^(Table of Contents|Contents|Copyright|Dedication|Index|Bibliography|Glossary|Title Page|Also by|Acknowledgments|List of|Front Matter)',
+    r'^(Table of Contents|Contents|Copyright|Index|Bibliography|Glossary|Title Page|Also by|List of|Front Matter)',
     re.IGNORECASE
 )
 
@@ -73,28 +80,37 @@ def _split_large_chapter_into_parts(chapter: Chapter, max_words: int) -> List[Ch
     total_parts = len(parts)
     return [p._replace(part_info=(i + 1, total_parts)) for i, p in enumerate(parts)]
 
-def _find_raw_chapters_by_regex(text: str) -> List[Chapter]:
-    """Finds potential chapter breaks in raw, unaltered text and correctly splits the content between them."""
-    logger.info("Finding raw chapter breaks in text using regex.")
+def _find_raw_chapters(text: str) -> List[Chapter]:
+    """Finds potential chapter breaks in raw, unaltered text using specific patterns."""
+    logger.info("Finding raw chapter breaks in text.")
     chapters = []
-    matches = list(RAW_CHAPTER_PATTERN.finditer(text))
+    
+    # Combine matches from both patterns and sort them by their position in the text
+    matches = sorted(
+        list(NUMBERED_CHAPTER_PATTERN.finditer(text)) + list(NAMED_CHAPTER_PATTERN.finditer(text)),
+        key=lambda m: m.start()
+    )
 
     if not matches:
-        logger.warning("No chapter headings found via regex. Treating entire document as a single chapter.")
+        logger.warning("No chapter headings found. Treating entire document as a single chapter.")
         return [Chapter(0, "Full Document", "Full Document", text, len(text.split()))]
 
     last_end = 0
+    # Handle content before the first match as "Title Page" or "Front Matter"
     if matches[0].start() > 0:
         intro_content = text[:matches[0].start()].strip()
         if intro_content:
             chapters.append(Chapter(0, "Title Page", "Title Page", intro_content, len(intro_content.split())))
     
+    # Iterate through sorted matches to create chapters from the text *between* them
     for i, match in enumerate(matches):
         start_index = match.end()
         end_index = matches[i + 1].start() if (i + 1) < len(matches) else len(text)
         content = text[start_index:end_index].strip()
         
         original_title = match.group(0).strip().replace('\n', ' ')
+        
+        # Combine the captured groups to form a clean title
         cleaned_title = " ".join(filter(None, match.groups())).strip().title()
         if not cleaned_title:
              cleaned_title = f"Section {i+1}"
@@ -169,26 +185,14 @@ def chapterize(
             logger.warning(f"No text could be extracted from {p_filepath.name}.")
             return []
 
-        # STEP 2: Use the stable regex method as the foundation to get chapter breaks.
+        # STEP 2: Find chapter breaks in the single RAW text string.
         initial_chapters = _find_raw_chapters(raw_text)
-
-        # STEP 3 (Enhancement): If it's an EPUB, try to improve titles from the TOC.
-        if ext == '.epub' and initial_chapters:
-            logger.info("Enhancing chapter titles using EPUB Table of Contents.")
-            book = epub.read_epub(filepath)
-            toc_titles = [item.title for item in book.toc]
-            # Simple 1-to-1 mapping enhancement if counts match
-            if len(toc_titles) == len(initial_chapters):
-                enhanced_chapters = []
-                for i, chapter in enumerate(initial_chapters):
-                    enhanced_chapters.append(chapter._replace(title=toc_titles[i], original_title=toc_titles[i]))
-                initial_chapters = enhanced_chapters
 
     except Exception as e:
         logger.error(f"Failed to process {filepath}: {e}", exc_info=True)
         return []
 
-    # STEP 4: Send the raw chapters to the final processing pipeline.
+    # STEP 3: Send the raw chapters to the final processing pipeline.
     final_parts = _apply_final_processing(initial_chapters, config)
     
     if debug:
