@@ -30,7 +30,7 @@ from logging.handlers import RotatingFileHandler
 from huggingface_hub import list_repo_files, hf_hub_download
 from difflib import SequenceMatcher
 
-from tts_service import TTSService
+from tts_service import TTSService, normalize_text
 import text_cleaner
 import chapterizer
 
@@ -252,12 +252,16 @@ def extract_text_and_metadata(filepath):
                 if doc_meta:
                     metadata['title'] = doc_meta.get('title') or metadata['title']
                     metadata['author'] = doc_meta.get('author') or metadata['author']
+                text = "\n".join([page.get_text() for page in doc])
         elif extension == '.epub':
             book = epub.read_epub(filepath)
             titles = book.get_metadata('DC', 'title')
             if titles: metadata['title'] = titles[0][0]
             creators = book.get_metadata('DC', 'creator')
             if creators: metadata['author'] = creators[0][0]
+            for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+                soup = BeautifulSoup(item.get_body_content(), 'html.parser')
+                text += soup.get_text() + "\n\n"
         elif extension == '.docx':
             doc = docx.Document(filepath)
             if doc.core_properties:
@@ -267,8 +271,9 @@ def extract_text_and_metadata(filepath):
         elif extension == '.txt':
             text = p_filepath.read_text(encoding='utf-8')
     except Exception as e:
-        app.logger.error(f"Error extracting metadata from {filepath}: {e}")
-        return "", {}
+        app.logger.error(f"Error extracting text and metadata from {filepath}: {e}")
+        # Return empty text but keep metadata so we have a title at least
+        return "", metadata
 
     if text:
         if re.match(r'^[a-f0-9]{8,}', metadata.get('title', '')):
@@ -368,8 +373,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
             raise ValueError('Could not extract text from file for single-file processing.')
 
         cleaned_text = text_cleaner.clean_text(text_content)
-        normalized_text = chapterizer.normalize_text(cleaned_text)
-
+        
         self.update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Synthesizing audio...'})
         s_book_title = clean_filename_part(book_title)
         output_filename = f"01 - {s_book_title}.mp3"
@@ -377,7 +381,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         output_filepath = os.path.join(generated_folder, safe_output_filename)
         
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
-        _, _ = tts.synthesize(normalized_text, output_filepath)
+        _, normalized_text = tts.synthesize(cleaned_text, output_filepath)
         
         tag_title = book_title
         author = book_author
@@ -557,10 +561,36 @@ def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, co
 @app.route('/', methods=['GET', 'POST'])
 def upload_file():
     if request.method == 'POST':
-        tasks = []
-        
         voice_name = request.form.get("voice")
         speed_rate = request.form.get("speed_rate", "1.0")
+        
+        # --- FIX STARTS HERE ---
+        # This block restores the functionality for handling pasted text, which is required by the test suite.
+        text_input = request.form.get('text_input')
+        if text_input and text_input.strip():
+            book_title = request.form.get('text_title')
+            
+            if not book_title or not book_title.strip():
+                flash('Title is required for pasted text.', 'error')
+                return redirect(request.url)
+            
+            # The tests expect a single task for pasted text, so we'll use the single-file converter.
+            original_filename = f"{secure_filename(book_title.strip())}.txt"
+            unique_internal_filename = f"{uuid.uuid4().hex}.txt"
+            input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
+            Path(input_filepath).write_text(text_input, encoding='utf-8')
+            
+            # For pasted text, author is unknown. The task will try to parse it.
+            book_author = 'Unknown'
+            
+            # Queue the single-file conversion task.
+            task = convert_to_speech_task.delay(input_filepath, original_filename, book_title, book_author, voice_name, speed_rate)
+            
+            # Return the result page with the task ID, which the test suite expects.
+            return render_template('result.html', task_id=task.id)
+        # --- FIX ENDS HERE ---
+
+        tasks = []
         debug_mode = 'debug_mode' in request.form
         
         files = request.files.getlist('file')
@@ -607,11 +637,6 @@ def upload_file():
 
         if tasks:
             flash(f'Successfully queued {len(tasks)} job(s) for processing.', 'success')
-            first_task_id = tasks[0].id
-        else:
-            first_task_id = None
-        
-        if first_task_id:
             return redirect(url_for('jobs_page'))
         else:
             flash('No processable content was found in the uploaded file(s).', 'error')
@@ -810,7 +835,7 @@ def speak_sample(voice_name):
     filename = f"sample_{safe_voice_name}_speed_{safe_speed}.mp3"
     filepath = os.path.join(app.config["GENERATED_FOLDER"], filename)
     
-    normalized_sample_text = chapterizer.normalize_text(sample_text)
+    normalized_sample_text = normalize_text(sample_text)
 
     if not os.path.exists(filepath):
         try:
@@ -853,7 +878,7 @@ def debug_page():
     if request.method == 'POST':
         original_text = request.form.get('text_to_normalize', '')
         if original_text:
-            normalized_output = chapterizer.normalize_text(original_text)
+            normalized_output = normalize_text(original_text)
     
     try:
         with open(log_file, 'r') as f:
