@@ -6,6 +6,7 @@ import unicodedata
 import yaml
 from pathlib import Path
 from argostranslate import translate
+import argostranslate.package
 
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 RULES_PATH = Path(__file__).parent / "rules.yaml"
@@ -39,8 +40,22 @@ else:
 
 _inflect = inflect.engine()
 try:
+    # Ensure the language packages are downloaded and installed
+    argostranslate.package.update_package_index()
+    available_packages = argostranslate.package.get_available_packages()
+    package_to_install = next(
+        filter(
+            lambda x: x.from_code == "he" and x.to_code == "en",
+            available_packages
+        )
+    )
+    if not package_to_install.is_installed():
+        print(f"Downloading and installing Argos Translate package: {package_to_install}")
+        package_to_install.install()
+    
     HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
-except Exception:
+except Exception as e:
+    print(f"Warning: Could not initialize Hebrew translation model: {e}")
     HEBREW_TO_ENGLISH = None
 
 def _strip_diacritics(text: str) -> str:
@@ -61,6 +76,8 @@ def normalize_greek(text: str) -> str:
         text = text.replace(greek_word, transliteration)
 
     text = text.translate(str.maketrans(GREEK_TRANSLITERATION))
+    # This rule was added to handle a specific edge case found in testing.
+    text = text.replace("’", "'")
     return text
 
 def remove_superscripts(text: str) -> str:
@@ -124,9 +141,6 @@ def expand_roman_numerals(text: str) -> str:
         
         return _convert_to_words(roman_str)
 
-    # --- CORRECTED REGEX ---
-    # The (?!\.) is a "negative lookahead" that ensures the match is NOT followed by a period.
-    # This prevents it from matching initials like "D." or "C.".
     return re.sub(r'\b([IVXLCDMivxlcdm]+)(?!\.)\b', replacer, text)
 
 
@@ -237,35 +251,27 @@ def number_replacer(match):
         if not is_ordinal and len(num_str) == 4 and num_str.isdigit():
             num_int = int(num_str)
 
-            # Handle years from 2000 to 2099
             if 2000 <= num_int <= 2099:
                 if num_int < 2010:
-                    # Pronounce as "two thousand five"
                     return _inflect.number_to_words(num_str).replace(" and ", " ")
                 else:
-                    # Pronounce as "twenty ten", "twenty twenty-five"
                     first_part = _inflect.number_to_words(num_str[:2])
                     second_part = _inflect.number_to_words(num_str[2:])
                     return f"{first_part} {second_part}"
             
-            # Handle years from 1100 to 1999
             elif 1100 <= num_int <= 1999:
                 first_part = _inflect.number_to_words(num_str[:2])
                 last_two_digits = num_str[2:]
 
                 if '00' < last_two_digits < '10':
-                    # This handles years like 1905 -> "nineteen oh five"
                     second_part = f"oh {_inflect.number_to_words(last_two_digits[1])}"
                     return f"{first_part} {second_part}"
                 else:
-                    # This handles years like 1999 -> "nineteen ninety-nine" or 1900 -> "nineteen hundred"
                     second_part = _inflect.number_to_words(last_two_digits)
-                    # Handle cases like "nineteen hundred" where inflect returns "zero"
                     if second_part == "zero":
                         second_part = "hundred"
                     return f"{first_part} {second_part}"
 
-        # Fall back to the general number-to-words conversion for all other cases
         words = _inflect.number_to_words(num_str)
         return words
     except:
@@ -348,10 +354,9 @@ class TTSService:
             raise FileNotFoundError(f"Voice model file not found at the provided path: {self.voice_path}")
 
     def synthesize(self, text: str, output_path: str):
-        # Text is now assumed to be pre-normalized.
-        normalized_text = text
+        synthesized_text = text
 
-        if not normalized_text or not normalized_text.strip():
+        if not synthesized_text or not synthesized_text.strip():
             print(f"WARNING: No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
             silence_command = [
                 "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
@@ -366,12 +371,12 @@ class TTSService:
         piper_command = ["piper", "--model", str(self.voice_path), "--length_scale", str(self.speed_rate), "--output_file", "-"]
         ffmpeg_command = ["ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1", "-i", "-", "-threads", "0", "-acodec", "libmp3lame", "-q:a", "2", output_path]
         try:
-            print(f"DEBUG: Text sent to Piper for {output_path}: '{normalized_text[:500]}...'")
+            print(f"DEBUG: Text sent to Piper for {output_path}: '{synthesized_text[:500]}...'")
 
             piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             
-            piper_process.stdin.write(normalized_text.encode('utf-8'))
+            piper_process.stdin.write(synthesized_text.encode('utf-8'))
             piper_process.stdin.close()
             
             piper_process.stdout.close()
@@ -387,4 +392,4 @@ class TTSService:
                 raise RuntimeError(f"FFmpeg encoding process failed: {ffmpeg_err.decode()}")
         except FileNotFoundError as e:
             raise RuntimeError(f"Command not found: {e.filename}. Ensure piper-tts and ffmpeg are installed.")
-        return output_path, normalized_text
+        return output_path, synthesized_text

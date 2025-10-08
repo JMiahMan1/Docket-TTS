@@ -289,7 +289,6 @@ def extract_text_and_metadata(filepath):
     
     return text, metadata
 
-# --- NEW FEATURE: Centralized function to fetch enhanced metadata ---
 def fetch_enhanced_metadata(title, author):
     """Queries Google Books API for enhanced metadata."""
     metadata = {
@@ -340,14 +339,19 @@ def clean_filename_part(name_part):
     s_name = re.sub(r'[-\s]+', ' ', s_name).strip()
     return s_name[:40]
 
-# --- NEW FEATURE: Helper function to create the title page text ---
 def create_title_page_text(metadata):
     """Creates a string for the audio title page from metadata."""
     parts = []
+    title_parts = []
+
     if metadata.get('title'):
-        parts.append(f"Title: {metadata['title']}.")
+        title_parts.append(metadata['title'].strip().rstrip('.'))
     if metadata.get('subtitle'):
-        parts.append(f"Subtitle: {metadata['subtitle']}.")
+        title_parts.append(metadata['subtitle'].strip().rstrip('.'))
+    
+    if title_parts:
+        parts.append(" ".join(title_parts) + ".")
+
     if metadata.get('author'):
         parts.append(f"By {metadata['author']}.")
     if metadata.get('publisher'):
@@ -369,11 +373,11 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         full_voice_path = ensure_voice_available(voice_name)
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
         
-        # --- NEW FEATURE: Add title page to the first chapter ---
-        final_content = chapter_content
+        final_content = chapter_content 
         if chapter_details.get("number") == 1:
-            title_page_text = create_title_page_text(book_metadata)
-            final_content = title_page_text + chapter_content
+            unnormalized_title_page = create_title_page_text(book_metadata)
+            normalized_title_page = normalize_text(unnormalized_title_page)
+            final_content = normalized_title_page + chapter_content
         
         s_book_title = clean_filename_part(book_metadata.get("title", "book"))
         s_chapter_title = clean_filename_part(chapter_details['title'])
@@ -387,7 +391,7 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         safe_output_filename = secure_filename(output_filename)
         output_filepath = generated_folder / safe_output_filename
         
-        _, normalized_text = tts.synthesize(final_content, str(output_filepath))
+        _, synthesized_text = tts.synthesize(final_content, str(output_filepath))
         
         metadata_title = chapter_details.get('original_title', chapter_details['title'])
         if part_info[1] > 1:
@@ -400,7 +404,7 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         )
 
         text_filename = output_filepath.with_suffix('.txt').name
-        (generated_folder / text_filename).write_text(normalized_text, encoding="utf-8")
+        (generated_folder / text_filename).write_text(synthesized_text, encoding="utf-8")
 
         app.logger.info(f"Task {self.request.id} completed successfully. Output: {safe_output_filename}")
         return {'status': 'Success', 'filename': safe_output_filename, 'textfile': text_filename}
@@ -439,9 +443,11 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         normalized_main_text = normalize_text(cleaned_text)
         
         enhanced_metadata = fetch_enhanced_metadata(book_title, book_author)
-        title_page_text = create_title_page_text(enhanced_metadata)
         
-        final_content_for_synthesis = title_page_text + normalized_main_text
+        unnormalized_title_page = create_title_page_text(enhanced_metadata)
+        normalized_title_page = normalize_text(unnormalized_title_page)
+        
+        final_content_for_synthesis = normalized_title_page + normalized_main_text
 
         self.update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Synthesizing audio...'})
         s_book_title = clean_filename_part(enhanced_metadata.get("title", book_title))
@@ -621,7 +627,6 @@ def upload_file():
         voice_name = request.form.get("voice")
         speed_rate = request.form.get("speed_rate", "1.0")
         
-        # --- FIX: This block restores functionality for pasted text, which is required by the test suite. ---
         text_input = request.form.get('text_input')
         if text_input and text_input.strip():
             book_title = request.form.get('text_title')
@@ -630,7 +635,6 @@ def upload_file():
                 flash('Title is required for pasted text.', 'error')
                 return redirect(request.url)
             
-            # The tests expect a single task for pasted text, so we'll use the single-file converter.
             original_filename = f"{secure_filename(book_title.strip())}.txt"
             unique_internal_filename = f"{uuid.uuid4().hex}.txt"
             input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
@@ -640,9 +644,7 @@ def upload_file():
             
             task = convert_to_speech_task.delay(input_filepath, original_filename, book_title, book_author, voice_name, speed_rate)
             
-            # This returns the result page with the task ID, which the test suite expects.
             return render_template('result.html', task_id=task.id)
-        # --- END FIX ---
 
         tasks = []
         debug_mode = 'debug_mode' in request.form
@@ -664,7 +666,6 @@ def upload_file():
 
             text_content, metadata = extract_text_and_metadata(input_filepath)
             
-            # --- FEATURE UPDATE: Fetch enhanced metadata before queuing tasks ---
             enhanced_metadata = fetch_enhanced_metadata(metadata.get('title'), metadata.get('author'))
 
             app.logger.info(f"Processing '{original_filename}'.")
@@ -705,26 +706,19 @@ def list_files():
     for entry in all_files:
         if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
             continue
-
         key = entry.stem
         file_data = file_map.setdefault(key, {})
-
         if entry.suffix in ['.mp3', '.m4b']:
             file_data['audio_name'] = entry.name
             file_data['size'] = human_readable_size(entry.stat().st_size)
             file_data['date'] = datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc).isoformat()
         elif entry.suffix == '.txt':
             file_data['txt_name'] = entry.name
-
     processed_files = []
     for key, data in file_map.items():
-        if 'audio_name' not in data:
-            continue
-        
+        if 'audio_name' not in data: continue
         data['base_name'] = key
-        
         processed_files.append(data)
-
     return render_template('files.html', audio_files=processed_files)
 
 def _similar(a, b):
@@ -751,7 +745,6 @@ def get_book_metadata():
     final_title = title_from_tags
     final_author = author_from_tags
     cover_url = ''
-
     if final_title and final_title != "Unknown":
         try:
             enhanced_meta = fetch_enhanced_metadata(final_title, final_author)
@@ -759,7 +752,6 @@ def get_book_metadata():
         except Exception as e:
              app.logger.error(f"get_book_metadata failed during API call: {e}")
     return jsonify({'title': final_title, 'author': final_author, 'cover_url': cover_url})
-
 
 @app.route('/create-audiobook', methods=['POST'])
 def create_audiobook():
