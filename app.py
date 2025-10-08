@@ -272,7 +272,6 @@ def extract_text_and_metadata(filepath):
             text = p_filepath.read_text(encoding='utf-8')
     except Exception as e:
         app.logger.error(f"Error extracting text and metadata from {filepath}: {e}")
-        # Return empty text but keep metadata so we have a title at least
         return "", metadata
 
     if text:
@@ -290,6 +289,44 @@ def extract_text_and_metadata(filepath):
     
     return text, metadata
 
+# --- NEW FEATURE: Centralized function to fetch enhanced metadata ---
+def fetch_enhanced_metadata(title, author):
+    """Queries Google Books API for enhanced metadata."""
+    metadata = {
+        'title': title,
+        'subtitle': None,
+        'author': author,
+        'publisher': None,
+        'published_date': None,
+        'cover_url': ''
+    }
+    if not title or title == "Unknown":
+        return metadata
+
+    try:
+        query_title = title.split(':')[0].strip()
+        query = f"intitle:{query_title}"
+        if author and author != 'Unknown':
+            query += f"+inauthor:{author}"
+        
+        response = requests.get(f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=1")
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('totalItems', 0) > 0:
+            book_info = data['items'][0]['volumeInfo']
+            metadata['title'] = book_info.get('title', title)
+            metadata['subtitle'] = book_info.get('subtitle')
+            metadata['author'] = ", ".join(book_info.get('authors', [author]))
+            metadata['publisher'] = book_info.get('publisher')
+            metadata['published_date'] = book_info.get('publishedDate')
+            metadata['cover_url'] = book_info.get('imageLinks', {}).get('thumbnail', '')
+            app.logger.info(f"Google Books API found enhanced metadata for '{title}'")
+    except requests.RequestException as e:
+        app.logger.error(f"Google Books API request failed: {e}")
+    
+    return metadata
+
 def list_available_voices():
     voices = []
     voice_dir = Path(VOICES_FOLDER)
@@ -303,17 +340,42 @@ def clean_filename_part(name_part):
     s_name = re.sub(r'[-\s]+', ' ', s_name).strip()
     return s_name[:40]
 
+# --- NEW FEATURE: Helper function to create the title page text ---
+def create_title_page_text(metadata):
+    """Creates a string for the audio title page from metadata."""
+    parts = []
+    if metadata.get('title'):
+        parts.append(f"Title: {metadata['title']}.")
+    if metadata.get('subtitle'):
+        parts.append(f"Subtitle: {metadata['subtitle']}.")
+    if metadata.get('author'):
+        parts.append(f"By {metadata['author']}.")
+    if metadata.get('publisher'):
+        parts.append(f"Published by {metadata['publisher']}.")
+    if metadata.get('published_date'):
+        year_match = re.search(r'\d{4}', metadata['published_date'])
+        if year_match:
+            parts.append(f"Copyright {year_match.group(0)}.")
+    
+    return " ".join(parts) + "\n\n" if parts else ""
+
 @celery.task(bind=True)
-def process_chapter_task(self, chapter_content, book_title, book_author, chapter_details, voice_name, speed_rate):
+def process_chapter_task(self, chapter_content, book_metadata, chapter_details, voice_name, speed_rate):
     generated_folder = Path(current_app.config['GENERATED_FOLDER'])
     try:
-        status_msg = f'Processing: {book_title} - Ch. {chapter_details["number"]} "{chapter_details["title"][:20]}..."'
+        status_msg = f'Processing: {book_metadata.get("title", "Unknown")} - Ch. {chapter_details["number"]} "{chapter_details["title"][:20]}..."'
         self.update_state(state='PROGRESS', meta={'status': status_msg})
         
         full_voice_path = ensure_voice_available(voice_name)
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
         
-        s_book_title = clean_filename_part(book_title)
+        # --- NEW FEATURE: Add title page to the first chapter ---
+        final_content = chapter_content
+        if chapter_details.get("number") == 1:
+            title_page_text = create_title_page_text(book_metadata)
+            final_content = title_page_text + chapter_content
+        
+        s_book_title = clean_filename_part(book_metadata.get("title", "book"))
         s_chapter_title = clean_filename_part(chapter_details['title'])
         
         part_info = chapter_details.get('part_info', (1, 1))
@@ -325,7 +387,7 @@ def process_chapter_task(self, chapter_content, book_title, book_author, chapter
         safe_output_filename = secure_filename(output_filename)
         output_filepath = generated_folder / safe_output_filename
         
-        _, normalized_text = tts.synthesize(chapter_content, str(output_filepath))
+        _, normalized_text = tts.synthesize(final_content, str(output_filepath))
         
         metadata_title = chapter_details.get('original_title', chapter_details['title'])
         if part_info[1] > 1:
@@ -333,7 +395,7 @@ def process_chapter_task(self, chapter_content, book_title, book_author, chapter
 
         tag_mp3_file(
             str(output_filepath),
-            metadata={'title': metadata_title, 'author': book_author, 'book_title': book_title},
+            metadata={'title': metadata_title, 'author': book_metadata.get("author"), 'book_title': book_metadata.get("title")},
             voice_name=voice_name
         )
 
@@ -359,7 +421,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Reading, cleaning, and normalizing text...'})
         
         text_content, _ = extract_text_and_metadata(input_filepath)
-        if not text_content: 
+        if not text_content: # Fallback for edge cases
             if Path(input_filepath).suffix.lower() == '.pdf':
                 with fitz.open(input_filepath) as doc:
                     text_content = "\n".join([page.get_text() for page in doc])
@@ -374,33 +436,21 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
 
         cleaned_text = text_cleaner.clean_text(text_content)
         
+        # --- NEW FEATURE: Fetch enhanced metadata and create title page ---
+        enhanced_metadata = fetch_enhanced_metadata(book_title, book_author)
+        title_page_text = create_title_page_text(enhanced_metadata)
+        final_content = title_page_text + cleaned_text
+
         self.update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Synthesizing audio...'})
-        s_book_title = clean_filename_part(book_title)
+        s_book_title = clean_filename_part(enhanced_metadata.get("title", book_title))
         output_filename = f"01 - {s_book_title}.mp3"
         safe_output_filename = secure_filename(output_filename)
         output_filepath = os.path.join(generated_folder, safe_output_filename)
         
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
-        _, normalized_text = tts.synthesize(cleaned_text, output_filepath)
+        _, normalized_text = tts.synthesize(final_content, output_filepath)
         
-        tag_title = book_title
-        author = book_author
-        
-        cover_url = ''
-        if tag_title:
-            try:
-                query_title = tag_title.split(':')[0].strip()
-                query = f"intitle:{query_title}"
-                if author and author != 'Unknown': query += f"+inauthor:{author}"
-                response = requests.get(f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=1")
-                response.raise_for_status()
-                data = response.json()
-                if data.get('totalItems', 0) > 0:
-                    book_info = data['items'][0]['volumeInfo']
-                    cover_url = book_info.get('imageLinks', {}).get('thumbnail', '')
-            except requests.RequestException as e:
-                app.logger.error(f"Google Books API request failed during TTS task: {e}")
-        
+        cover_url = enhanced_metadata.get('cover_url', '')
         unique_id = str(uuid.uuid4().hex[:8])
         temp_cover_path = os.path.join(generated_folder, f"cover_{unique_id}.jpg")
         cover_path_to_use = None
@@ -415,11 +465,16 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
                 app.logger.error(f"Failed to download cover art: {e}")
 
         if not cover_path_to_use:
-            if create_generic_cover_image(tag_title, author, temp_cover_path):
+            if create_generic_cover_image(enhanced_metadata.get("title"), enhanced_metadata.get("author"), temp_cover_path):
                 cover_path_to_use = temp_cover_path
         
         self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Tagging and Saving...'})
-        tag_mp3_file(output_filepath, {'title': tag_title, 'author': author, 'book_title': book_title}, cover_image_path=cover_path_to_use, voice_name=voice_name)
+        tag_mp3_file(
+            output_filepath, 
+            {'title': enhanced_metadata.get("title"), 'author': enhanced_metadata.get("author"), 'book_title': enhanced_metadata.get("title")}, 
+            cover_image_path=cover_path_to_use, 
+            voice_name=voice_name
+        )
         
         self.update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Saving text file...'})
         text_filename = Path(output_filepath).with_suffix('.txt').name
@@ -564,8 +619,7 @@ def upload_file():
         voice_name = request.form.get("voice")
         speed_rate = request.form.get("speed_rate", "1.0")
         
-        # --- FIX STARTS HERE ---
-        # This block restores the functionality for handling pasted text, which is required by the test suite.
+        # --- FIX: This block restores functionality for pasted text, which is required by the test suite. ---
         text_input = request.form.get('text_input')
         if text_input and text_input.strip():
             book_title = request.form.get('text_title')
@@ -580,15 +634,13 @@ def upload_file():
             input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
             Path(input_filepath).write_text(text_input, encoding='utf-8')
             
-            # For pasted text, author is unknown. The task will try to parse it.
             book_author = 'Unknown'
             
-            # Queue the single-file conversion task.
             task = convert_to_speech_task.delay(input_filepath, original_filename, book_title, book_author, voice_name, speed_rate)
             
-            # Return the result page with the task ID, which the test suite expects.
+            # This returns the result page with the task ID, which the test suite expects.
             return render_template('result.html', task_id=task.id)
-        # --- FIX ENDS HERE ---
+        # --- END FIX ---
 
         tasks = []
         debug_mode = 'debug_mode' in request.form
@@ -609,11 +661,9 @@ def upload_file():
             file.save(input_filepath)
 
             text_content, metadata = extract_text_and_metadata(input_filepath)
-            book_title = metadata.get('title', Path(original_filename).stem)
-            book_author = metadata.get('author', 'Unknown')
-
-            if ':' in book_title:
-                book_title = book_title.split(':')[0].strip()
+            
+            # --- FEATURE UPDATE: Fetch enhanced metadata before queuing tasks ---
+            enhanced_metadata = fetch_enhanced_metadata(metadata.get('title'), metadata.get('author'))
 
             app.logger.info(f"Processing '{original_filename}'.")
             chapters = chapterizer.chapterize(filepath=input_filepath, text_content=text_content, debug=debug_mode)
@@ -627,12 +677,12 @@ def upload_file():
                         'original_title': chapter.original_title,
                         'part_info': chapter.part_info
                     }
-                    task = process_chapter_task.delay(chapter.content, book_title, book_author, chapter_details, voice_name, speed_rate)
+                    task = process_chapter_task.delay(chapter.content, enhanced_metadata, chapter_details, voice_name, speed_rate)
                     tasks.append(task)
                 os.remove(input_filepath)
             else:
                 flash(f"Could not split '{original_filename}' into chapters. Processing as a single file.", "warning")
-                task = convert_to_speech_task.delay(input_filepath, original_filename, book_title, book_author, voice_name, speed_rate)
+                task = convert_to_speech_task.delay(input_filepath, original_filename, enhanced_metadata.get('title'), enhanced_metadata.get('author'), voice_name, speed_rate)
                 tasks.append(task)
 
         if tasks:
@@ -702,34 +752,10 @@ def get_book_metadata():
 
     if final_title and final_title != "Unknown":
         try:
-            queries = [
-                f'intitle:"{final_title}" inauthor:"{final_author}"',
-                f'intitle:"{final_title}"'
-            ]
-            
-            data = {'totalItems': 0}
-            for query in queries:
-                if data.get('totalItems', 0) > 0:
-                    break
-                app.logger.info(f"Trying Google Books API query: {query}")
-                response = requests.get(f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=1")
-                response.raise_for_status()
-                data = response.json()
-
-            if data.get('totalItems', 0) > 0:
-                book_info = data['items'][0]['volumeInfo']
-                api_title = book_info.get('title', '')
-                
-                if _similar(final_title.lower(), api_title.lower()):
-                    final_title = api_title
-                    final_author = ", ".join(book_info.get('authors', [final_author]))
-                    cover_url = book_info.get('imageLinks', {}).get('thumbnail', '')
-                else:
-                    app.logger.warning(f"Google Books API returned a mismatched title ('{api_title}' vs '{final_title}'). Rejecting API result.")
-
-        except requests.RequestException as e:
-            app.logger.error(f"Google Books API request failed: {e}")
-            
+            enhanced_meta = fetch_enhanced_metadata(final_title, final_author)
+            return jsonify(enhanced_meta)
+        except Exception as e:
+             app.logger.error(f"get_book_metadata failed during API call: {e}")
     return jsonify({'title': final_title, 'author': final_author, 'cover_url': cover_url})
 
 
@@ -757,7 +783,7 @@ def jobs_page():
                 original_filename = "N/A"
                 if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 3:
                     if 'process_chapter_task' in task.get('name', ''):
-                         original_filename = f"{task_args[1]} - Ch. {task_args[3]['number']}"
+                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
                     else:
                          original_filename = Path(task_args[1]).name
                 running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker})
@@ -767,7 +793,7 @@ def jobs_page():
                 original_filename = "N/A"
                 if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 3:
                     if 'process_chapter_task' in task.get('name', ''):
-                         original_filename = f"{task_args[1]} - Ch. {task_args[3]['number']}"
+                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
                     else:
                          original_filename = Path(task_args[1]).name
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
@@ -780,6 +806,7 @@ def jobs_page():
         app.logger.error(f"Could not inspect Celery/Redis: {e}")
         flash("Could not connect to the Celery worker or Redis.", "error")
     return render_template('jobs.html', running_jobs=running_jobs, waiting_jobs=queued_jobs, unassigned_job_count=unassigned_job_count)
+
 
 @app.route('/cancel-job/<task_id>', methods=['POST'])
 def cancel_job(task_id):
