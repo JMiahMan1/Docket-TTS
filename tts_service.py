@@ -232,15 +232,41 @@ def _replace_leading_verse_marker(match):
 def number_replacer(match):
     num_str = match.group(0).strip()
     try:
-        words = _inflect.number_to_words(num_str)
+        is_ordinal = any(num_str.lower().endswith(s) for s in ['st', 'nd', 'rd', 'th'])
         
-        is_ordinal = any(num_str.endswith(s) for s in ['st', 'nd', 'rd', 'th'])
         if not is_ordinal and len(num_str) == 4 and num_str.isdigit():
             num_int = int(num_str)
-            if 1100 <= num_int <= 1999:
-                return f"{_inflect.number_to_words(num_str[:2])} {_inflect.number_to_words(num_str[2:])}"
-            elif 2000 <= num_int <= 2099:
-                return words.replace(" and ", " ")
+
+            # Handle years from 2000 to 2099
+            if 2000 <= num_int <= 2099:
+                if num_int < 2010:
+                    # Pronounce as "two thousand five"
+                    return _inflect.number_to_words(num_str).replace(" and ", " ")
+                else:
+                    # Pronounce as "twenty ten", "twenty twenty-five"
+                    first_part = _inflect.number_to_words(num_str[:2])
+                    second_part = _inflect.number_to_words(num_str[2:])
+                    return f"{first_part} {second_part}"
+            
+            # Handle years from 1100 to 1999
+            elif 1100 <= num_int <= 1999:
+                first_part = _inflect.number_to_words(num_str[:2])
+                last_two_digits = num_str[2:]
+
+                if '00' < last_two_digits < '10':
+                    # This handles years like 1905 -> "nineteen oh five"
+                    second_part = f"oh {_inflect.number_to_words(last_two_digits[1])}"
+                    return f"{first_part} {second_part}"
+                else:
+                    # This handles years like 1999 -> "nineteen ninety-nine" or 1900 -> "nineteen hundred"
+                    second_part = _inflect.number_to_words(last_two_digits)
+                    # Handle cases like "nineteen hundred" where inflect returns "zero"
+                    if second_part == "zero":
+                        second_part = "hundred"
+                    return f"{first_part} {second_part}"
+
+        # Fall back to the general number-to-words conversion for all other cases
+        words = _inflect.number_to_words(num_str)
         return words
     except:
         return num_str
