@@ -7,18 +7,16 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = {
     "section_markers": {
-        # This list is now more targeted to avoid removing legitimate chapter headings.
-        # It primarily targets the Table of Contents and back matter.
         r"^(Contents|Table of Contents)$": (r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\s+",),
         r"^(Index|Bibliography|Works Cited|References|Glossary|About the Author|Author Bio)$": (None,),
         r"^(Copyright|Also by)$": (r"^\s*(Chapter|Part|Book|One|1)\s+",),
         r"^(List of Figures|List of Tables|List of Illustrations)$": (r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface)\s+",)
     },
     "paragraph_disallow_patterns": [
-        # More aggressive patterns to remove publisher/copyright lines
         re.compile(r'ISBN|Library of Congress|All rights reserved|Printed in the|copyright ©|www\..*\.com', re.IGNORECASE),
         re.compile(r'^\s*(A division of|Published by|Manufactured in the United States of America)', re.IGNORECASE),
-        re.compile(r'\.{5,}'),  # Matches dot leaders in a ToC
+        re.compile(r'\.{5,}'),
+        re.compile(r'^\s*\d+\.\s+.*(?:p\.|pp\.|ibid\.|(?:New York|Grand Rapids|London|Chicago):|\b(19|20)\d{2}\b)', re.IGNORECASE),
     ],
     "header_footer_config": {
         "min_line_len": 3,

@@ -421,7 +421,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Reading, cleaning, and normalizing text...'})
         
         text_content, _ = extract_text_and_metadata(input_filepath)
-        if not text_content: # Fallback for edge cases
+        if not text_content: 
             if Path(input_filepath).suffix.lower() == '.pdf':
                 with fitz.open(input_filepath) as doc:
                     text_content = "\n".join([page.get_text() for page in doc])
@@ -436,10 +436,12 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
 
         cleaned_text = text_cleaner.clean_text(text_content)
         
-        # --- NEW FEATURE: Fetch enhanced metadata and create title page ---
+        normalized_main_text = normalize_text(cleaned_text)
+        
         enhanced_metadata = fetch_enhanced_metadata(book_title, book_author)
         title_page_text = create_title_page_text(enhanced_metadata)
-        final_content = title_page_text + cleaned_text
+        
+        final_content_for_synthesis = title_page_text + normalized_main_text
 
         self.update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Synthesizing audio...'})
         s_book_title = clean_filename_part(enhanced_metadata.get("title", book_title))
@@ -448,7 +450,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         output_filepath = os.path.join(generated_folder, safe_output_filename)
         
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
-        _, normalized_text = tts.synthesize(final_content, output_filepath)
+        _, synthesized_text = tts.synthesize(final_content_for_synthesis, output_filepath)
         
         cover_url = enhanced_metadata.get('cover_url', '')
         unique_id = str(uuid.uuid4().hex[:8])
@@ -478,7 +480,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         
         self.update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Saving text file...'})
         text_filename = Path(output_filepath).with_suffix('.txt').name
-        Path(os.path.join(generated_folder, text_filename)).write_text(normalized_text, encoding="utf-8")
+        Path(os.path.join(generated_folder, text_filename)).write_text(synthesized_text, encoding="utf-8")
 
         return {'status': 'Success', 'filename': safe_output_filename, 'textfile': text_filename}
     except Exception as e:
