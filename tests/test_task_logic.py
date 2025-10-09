@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from app import convert_to_speech_task
+from app import convert_to_speech_task, app  # import your Flask app
 
 @patch("app.TTSService")
 @patch("app.ensure_voice_available")
@@ -27,15 +27,16 @@ def test_convert_to_speech_task_cleans_text(
     mock_tts_instance.synthesize.return_value = ("output_path", "normalized_text")
     mock_tts_service.return_value = mock_tts_instance
 
-    # --- Execution ---
-    convert_to_speech_task.run(
-        input_filepath="/path/to/dummy.txt",
-        original_filename="dummy.txt",
-        book_title="Dummy Title",
-        book_author="Dummy Author",
-        voice_name="dummy_voice",
-        speed_rate="1.0",
-    )
+    # --- Execution inside Flask app context ---
+    with app.app_context():
+        convert_to_speech_task.run(
+            input_filepath="/path/to/dummy.txt",
+            original_filename="dummy.txt",
+            book_title="Dummy Title",
+            book_author="Dummy Author",
+            voice_name="dummy_voice",
+            speed_rate="1.0",
+        )
 
     # --- Verification ---
     mock_clean_text.assert_called_once_with("Sample text with Table of Contents")
@@ -43,4 +44,3 @@ def test_convert_to_speech_task_cleans_text(
     call_args, _ = mock_tts_instance.synthesize.call_args
     synthesized_content = call_args[0]
     assert "Cleaned sample text" in synthesized_content
-

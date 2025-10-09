@@ -16,9 +16,7 @@ DEFAULT_CONFIG = {
         r"^\s*(Dedication|Foreword|Preface|Introduction)": (
             r"^\s*(Chapter|Part|Book|One|1)\s+",
         ),
-        r"^(Index|Bibliography|Works Cited|References|Glossary|About the Author|Author Bio)$": (
-            None,
-        ),
+        r"^\s*(Index|Bibliography|Works Cited|References|Glossary|About the Author|Author Bio)\s*$": (None,),
         r"^(Copyright|Also by)$": (
             r"^\s*(Chapter|Part|Book|One|1)\s+",
         ),
