@@ -89,20 +89,21 @@ def _find_raw_chapters(text: str) -> List[Chapter]:
         logger.warning("No chapter headings found. Treating entire document as a single chapter.")
         return [Chapter(0, "Full Document", "Full Document", text, len(text.split()))]
 
-    # Handle content before the first match as the Title Page
     if matches[0].start() > 0:
         intro_content = text[:matches[0].start()].strip()
         if intro_content:
             chapters.append(Chapter(0, "Title Page", "Title Page", intro_content, len(intro_content.split())))
     
     for i, match in enumerate(matches):
-        # The content of this chapter is the text from the start of this heading to the start of the next one.
         start_index = match.start()
         end_index = matches[i + 1].start() if (i + 1) < len(matches) else len(text)
         content = text[start_index:end_index].strip()
         
         original_title = match.group(0).strip().replace('\n', ' ')
+        
         cleaned_title = " ".join(filter(None, match.groups())).strip().title()
+        cleaned_title = re.sub(r"(\w)'(S|T|M|LL|RE|VE)\b", lambda m: m.group(1) + "'" + m.group(2).lower(), cleaned_title, flags=re.IGNORECASE)
+
         if not cleaned_title:
              cleaned_title = f"Section {i+1}"
 
