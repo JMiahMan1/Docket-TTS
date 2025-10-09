@@ -13,8 +13,8 @@ services:
     ports:
       - "8000:5000"
     volumes:
-      - generated_data:/app/generated
-      - uploads_data:/app/uploads
+      - generated_data:/app/generated:z
+      - uploads_data:/app/uploads:z
     command: /opt/venv/bin/python -m gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 300 app:app
     depends_on:
       - redis
@@ -29,8 +29,8 @@ services:
         - BASE_IMAGE_TAG=latest
     command: /opt/venv/bin/python -m celery -A app.celery worker --loglevel=info
     volumes:
-      - generated_data:/app/generated
-      - uploads_data:/app/uploads
+      - generated_data:/app/generated:z
+      - uploads_data:/app/uploads:z
     depends_on:
       - redis
     restart: always

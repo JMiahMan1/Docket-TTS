@@ -7,16 +7,13 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = {
     "section_markers": {
-        # More flexible Contents rule (removed end-of-line anchor)
         r"^(Contents|Table of Contents)": (
             r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\s+",
         ),
-        # Added rule for "Praise for" pages
         r"^\s*Praise for\b": (
             r"^\s*(Contents|Table of Contents|Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\s+",
         ),
-        # Dedication and similar sections
-        r"^(Dedication|Foreword|Preface|Introduction)": (
+        r"^\s*(Dedication|Foreword|Preface|Introduction)": (
             r"^\s*(Chapter|Part|Book|One|1)\s+",
         ),
         r"^(Index|Bibliography|Works Cited|References|Glossary|About the Author|Author Bio)$": (
@@ -38,7 +35,7 @@ DEFAULT_CONFIG = {
             r"^\s*(A division of|Published by|Manufactured in the United States of America)",
             re.IGNORECASE,
         ),
-        re.compile(r"\.{5,}"),  # dot leaders in ToC
+        re.compile(r"\.{5,}"),
         re.compile(
             r"^\s*\d+\.\s+.*(?:p\.|pp\.|ibid\.|(?:New York|Grand Rapids|London|Chicago):|\b(19|20)\d{2}\b)",
             re.IGNORECASE,
@@ -92,7 +89,6 @@ def clean_text(text: str, config: Dict[str, Any] = None) -> str:
                     )
                     cleaned_text = cleaned_text[:start_index] + cleaned_text[end_index:]
                 else:
-                    # FIX: if no end marker found, remove everything from start_index to end of doc
                     logger.info(
                         f"Removing section '{start_match.group(0).strip()}' from index {start_index} to end (no end marker found)."
                     )
@@ -101,7 +97,6 @@ def clean_text(text: str, config: Dict[str, Any] = None) -> str:
         except Exception as e:
             logger.error(f"Error processing section rule for '{start_pattern}': {e}")
 
-    # Filter disallowed paragraphs
     paragraphs = cleaned_text.split("\n")
     kept_paragraphs = []
     for para in paragraphs:
@@ -113,7 +108,6 @@ def clean_text(text: str, config: Dict[str, Any] = None) -> str:
                 kept_paragraphs.append(para)
     cleaned_text = "\n".join(kept_paragraphs)
 
-    # Detect and remove common headers/footers
     h_config = config["header_footer_config"]
     lines = cleaned_text.split("\n")
 
@@ -143,7 +137,6 @@ def clean_text(text: str, config: Dict[str, Any] = None) -> str:
         )
         cleaned_text = header_pattern.sub("", cleaned_text)
 
-    # Normalize blank lines
     cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text)
 
     return cleaned_text.strip()

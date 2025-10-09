@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 from app import convert_to_speech_task
 
 @patch("app.TTSService")
@@ -27,14 +27,8 @@ def test_convert_to_speech_task_cleans_text(
     mock_tts_instance.synthesize.return_value = ("output_path", "normalized_text")
     mock_tts_service.return_value = mock_tts_instance
 
-    # Mock the Celery task instance
-    mock_task = MagicMock()
-    type(mock_task.request).id = PropertyMock(return_value="mock-task-id-123")
-
     # --- Execution ---
-    # FIX: Bind the task properly before calling .run()
-    bound_task = convert_to_speech_task.__get__(mock_task, type(mock_task))
-    bound_task.run(
+    convert_to_speech_task.run(
         input_filepath="/path/to/dummy.txt",
         original_filename="dummy.txt",
         book_title="Dummy Title",
@@ -49,3 +43,4 @@ def test_convert_to_speech_task_cleans_text(
     call_args, _ = mock_tts_instance.synthesize.call_args
     synthesized_content = call_args[0]
     assert "Cleaned sample text" in synthesized_content
+
