@@ -24,14 +24,16 @@ if NORMALIZATION_PATH.exists():
     PUNCTUATION = NORMALIZATION.get("punctuation", {})
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
     GREEK_WORDS = NORMALIZATION.get("greek_words", {})
+    # --- CHANGE: LOAD THE NEW ARCHAIC WORDS DICTIONARY ---
+    ARCHAIC_WORDS = NORMALIZATION.get("archaic_words", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
     SUPERSCRIPTS = NORMALIZATION.get("superscripts", [])
     SUPERSCRIPT_MAP = NORMALIZATION.get("SUPERSCRIPT_MAP", {})
 
 else:
     (ABBREVIATIONS, CI_ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS,
-     BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_WORDS, GREEK_TRANSLITERATION,
-     SUPERSCRIPTS, SUPERSCRIPT_MAP) = [{}, {}, [], [], set(), {}, {}, {}, {}, {}, {}, {}, [], {}]
+     BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_WORDS, ARCHAIC_WORDS, GREEK_TRANSLITERATION,
+     SUPERSCRIPTS, SUPERSCRIPT_MAP) = [{}, {}, [], [], set(), {}, {}, {}, {}, {}, {}, {}, {}, [], {}]
 
 if RULES_PATH.exists():
     RULES = yaml.safe_load(RULES_PATH.read_text(encoding="utf-8"))['normalization_rules']
@@ -46,19 +48,10 @@ def ensure_translation_models_are_loaded():
     global HEBREW_TO_ENGLISH
     if HEBREW_TO_ENGLISH:
         return
-
     try:
         argostranslate.package.update_package_index()
         available_packages = argostranslate.package.get_available_packages()
-        
-        package_to_install = next(
-            filter(
-                lambda x: x.from_code == "he" and x.to_code == "en",
-                available_packages
-            ),
-            None
-        )
-        
+        package_to_install = next(filter(lambda x: x.from_code == "he" and x.to_code == "en", available_packages), None)
         if package_to_install:
             if not getattr(package_to_install, 'installed', False):
                 print(f"Downloading and installing Argos Translate package: {package_to_install}")
@@ -66,7 +59,6 @@ def ensure_translation_models_are_loaded():
             HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
         else:
             print("Warning: Hebrew to English translation package not found in Argos Translate index.")
-            
     except Exception as e:
         print(f"Warning: Could not initialize Hebrew translation model: {e}")
         HEBREW_TO_ENGLISH = None
@@ -84,8 +76,7 @@ def normalize_hebrew(text: str) -> str:
         ensure_translation_models_are_loaded()
         if HEBREW_TO_ENGLISH:
             try:
-                translated_text = HEBREW_TO_ENGLISH.translate(hebrew_text)
-                return f" {translated_text} "
+                return f" {HEBREW_TO_ENGLISH.translate(hebrew_text)} "
             except Exception as e:
                 print(f"Error during Hebrew translation: {e}")
                 return " [Hebrew text] "
@@ -95,7 +86,6 @@ def normalize_hebrew(text: str) -> str:
 def normalize_greek(text: str) -> str:
     for greek_word, transliteration in sorted(GREEK_WORDS.items(), key=lambda item: len(item[0]), reverse=True):
         text = text.replace(greek_word, transliteration)
-
     text = text.translate(str.maketrans(GREEK_TRANSLITERATION))
     text = text.replace("’", "'")
     return text
@@ -116,9 +106,7 @@ def remove_superscripts(text: str) -> str:
     return text
 
 def expand_roman_numerals(text: str) -> str:
-    valid_roman_pattern = re.compile(
-        r"^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$", re.IGNORECASE)
-    
+    valid_roman_pattern = re.compile(r"^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$", re.IGNORECASE)
     common_words_to_exclude = {'i', 'a', 'v', 'x', 'l', 'c', 'd', 'm', 'did', 'mix', 'civil', 'mid', 'dim', 'lid', 'ill'}
 
     def roman_to_int(s):
@@ -132,21 +120,16 @@ def expand_roman_numerals(text: str) -> str:
         return num
 
     def _convert_to_words(s):
-        if s.upper() in ROMAN_EXCEPTIONS:
-            return s
+        if s.upper() in ROMAN_EXCEPTIONS: return s
         try:
             integer_val = roman_to_int(s)
             return f"Roman Numeral {_inflect.number_to_words(integer_val)}"
-        except (KeyError, IndexError):
-            return s
+        except (KeyError, IndexError): return s
 
     def replacer(match):
         roman_str = match.group(1)
-
-        if not valid_roman_pattern.match(roman_str):
-            return roman_str
-        
-        keywords = {'chapter', 'part', 'book', 'section', 'act', 'unit', 'volume'}
+        if not valid_roman_pattern.match(roman_str): return roman_str
+        keywords = {'chapter', 'part', 'book', 'section', 'act', 'unit', 'volume', 'homily'}
         preceding_text = text[:match.start()]
         preceding_words = preceding_text.split()
         
@@ -156,16 +139,13 @@ def expand_roman_numerals(text: str) -> str:
             if last_word.lower() in keywords or (last_word.istitle() and len(last_word) > 1):
                 has_strong_clue = True
         
-        if roman_str.lower() in common_words_to_exclude and not has_strong_clue:
-            return roman_str
-        
+        if roman_str.lower() in common_words_to_exclude and not has_strong_clue: return roman_str
         return _convert_to_words(roman_str)
 
     return re.sub(r'\b([IVXLCDMivxlcdm]+)(?!\.)\b', replacer, text)
 
-
 def _format_ref_segment(book_full, chapter, verses_str):
-    chapter_words = _inflect.number_to_words(int(chapter))
+    chapter_words = _inflect.number_to_words(int(chapter)) if chapter.isdigit() else f"Roman Numeral {chapter}"
     if not verses_str: return f"{book_full} chapter {chapter_words}"
     suffix = ""
     verses_str = verses_str.strip().rstrip(".;,")
@@ -173,21 +153,23 @@ def _format_ref_segment(book_full, chapter, verses_str):
         verses_str, suffix = verses_str[:-2].strip(), f" {BIBLE_REFS.get('ff', 'and following')}"
     elif verses_str.lower().endswith("f"):
         verses_str, suffix = verses_str[:-1].strip(), f" {BIBLE_REFS.get('f', 'and the following verse')}"
-    prefix = "verses" if any(c in verses_str for c in ",–-") else "verse"
+    prefix = "verses" if any(c in verses_str for c in ",–-—") else "verse"
     verses_str = re.sub(r"(\d)([a-z])", r"\1 \2", verses_str, flags=re.IGNORECASE)
-    verses_str = verses_str.replace("–", "-").replace("-", " through ")
+    verses_str = verses_str.replace("–", "-").replace("—", "-").replace("-", " through ")
     verse_words = re.sub(r"\d+", lambda m: _inflect.number_to_words(int(m.group())), verses_str)
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
 def normalize_scripture(text: str) -> str:
-    bible_abbr_keys = {re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS)}
+    bible_abbr_keys = {re.escape(k) for k, v in ABBREVIATIONS.items() if any(book in v for book in BIBLE_BOOKS) or "Homily" in v}
     full_book_names = {re.escape(book) for book in BIBLE_BOOKS}
     book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
-    book_chapter_pattern = re.compile(r'^\s*(' + book_pattern_str + r')\s+(\d+)\s*$', re.IGNORECASE | re.MULTILINE)
-    ref_pattern = re.compile(r'\b(?:(' + book_pattern_str + r')\s+)?(\d+)[:\s]([\d\w\s,.\–-]+(?:ff|f)?)', re.IGNORECASE)
-    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
+
+    book_chapter_pattern = re.compile(r'^\s*(' + book_pattern_str + r')\s+([IVXLCDM\d]+)\s*$', re.IGNORECASE | re.MULTILINE)
+    ref_pattern = re.compile(r'\b(?:(' + book_pattern_str + r')\s+)?([IVXLCDM\d]+)[:\s]([\d\w\s,.\–-—]+(?:ff|f)?)', re.IGNORECASE)
+    prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+([IVXLCDM\d]+):([\d\w\s,.-—]+(?:ff|f)?)', re.IGNORECASE)
     enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
+    shorthand_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+([IVXLCDM\d]+)\b(?!:)', re.IGNORECASE)
     
     last_context = {'book': None, 'chapter': None}
     
@@ -197,19 +179,16 @@ def normalize_scripture(text: str) -> str:
         last_context['book'] = book_abbr.strip()
         last_context['chapter'] = chapter.strip()
         book_full = CI_ABBREVIATIONS.get(book_abbr.replace('.','').lower(), book_abbr)
-        return f"{book_full} chapter {_inflect.number_to_words(int(chapter))}"
+        return f"{book_full} chapter {_inflect.number_to_words(int(chapter)) if chapter.isdigit() else f'Roman Numeral {chapter}'}"
 
     def replacer(match):
         nonlocal last_context
         book_abbr, chapter, verses = match.groups()
         book_to_use = book_abbr.strip() if book_abbr else last_context.get('book')
-        
         if book_abbr:
             last_context['book'] = book_abbr.strip()
             last_context['chapter'] = chapter.strip()
-        
         if not book_to_use: return match.group(0)
-        
         book_full = CI_ABBREVIATIONS.get(book_to_use.replace('.','').lower(), book_to_use)
         return _format_ref_segment(book_full, chapter, verses or "")
 
@@ -220,22 +199,25 @@ def normalize_scripture(text: str) -> str:
         last_context['chapter'] = chapter.strip()
         book_full = CI_ABBREVIATIONS.get(book_abbr.replace('.','').lower(), book_abbr)
         return _format_ref_segment(book_full, chapter, verses or "")
+        
+    def shorthand_replacer(match):
+        nonlocal last_context
+        book_abbr, chapter = match.groups()
+        last_context['book'] = book_abbr.strip()
+        last_context['chapter'] = chapter
+        book_full = CI_ABBREVIATIONS.get(book_abbr.replace('.','').lower(), book_abbr)
+        return _format_ref_segment(book_full, chapter, "")
 
     def enclosed_replacer(match):
         nonlocal last_context
-        original_match_text = match.group(0)
-        opener, inner_text, closer = match.groups()
-        
-        verse_abbr_match = re.match(r'^\s*v{1,2}\.\s*([\d\w\s,.\–-]+)\s*$', inner_text, re.IGNORECASE)
+        original_match_text, opener, inner_text, closer = match.group(0), match.group(1), match.group(2), match.group(3)
+        verse_abbr_match = re.match(r'^\s*v{1,2}\.\s*([\d\w\s,.\–-—]+)\s*$', inner_text, re.IGNORECASE)
         if verse_abbr_match and last_context.get('book') and last_context.get('chapter'):
-            verse_part = verse_abbr_match.group(1)
             book_full = CI_ABBREVIATIONS.get(last_context['book'].lower().replace('.', ''), last_context['book'])
-            return _format_ref_segment(book_full, last_context['chapter'], verse_part)
-
+            return _format_ref_segment(book_full, last_context['chapter'], verse_abbr_match.group(1))
         if inner_text.strip().isdigit() and last_context.get('book') and last_context.get('chapter'):
             book_full = CI_ABBREVIATIONS.get(last_context['book'].replace('.','').lower(), last_context['book'])
             return _format_ref_segment(book_full, last_context['chapter'], inner_text)
-
         parts, final_text_parts = re.split(r'(;)', inner_text), []
         found_scripture = False
         for i, part in enumerate(parts):
@@ -245,15 +227,13 @@ def normalize_scripture(text: str) -> str:
                 found_scripture = True
                 new_chunk_parts.append(part[last_end:m.start()]); new_chunk_parts.append(replacer(m)); last_end = m.end()
             new_chunk_parts.append(part[last_end:]); final_text_parts.append("".join(new_chunk_parts))
-        
-        if not found_scripture:
-            return original_match_text
-            
+        if not found_scripture: return original_match_text
         return "".join(final_text_parts)
         
     text = book_chapter_pattern.sub(book_chapter_replacer, text)
     text = enclosed_pattern.sub(enclosed_replacer, text)
     text = prose_pattern.sub(replacer_simple, text)
+    text = shorthand_pattern.sub(shorthand_replacer, text)
     return text
 
 def _replace_leading_verse_marker(match):
@@ -264,77 +244,58 @@ def _replace_leading_verse_marker(match):
     return f"verse {verse_words} "
 
 def number_replacer(match):
+    preceding_text = match.string[max(0, match.start()-20):match.start()]
+    if re.search(r'[\(,”]\s*$', preceding_text):
+        return match.group(0)
+
     num_str = match.group(0).strip()
     try:
         is_ordinal = any(num_str.lower().endswith(s) for s in ['st', 'nd', 'rd', 'th'])
-        
         if not is_ordinal and len(num_str) == 4 and num_str.isdigit():
             num_int = int(num_str)
-
             if 2000 <= num_int <= 2099:
-                if num_int < 2010:
-                    return _inflect.number_to_words(num_str).replace(" and ", " ")
-                else:
-                    first_part = _inflect.number_to_words(num_str[:2])
-                    second_part = _inflect.number_to_words(num_str[2:])
-                    return f"{first_part} {second_part}"
-            
+                if num_int < 2010: return _inflect.number_to_words(num_str).replace(" and ", " ")
+                else: return f"{_inflect.number_to_words(num_str[:2])} {_inflect.number_to_words(num_str[2:])}"
             elif 1100 <= num_int <= 1999:
                 first_part = _inflect.number_to_words(num_str[:2])
                 last_two_digits = num_str[2:]
-
                 if '00' < last_two_digits < '10':
-                    second_part = f"oh {_inflect.number_to_words(last_two_digits[1])}"
-                    return f"{first_part} {second_part}"
+                    return f"{first_part} oh {_inflect.number_to_words(last_two_digits[1])}"
                 else:
                     second_part = _inflect.number_to_words(last_two_digits)
-                    if second_part == "zero":
-                        second_part = "hundred"
+                    if second_part == "zero": second_part = "hundred"
                     return f"{first_part} {second_part}"
-
-        words = _inflect.number_to_words(num_str)
-        return words
+        return _inflect.number_to_words(num_str)
     except:
         return num_str
 
 def currency_replacer(match):
     num_str = match.group(1)
-    num_words = _inflect.number_to_words(num_str)
-    return f"{num_words} dollars"
+    return f"{_inflect.number_to_words(num_str)} dollars"
 
 def time_replacer(match):
     hour, minutes, period = match.groups()
-    
     hour_words = _inflect.number_to_words(int(hour))
-    period_words = " ".join(list(period.lower())) # Creates "a m" or "p m"
-    
-    if minutes == "00":
-        # For times like 7:00 AM, say "seven a m"
-        return f"{hour_words} {period_words}"
-    else:
-        # For times like 8:30 AM, say "eight thirty a m"
-        minutes_words = _inflect.number_to_words(int(minutes))
-        return f"{hour_words} {minutes_words} {period_words}"
+    period_words = " ".join(list(period.lower()))
+    if minutes == "00": return f"{hour_words} {period_words}"
+    else: return f"{hour_words} {_inflect.number_to_words(int(minutes))} {period_words}"
 
 FUNCTION_REGISTRY = {
-    "remove_superscripts": remove_superscripts,
-    "normalize_scripture": normalize_scripture,
-    "_strip_diacritics": _strip_diacritics,
-    "normalize_hebrew": normalize_hebrew,
-    "normalize_greek": normalize_greek,
-    "expand_roman_numerals": expand_roman_numerals,
-    "_replace_leading_verse_marker": _replace_leading_verse_marker,
-    "number_replacer": number_replacer,
-    "currency_replacer": currency_replacer,
-    "time_replacer": time_replacer, 
+    "remove_superscripts": remove_superscripts, "normalize_scripture": normalize_scripture,
+    "_strip_diacritics": _strip_diacritics, "normalize_hebrew": normalize_hebrew,
+    "normalize_greek": normalize_greek, "expand_roman_numerals": expand_roman_numerals,
+    "_replace_leading_verse_marker": _replace_leading_verse_marker, "number_replacer": number_replacer,
+    "currency_replacer": currency_replacer, "time_replacer": time_replacer, 
 }
 SYMBOLS.pop('$', None)
 DICTIONARY_REGISTRY = {
     "latin_phrases": LATIN_PHRASES,
     "non_bible_abbrs": {k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS)},
-    "contractions": CONTRACTIONS,
-    "symbols": SYMBOLS,
+    "contractions": CONTRACTIONS, 
+    "symbols": SYMBOLS, 
     "punctuation": PUNCTUATION,
+    # --- CHANGE: REGISTER THE NEW ARCHAIC WORDS DICTIONARY ---
+    "archaic_words": ARCHAIC_WORDS
 }
 
 def normalize_text(text: str) -> str:
@@ -345,25 +306,23 @@ def normalize_text(text: str) -> str:
         
         if rule_type == "function":
             func = FUNCTION_REGISTRY.get(rule["function_name"])
-            if func:
-                text = func(text)
+            if func: text = func(text)
 
         elif rule_type == "regex":
             flags = 0
-            for flag_name in rule.get("flags", []):
-                flags |= getattr(re, flag_name, 0)
+            for flag_name in rule.get("flags", []): flags |= getattr(re, flag_name, 0)
             text = re.sub(rule["pattern"], rule["replacement"], text, flags=flags)
 
         elif rule_type == "regex_callback":
             func = FUNCTION_REGISTRY.get(rule["function_name"])
             if func:
                 flags = 0
-                for flag_name in rule.get("flags", []):
-                    flags |= getattr(re, flag_name, 0)
+                for flag_name in rule.get("flags", []): flags |= getattr(re, flag_name, 0)
                 text = re.sub(rule["pattern"], func, text, flags=flags)
 
         elif rule_type == "dict_lookup":
-            dictionary = DICTIONARY_REGISTRY.get(rule["dictionary_name"], {})
+            dictionary_name = rule.get("dictionary_name")
+            dictionary = DICTIONARY_REGISTRY.get(dictionary_name, {})
             options = rule.get("options", {})
             
             for key, value in sorted(dictionary.items(), key=lambda item: len(item[0]), reverse=True):
@@ -373,32 +332,25 @@ def normalize_text(text: str) -> str:
                 
                 flags = 0
                 if options.get("use_case_sensitive_list"):
-                    if key not in CASE_SENSITIVE_ABBRS:
-                        flags |= re.IGNORECASE
+                    if key not in CASE_SENSITIVE_ABBRS: flags |= re.IGNORECASE
                 elif options.get("case_insensitive"):
                     flags |= re.IGNORECASE
-                
                 text = re.sub(pattern, value, text, flags=flags)
-
+    
     return text.strip()
 
 class TTSService:
     def __init__(self, voice_path: str, speed_rate: str = "1.0"):
         self.speed_rate = speed_rate
         self.voice_path = Path(voice_path)
-        
         if not self.voice_path.exists():
             raise FileNotFoundError(f"Voice model file not found at the provided path: {self.voice_path}")
 
     def synthesize(self, text: str, output_path: str):
         synthesized_text = text
-
         if not synthesized_text or not synthesized_text.strip():
             print(f"WARNING: No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
-            silence_command = [
-                "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
-                "-t", "0.5", "-acodec", "libmp3lame", "-q:a", "9", output_path
-            ]
+            silence_command = ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono", "-t", "0.5", "-acodec", "libmp3lame", "-q:a", "9", output_path]
             try:
                 subprocess.run(silence_command, check=True, capture_output=True)
                 return output_path, ""
@@ -409,22 +361,16 @@ class TTSService:
         ffmpeg_command = ["ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1", "-i", "-", "-threads", "0", "-acodec", "libmp3lame", "-q:a", "2", output_path]
         try:
             print(f"DEBUG: Text sent to Piper for {output_path}: '{synthesized_text[:500]}...'")
-
             piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            
             piper_process.stdin.write(synthesized_text.encode('utf-8'))
             piper_process.stdin.close()
-            
             piper_process.stdout.close()
-            
             _, ffmpeg_err = ffmpeg_process.communicate()
-
             piper_exit_code = piper_process.wait()
 
             if piper_exit_code != 0:
-                piper_err_output = piper_process.stderr.read().decode(errors='replace')
-                raise RuntimeError(f"Piper process failed with exit code {piper_exit_code}: {piper_err_output}")
+                raise RuntimeError(f"Piper process failed with exit code {piper_exit_code}: {piper_process.stderr.read().decode(errors='replace')}")
             if ffmpeg_process.returncode != 0:
                 raise RuntimeError(f"FFmpeg encoding process failed: {ffmpeg_err.decode()}")
         except FileNotFoundError as e:

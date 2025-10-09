@@ -3,14 +3,25 @@
 
 normalization_rules:
   # === STAGE 1: PRE-PROCESSING AND STRUCTURAL CLEANUP ===
-  - name: "Remove superscripts"
-    type: "function"
-    function_name: "remove_superscripts"
+  - type: regex
+    pattern: '\bLit\.\s?|[\*†]'
+    replacement: ' '
+    description: "NEW: Removes footnote markers like 'Lit.' and special characters."
+
+  - type: regex
+    pattern: '(\w+\.?\s+\d+[:.]\d+)\.\s*(\d{1,2})\b'
+    replacement: '\1'
+    description: "NEW: Removes trailing footnote numbers from the end of verse citations."
+
   - name: "Remove footnotes and reference markers"
     type: "regex"
     pattern: '\[\d+\]|\[fn\]|\[[a-zA-Z]\]'
     replacement: ''
 
+  - name: "Remove superscripts"
+    type: "function"
+    function_name: "remove_superscripts"
+  
   - name: "Add a period for a longer pause after chapter headings"
     type: "regex"
     pattern: '^((?:Chapter|Part|Book|Section|Prologue|Epilogue|Introduction)\s+.*)$'
@@ -21,11 +32,13 @@ normalization_rules:
   - name: "Normalize all scripture references (e.g., Romans 8, Rom 8:1, etc.)"
     type: "function"
     function_name: "normalize_scripture"
+
   - name: "Normalize leading chapter:verse markers (e.g., '2:5 ...')"
     type: "regex_callback"
     pattern: '^\s*(?:(\d+))?:(\d+)\b'
     function_name: "_replace_leading_verse_marker"
     flags: ["MULTILINE"]
+
   - name: "Fix embedded headers in verse calls"
     type: "regex"
     pattern: 'verse\s+([A-Z\s]+)([a-z]+):([a-z]+)'
@@ -36,26 +49,37 @@ normalization_rules:
     type: "dict_lookup"
     dictionary_name: "latin_phrases"
     options: { case_insensitive: true, word_boundary: true }
+
   - name: "Strip diacritics from characters"
     type: "function"
     function_name: "_strip_diacritics"
+
   - name: "Normalize Hebrew characters"
     type: "function"
     function_name: "normalize_hebrew"
+
   - name: "Normalize Greek characters"
     type: "function"
     function_name: "normalize_greek"
+
   - name: "Expand Roman numerals"
     type: "function"
     function_name: "expand_roman_numerals"
+
   - name: "Expand non-Biblical abbreviations"
     type: "dict_lookup"
     dictionary_name: "non_bible_abbrs"
     options: { use_case_sensitive_list: true, word_boundary: true }
+
   - name: "Expand contractions"
     type: "dict_lookup"
     dictionary_name: "contractions"
-    options: { case_insensitive: false, word_boundary: false }
+    options: { case_insensitive: false, word_boundary: true }
+
+  - name: "Expand archaic words"
+    type: "dict_lookup"
+    dictionary_name: "archaic_words"
+    options: { word_boundary: true, case_insensitive: true }
 
   # === STAGE 4: NUMERICAL EXPANSION (MUST BE BEFORE SYMBOLS) ===
   - name: "Expand time expressions (e.g., 7:00 AM)"
@@ -63,26 +87,26 @@ normalization_rules:
     pattern: '\b(\d{1,2}):(\d{2})\s*(AM|PM)\b'
     function_name: "time_replacer"
     flags: [IGNORECASE]
+
   - name: "Expand currency expressions (e.g., $50)"
     type: "regex_callback"
-    pattern: '\$(\d+)\b'
+    pattern: '\$(\d[\d,]*(\.\d+)?)'
     function_name: "currency_replacer"
+
   - name: "Strip verse numbers at start of lines"
     type: "regex"
     pattern: '^\s*\d{1,3}\b'
     replacement: ''
     flags: ["MULTILINE"]
+
   - name: "Strip verse numbers after punctuation"
     type: "regex"
     pattern: '([.?!;])\s*("?)\s*\d{1,3}\b'
     replacement: '\1\2 '
-  - name: "Expand ordinal numbers to words"
+
+  - name: "Expand remaining numbers (including ordinals)"
     type: "regex_callback"
-    pattern: '\b\d+(?:st|nd|rd|th)\b'
-    function_name: "number_replacer"
-  - name: "Expand all remaining numbers to words"
-    type: "regex_callback"
-    pattern: '\b\d+\b'
+    pattern: '\b\d[\d,]*(\.\d+)?(st|nd|rd|th)?\b'
     function_name: "number_replacer"
 
   # === STAGE 5: SYMBOLS AND FINAL FORMATTING ===
@@ -90,23 +114,28 @@ normalization_rules:
     type: "dict_lookup"
     dictionary_name: "symbols"
     options: { case_insensitive: false, word_boundary: false }
+
   - name: "Normalize punctuation"
     type: "dict_lookup"
     dictionary_name: "punctuation"
     options: { case_insensitive: false, word_boundary: false }
+
   - name: "Format all-caps headings with pauses"
     type: "regex"
     pattern: '^([A-Z][A-Z0-9\s,.-]{4,})$'
     replacement: ', \1, '
     flags: ["MULTILINE"]
+
   - name: "Replace double newlines with pauses"
     type: "regex"
     pattern: '\n\s*\n'
     replacement: ', \n'
+
   - name: "Replace remaining brackets/parentheses with commas"
     type: "regex"
     pattern: '\[|\]|\(|\)'
     replacement: ' , '
+
   - name: "Collapse all extra whitespace"
     type: "regex"
     pattern: '\s+'
