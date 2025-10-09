@@ -71,7 +71,6 @@ def ensure_translation_models_are_loaded():
         print(f"Warning: Could not initialize Hebrew translation model: {e}")
         HEBREW_TO_ENGLISH = None
 
-# Initial load attempt
 ensure_translation_models_are_loaded()
 
 
@@ -303,6 +302,20 @@ def currency_replacer(match):
     num_words = _inflect.number_to_words(num_str)
     return f"{num_words} dollars"
 
+def time_replacer(match):
+    hour, minutes, period = match.groups()
+    
+    hour_words = _inflect.number_to_words(int(hour))
+    period_words = " ".join(list(period.lower())) # Creates "a m" or "p m"
+    
+    if minutes == "00":
+        # For times like 7:00 AM, say "seven a m"
+        return f"{hour_words} {period_words}"
+    else:
+        # For times like 8:30 AM, say "eight thirty a m"
+        minutes_words = _inflect.number_to_words(int(minutes))
+        return f"{hour_words} {minutes_words} {period_words}"
+
 FUNCTION_REGISTRY = {
     "remove_superscripts": remove_superscripts,
     "normalize_scripture": normalize_scripture,
@@ -313,6 +326,7 @@ FUNCTION_REGISTRY = {
     "_replace_leading_verse_marker": _replace_leading_verse_marker,
     "number_replacer": number_replacer,
     "currency_replacer": currency_replacer,
+    "time_replacer": time_replacer, 
 }
 SYMBOLS.pop('$', None)
 DICTIONARY_REGISTRY = {

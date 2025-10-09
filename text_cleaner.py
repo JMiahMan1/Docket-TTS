@@ -16,7 +16,7 @@ DEFAULT_CONFIG = {
     "paragraph_disallow_patterns": [
         re.compile(r'ISBN|Library of Congress|All rights reserved|Printed in the|copyright ©|www\..*\.com', re.IGNORECASE),
         re.compile(r'^\s*(A division of|Published by|Manufactured in the United States of America)', re.IGNORECASE),
-        re.compile(r'\.{5,}'),
+        re.compile(r'\.{5,}'),  # Matches dot leaders in a ToC
         re.compile(r'^\s*\d+\.\s+.*(?:p\.|pp\.|ibid\.|(?:New York|Grand Rapids|London|Chicago):|\b(19|20)\d{2}\b)', re.IGNORECASE),
     ],
     "header_footer_config": {
@@ -38,18 +38,31 @@ def clean_text(text: str, config: Dict[str, Any] = None) -> str:
             matches = list(re.finditer(start_pattern, cleaned_text, re.IGNORECASE | re.MULTILINE))
             for start_match in reversed(matches):
                 start_index = start_match.start()
-                end_index = len(cleaned_text)
 
-                if end_patterns:
-                    search_area = cleaned_text[start_match.end():]
-                    for end_pattern in end_patterns:
-                        end_match = re.search(end_pattern, search_area, re.IGNORECASE | re.MULTILINE)
-                        if end_match:
-                            end_index = start_match.end() + end_match.start()
-                            break
+                # FIX: Correctly handle both types of section rules.
+                # Case 1: The rule is to delete everything to the end of the document.
+                if end_patterns is None or end_patterns == (None,):
+                    logger.info(f"Removing section '{start_match.group(0).strip()}' from index {start_index} to end of document.")
+                    cleaned_text = cleaned_text[:start_index]
+                    # Since we are processing in reverse, we can continue to the next match
+                    # on the now-truncated text.
+                    continue
+
+                # Case 2: The rule has specific end patterns to look for.
+                end_index = -1  # Sentinel value
+                search_area = cleaned_text[start_match.end():]
+                for end_pattern in end_patterns:
+                    if not isinstance(end_pattern, str): continue # Skip invalid patterns like None
+                    end_match = re.search(end_pattern, search_area, re.IGNORECASE | re.MULTILINE)
+                    if end_match:
+                        end_index = start_match.end() + end_match.start()
+                        break
                 
-                logger.info(f"Removing section detected by '{start_pattern}' from index {start_index} to {end_index}.")
-                cleaned_text = cleaned_text[:start_index] + cleaned_text[end_index:]
+                # Only perform the deletion if a valid end marker was found.
+                if end_index != -1:
+                    logger.info(f"Removing section '{start_match.group(0).strip()}' from index {start_index} to {end_index}.")
+                    cleaned_text = cleaned_text[:start_index] + cleaned_text[end_index:]
+
         except Exception as e:
             logger.error(f"Error processing section rule for '{start_pattern}': {e}")
 

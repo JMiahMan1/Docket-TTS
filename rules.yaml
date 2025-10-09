@@ -58,6 +58,11 @@ normalization_rules:
     options: { case_insensitive: false, word_boundary: false }
 
   # === STAGE 4: NUMERICAL EXPANSION (MUST BE BEFORE SYMBOLS) ===
+  - name: "Expand time expressions (e.g., 7:00 AM)"
+    type: "regex_callback"
+    pattern: '\b(\d{1,2}):(\d{2})\s*(AM|PM)\b'
+    function_name: "time_replacer"
+    flags: [IGNORECASE]
   - name: "Expand currency expressions (e.g., $50)"
     type: "regex_callback"
     pattern: '\$(\d+)\b'

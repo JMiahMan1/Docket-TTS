@@ -21,14 +21,14 @@ def test_convert_to_speech_task_cleans_text(
     mock_tts_instance.synthesize.return_value = ("output_path", "normalized_text")
     mock_tts_service.return_value = mock_tts_instance
 
-    # FIX: Mock the task object correctly, including the request.id
+    # FIX: Mock the task object correctly, including the request.id needed by the Celery backend
     mock_task = MagicMock()
     type(mock_task.request).id = PropertyMock(return_value='mock-task-id-123')
 
     # --- Execution ---
-    # Bind the mock task instance to the function call
-    bound_task = convert_to_speech_task.__get__(mock_task, type(mock_task))
-    bound_task(
+    # FIX: Call the task's .run() method directly, passing the mock_task as the 'self' argument
+    convert_to_speech_task.run(
+        mock_task,  # This becomes the 'self' argument for the bound task
         input_filepath="/path/to/dummy.txt",
         original_filename="dummy.txt",
         book_title="Dummy Title",
