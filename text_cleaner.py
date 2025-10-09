@@ -7,19 +7,27 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = {
     "section_markers": {
+        # Flexible rule for table of contents
         r"^(Contents|Table of Contents)": (
             r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\s+",
         ),
+        # Added rule for "Praise for" pages
         r"^\s*Praise for\b": (
             r"^\s*(Contents|Table of Contents|Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\s+",
         ),
+        # Dedication, Preface, etc. — allow leading whitespace
         r"^\s*(Dedication|Foreword|Preface|Introduction)": (
             r"^\s*(Chapter|Part|Book|One|1)\s+",
         ),
-        r"^\s*(Index|Bibliography|Works Cited|References|Glossary|About the Author|Author Bio)\s*$": (None,),
+        # Index and similar — allow indentation and capitalization differences
+        r"^\s*(Index|Bibliography|Works Cited|References|Glossary|About the Author|Author Bio)\s*$": (
+            None,
+        ),
+        # Copyright and "Also by" sections
         r"^(Copyright|Also by)$": (
             r"^\s*(Chapter|Part|Book|One|1)\s+",
         ),
+        # Lists and figure sections
         r"^(List of Figures|List of Tables|List of Illustrations)$": (
             r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface)\s+",
         ),
@@ -33,7 +41,7 @@ DEFAULT_CONFIG = {
             r"^\s*(A division of|Published by|Manufactured in the United States of America)",
             re.IGNORECASE,
         ),
-        re.compile(r"\.{5,}"),
+        re.compile(r"\.{5,}"),  # dot leaders in ToC
         re.compile(
             r"^\s*\d+\.\s+.*(?:p\.|pp\.|ibid\.|(?:New York|Grand Rapids|London|Chicago):|\b(19|20)\d{2}\b)",
             re.IGNORECASE,
@@ -49,11 +57,18 @@ DEFAULT_CONFIG = {
 
 
 def clean_text(text: str, config: Dict[str, Any] = None) -> str:
+    """
+    Cleans text extracted from books or documents by:
+    - Removing non-narrative sections (Dedication, Index, etc.)
+    - Removing headers, footers, and repetitive elements
+    - Stripping out page numbers and boilerplate
+    """
     if config is None:
         config = DEFAULT_CONFIG
 
     cleaned_text = text
 
+    # --- Remove marked sections (Dedication, Index, etc.) ---
     for start_pattern, end_patterns in config["section_markers"].items():
         try:
             matches = list(
@@ -62,15 +77,17 @@ def clean_text(text: str, config: Dict[str, Any] = None) -> str:
             for start_match in reversed(matches):
                 start_index = start_match.start()
 
+                # Remove to end if no end pattern
                 if end_patterns is None or end_patterns == (None,):
                     logger.info(
-                        f"Removing section '{start_match.group(0).strip()}' from index {start_index} to end of document."
+                        f"Removing section '{start_match.group(0).strip()}' "
+                        f"from index {start_index} to end of document."
                     )
                     cleaned_text = cleaned_text[:start_index]
                     continue
 
                 end_index = -1
-                search_area = cleaned_text[start_match.end() :]
+                search_area = cleaned_text[start_match.end():]
                 for end_pattern in end_patterns:
                     if not isinstance(end_pattern, str):
                         continue
@@ -83,18 +100,22 @@ def clean_text(text: str, config: Dict[str, Any] = None) -> str:
 
                 if end_index != -1:
                     logger.info(
-                        f"Removing section '{start_match.group(0).strip()}' from index {start_index} to {end_index}."
+                        f"Removing section '{start_match.group(0).strip()}' "
+                        f"from index {start_index} to {end_index}."
                     )
                     cleaned_text = cleaned_text[:start_index] + cleaned_text[end_index:]
                 else:
+                    # FIX: if no end marker found, remove everything from start_index to end
                     logger.info(
-                        f"Removing section '{start_match.group(0).strip()}' from index {start_index} to end (no end marker found)."
+                        f"Removing section '{start_match.group(0).strip()}' "
+                        f"from index {start_index} to end (no end marker found)."
                     )
                     cleaned_text = cleaned_text[:start_index]
 
         except Exception as e:
             logger.error(f"Error processing section rule for '{start_pattern}': {e}")
 
+    # --- Filter out disallowed paragraphs ---
     paragraphs = cleaned_text.split("\n")
     kept_paragraphs = []
     for para in paragraphs:
@@ -106,6 +127,7 @@ def clean_text(text: str, config: Dict[str, Any] = None) -> str:
                 kept_paragraphs.append(para)
     cleaned_text = "\n".join(kept_paragraphs)
 
+    # --- Detect and remove common headers/footers ---
     h_config = config["header_footer_config"]
     lines = cleaned_text.split("\n")
 
@@ -135,7 +157,11 @@ def clean_text(text: str, config: Dict[str, Any] = None) -> str:
         )
         cleaned_text = header_pattern.sub("", cleaned_text)
 
+    # --- FIX: Remove single page markers like "Page 3" or "3" ---
+    cleaned_text = re.sub(r'^\s*Page\s*\d+\s*$', '', cleaned_text, flags=re.MULTILINE)
+    cleaned_text = re.sub(r'^\s*\d+\s*$', '', cleaned_text, flags=re.MULTILINE)
+
+    # --- Normalize blank lines ---
     cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text)
 
     return cleaned_text.strip()
-
