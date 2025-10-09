@@ -28,9 +28,11 @@ def test_convert_to_speech_task_cleans_text(
 
     # Create mock task context with fake task_id
     mock_task = convert_to_speech_task
+    # FIX: Use a new MagicMock for the request object to avoid modifying the global task object
     mock_task.request = MagicMock()
     mock_task.request.id = "mock-task-id-123"
 
+    # FIX: Wrap the task execution in an application context
     with app.app_context():
         convert_to_speech_task.run(
             input_filepath="/path/to/dummy.txt",
@@ -46,4 +48,3 @@ def test_convert_to_speech_task_cleans_text(
     call_args, _ = mock_tts_instance.synthesize.call_args
     synthesized_content = call_args[0]
     assert "Cleaned sample text" in synthesized_content
-
