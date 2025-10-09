@@ -47,8 +47,7 @@ DISALLOWED_TITLES_PATTERN = re.compile(
 # --- HELPER FUNCTIONS ---
 
 def _split_large_chapter_into_parts(chapter: Chapter, max_words: int) -> List[Chapter]:
-    if chapter.word_count <= max_words:
-        return [chapter]
+    if chapter.word_count <= max_words: return [chapter]
     logger.info(f"Chapter '{chapter.original_title}' is too long ({chapter.word_count} words). Splitting into parts.")
     parts = []
     paragraphs = re.split(r'\n\s*\n', chapter.content)
@@ -72,8 +71,7 @@ def _split_large_chapter_into_parts(chapter: Chapter, max_words: int) -> List[Ch
 
 def _apply_final_processing(initial_chapters: List[Chapter], config: Dict[str, Any]) -> List[Chapter]:
     final_parts = []
-    if not initial_chapters:
-        return []
+    if not initial_chapters: return []
     logger.info(f"Starting final processing on {len(initial_chapters)} raw chapters found.")
     for raw_chapter in initial_chapters:
         if DISALLOWED_TITLES_PATTERN.search(raw_chapter.original_title):
@@ -96,40 +94,38 @@ def _apply_final_processing(initial_chapters: List[Chapter], config: Dict[str, A
 def _chapterize_by_epub_toc(filepath: str) -> List[Chapter]:
     """
     Finds chapters in an EPUB file by recursively parsing its structured Table of Contents.
-    -- VERSION 4: With recursive parsing for nested TOCs. --
+    -- VERSION 6: Final definitive fix for nested TOCs. --
     """
     logger.info(f"Attempting to find chapters in '{filepath}' using EPUB TOC.")
     chapters = []
     try:
         book = epub.read_epub(filepath)
         content_map = {Path(item.file_name).name.lower(): item.get_content() for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT)}
-        
-        # --- NEW RECURSIVE HELPER FUNCTION ---
-        def _recursive_toc_parser(toc_items):
+
+        # --- REWRITTEN RECURSIVE HELPER ---
+        def _recursive_parser(toc_items):
             for item in toc_items:
-                # If the item is a tuple, it's a section with nested items. Recurse into it.
-                if isinstance(item, tuple):
-                    _recursive_toc_parser(item)
-                    continue
+                # If the item is a tuple, it's a section with children.
+                # Recurse into the list of children (item[1]), but DO NOT process the section link (item[0]) itself.
+                if isinstance(item, tuple) and len(item) > 1 and isinstance(item[1], list):
+                    _recursive_parser(item[1])
+                
+                # If the item is a direct link (a leaf node), process it.
+                elif hasattr(item, 'href'):
+                    title = item.title
+                    href_unquoted = unquote(item.href.split('#')[0])
+                    href_filename = Path(href_unquoted).name.lower()
 
-                # If it's a link, process it.
-                title = item.title
-                href_unquoted = unquote(item.href.split('#')[0])
-                href_filename = Path(href_unquoted).name.lower()
-
-                if href_filename in content_map:
-                    html_content = content_map[href_filename]
-                    soup = BeautifulSoup(html_content, 'html.parser')
-                    content = soup.get_text(separator='\n\n', strip=True)
-                    
-                    if content:
-                        word_count = len(content.split())
-                        chapters.append(Chapter(0, title, title, content, word_count))
-                else:
-                    logger.warning(f"TOC item '{title}' with href '{item.href}' not found in content map.")
-
-        # Start the recursive parsing
-        _recursive_toc_parser(book.toc)
+                    if href_filename in content_map:
+                        html_content = content_map[href_filename]
+                        soup = BeautifulSoup(html_content, 'html.parser')
+                        content = soup.get_text(separator='\n\n', strip=True)
+                        
+                        if content:
+                            chapters.append(Chapter(0, title, title, content, len(content.split())))
+        
+        # Start the recursive parsing on the book's main TOC
+        _recursive_parser(book.toc)
 
     except Exception as e:
         logger.error(f"Failed to parse EPUB TOC for {filepath}: {e}", exc_info=True)

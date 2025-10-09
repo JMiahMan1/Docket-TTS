@@ -7,6 +7,12 @@ import yaml
 from pathlib import Path
 from argostranslate import translate
 import argostranslate.package
+import threading
+import logging
+
+# Get the application logger
+logger = logging.getLogger('werkzeug')
+
 
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 RULES_PATH = Path(__file__).parent / "rules.yaml"
@@ -24,7 +30,6 @@ if NORMALIZATION_PATH.exists():
     PUNCTUATION = NORMALIZATION.get("punctuation", {})
     LATIN_PHRASES = NORMALIZATION.get("latin_phrases", {})
     GREEK_WORDS = NORMALIZATION.get("greek_words", {})
-    # --- CHANGE: LOAD THE NEW ARCHAIC WORDS DICTIONARY ---
     ARCHAIC_WORDS = NORMALIZATION.get("archaic_words", {})
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
     SUPERSCRIPTS = NORMALIZATION.get("superscripts", [])
@@ -54,13 +59,13 @@ def ensure_translation_models_are_loaded():
         package_to_install = next(filter(lambda x: x.from_code == "he" and x.to_code == "en", available_packages), None)
         if package_to_install:
             if not getattr(package_to_install, 'installed', False):
-                print(f"Downloading and installing Argos Translate package: {package_to_install}")
+                logger.info(f"Downloading and installing Argos Translate package: {package_to_install}")
                 package_to_install.install()
             HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
         else:
-            print("Warning: Hebrew to English translation package not found in Argos Translate index.")
+            logger.warning("Hebrew to English translation package not found in Argos Translate index.")
     except Exception as e:
-        print(f"Warning: Could not initialize Hebrew translation model: {e}")
+        logger.warning(f"Could not initialize Hebrew translation model: {e}")
         HEBREW_TO_ENGLISH = None
 
 ensure_translation_models_are_loaded()
@@ -78,7 +83,7 @@ def normalize_hebrew(text: str) -> str:
             try:
                 return f" {HEBREW_TO_ENGLISH.translate(hebrew_text)} "
             except Exception as e:
-                print(f"Error during Hebrew translation: {e}")
+                logger.error(f"Error during Hebrew translation: {e}")
                 return " [Hebrew text] "
         return " [Hebrew text] "
     return re.sub(r'[\u0590-\u05FF]+', translate_match, text)
@@ -294,7 +299,6 @@ DICTIONARY_REGISTRY = {
     "contractions": CONTRACTIONS, 
     "symbols": SYMBOLS, 
     "punctuation": PUNCTUATION,
-    # --- CHANGE: REGISTER THE NEW ARCHAIC WORDS DICTIONARY ---
     "archaic_words": ARCHAIC_WORDS
 }
 
@@ -339,6 +343,18 @@ def normalize_text(text: str) -> str:
     
     return text.strip()
 
+# --- NEW HELPER FUNCTION FOR LOGGING SUBPROCESS OUTPUT ---
+def _log_stream(stream, log_prefix):
+    """Reads a stream line by line and logs it with a prefix."""
+    try:
+        for line in iter(stream.readline, b''):
+            if line:
+                logger.info(f"{log_prefix}: {line.decode('utf-8', errors='replace').strip()}")
+    except Exception as e:
+        logger.error(f"Error reading stream for {log_prefix}: {e}")
+    finally:
+        stream.close()
+
 class TTSService:
     def __init__(self, voice_path: str, speed_rate: str = "1.0"):
         self.speed_rate = speed_rate
@@ -348,8 +364,9 @@ class TTSService:
 
     def synthesize(self, text: str, output_path: str):
         synthesized_text = text
+
         if not synthesized_text or not synthesized_text.strip():
-            print(f"WARNING: No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
+            logger.warning(f"No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
             silence_command = ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono", "-t", "0.5", "-acodec", "libmp3lame", "-q:a", "9", output_path]
             try:
                 subprocess.run(silence_command, check=True, capture_output=True)
@@ -359,20 +376,50 @@ class TTSService:
 
         piper_command = ["piper", "--model", str(self.voice_path), "--length_scale", str(self.speed_rate), "--output_file", "-"]
         ffmpeg_command = ["ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1", "-i", "-", "-threads", "0", "-acodec", "libmp3lame", "-q:a", "2", output_path]
+        
         try:
-            print(f"DEBUG: Text sent to Piper for {output_path}: '{synthesized_text[:500]}...'")
+            logger.info(f"Starting Piper/FFmpeg for {output_path}. Text length: {len(synthesized_text)} chars.")
+            logger.debug(f"Piper command: {' '.join(piper_command)}")
+            logger.debug(f"FFmpeg command: {' '.join(ffmpeg_command)}")
+
             piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            piper_process.stdin.write(synthesized_text.encode('utf-8'))
-            piper_process.stdin.close()
-            piper_process.stdout.close()
-            _, ffmpeg_err = ffmpeg_process.communicate()
-            piper_exit_code = piper_process.wait()
+            
+            # --- NEW: START THREADS TO LOG STDERR FROM SUBPROCESSES ---
+            piper_stderr_thread = threading.Thread(target=_log_stream, args=(piper_process.stderr, "[Piper stderr]"))
+            ffmpeg_stderr_thread = threading.Thread(target=_log_stream, args=(ffmpeg_process.stderr, "[FFmpeg stderr]"))
+            piper_stderr_thread.start()
+            ffmpeg_stderr_thread.start()
 
-            if piper_exit_code != 0:
-                raise RuntimeError(f"Piper process failed with exit code {piper_exit_code}: {piper_process.stderr.read().decode(errors='replace')}")
+            # Write text to Piper's stdin in a separate thread to avoid blocking on large texts
+            def write_to_piper():
+                try:
+                    piper_process.stdin.write(synthesized_text.encode('utf-8'))
+                except (IOError, BrokenPipeError) as e:
+                    logger.warning(f"Could not write full text to Piper, it may have exited early: {e}")
+                finally:
+                    if piper_process.stdin:
+                        piper_process.stdin.close()
+            
+            writer_thread = threading.Thread(target=write_to_piper)
+            writer_thread.start()
+            
+            # Wait for the writer and ffmpeg to finish
+            writer_thread.join()
+            ffmpeg_stdout, _ = ffmpeg_process.communicate() # stderr is being handled by its thread
+            
+            # Wait for piper to finish and the logging threads to catch all output
+            piper_process.wait()
+            piper_stderr_thread.join()
+            ffmpeg_stderr_thread.join()
+            
+            if piper_process.returncode != 0:
+                raise RuntimeError(f"Piper process failed with exit code {piper_process.returncode}. Check logs for [Piper stderr].")
             if ffmpeg_process.returncode != 0:
-                raise RuntimeError(f"FFmpeg encoding process failed: {ffmpeg_err.decode()}")
+                raise RuntimeError(f"FFmpeg encoding process failed with exit code {ffmpeg_process.returncode}. Check logs for [FFmpeg stderr].")
+
         except FileNotFoundError as e:
             raise RuntimeError(f"Command not found: {e.filename}. Ensure piper-tts and ffmpeg are installed.")
+        
+        logger.info(f"Successfully synthesized audio to {output_path}")
         return output_path, synthesized_text
