@@ -290,40 +290,31 @@ def extract_text_and_metadata(filepath):
     return text, metadata
 
 def fetch_enhanced_metadata(title, author):
-    """Queries Google Books API for enhanced metadata."""
     metadata = {
-        'title': title,
-        'subtitle': None,
-        'author': author,
-        'publisher': None,
-        'published_date': None,
-        'cover_url': ''
+        'title': title, 'subtitle': None, 'author': author,
+        'publisher': None, 'published_date': None, 'cover_url': ''
     }
-    if not title or title == "Unknown":
-        return metadata
-
+    if not title or title == "Unknown": return metadata
     try:
         query_title = title.split(':')[0].strip()
         query = f"intitle:{query_title}"
-        if author and author != 'Unknown':
-            query += f"+inauthor:{author}"
-        
+        if author and author != 'Unknown': query += f"+inauthor:{author}"
         response = requests.get(f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=1")
         response.raise_for_status()
         data = response.json()
-        
         if data.get('totalItems', 0) > 0:
             book_info = data['items'][0]['volumeInfo']
-            metadata['title'] = book_info.get('title', title)
-            metadata['subtitle'] = book_info.get('subtitle')
-            metadata['author'] = ", ".join(book_info.get('authors', [author]))
-            metadata['publisher'] = book_info.get('publisher')
-            metadata['published_date'] = book_info.get('publishedDate')
-            metadata['cover_url'] = book_info.get('imageLinks', {}).get('thumbnail', '')
+            metadata.update({
+                'title': book_info.get('title', title),
+                'subtitle': book_info.get('subtitle'),
+                'author': ", ".join(book_info.get('authors', [author])),
+                'publisher': book_info.get('publisher'),
+                'published_date': book_info.get('publishedDate'),
+                'cover_url': book_info.get('imageLinks', {}).get('thumbnail', '')
+            })
             app.logger.info(f"Google Books API found enhanced metadata for '{title}'")
     except requests.RequestException as e:
         app.logger.error(f"Google Books API request failed: {e}")
-    
     return metadata
 
 def list_available_voices():
@@ -340,27 +331,16 @@ def clean_filename_part(name_part):
     return s_name[:40]
 
 def create_title_page_text(metadata):
-    """Creates a string for the audio title page from metadata."""
     parts = []
     title_parts = []
-
-    if metadata.get('title'):
-        title_parts.append(metadata['title'].strip().rstrip('.'))
-    if metadata.get('subtitle'):
-        title_parts.append(metadata['subtitle'].strip().rstrip('.'))
-    
-    if title_parts:
-        parts.append(" ".join(title_parts) + ".")
-
-    if metadata.get('author'):
-        parts.append(f"By {metadata['author']}.")
-    if metadata.get('publisher'):
-        parts.append(f"Published by {metadata['publisher']}.")
+    if metadata.get('title'): title_parts.append(metadata['title'].strip().rstrip('.'))
+    if metadata.get('subtitle'): title_parts.append(metadata['subtitle'].strip().rstrip('.'))
+    if title_parts: parts.append(" ".join(title_parts) + ".")
+    if metadata.get('author'): parts.append(f"By {metadata['author']}.")
+    if metadata.get('publisher'): parts.append(f"Published by {metadata['publisher']}.")
     if metadata.get('published_date'):
         year_match = re.search(r'\d{4}', metadata['published_date'])
-        if year_match:
-            parts.append(f"Copyright {year_match.group(0)}.")
-    
+        if year_match: parts.append(f"Copyright {year_match.group(0)}.")
     return " ".join(parts) + "\n\n" if parts else ""
 
 @celery.task(bind=True)
@@ -369,46 +349,33 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
     try:
         status_msg = f'Processing: {book_metadata.get("title", "Unknown")} - Ch. {chapter_details["number"]} "{chapter_details["title"][:20]}..."'
         self.update_state(state='PROGRESS', meta={'status': status_msg})
-        
         full_voice_path = ensure_voice_available(voice_name)
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
-        
-        final_content = chapter_content 
+        final_content = chapter_content
         if chapter_details.get("number") == 1:
             unnormalized_title_page = create_title_page_text(book_metadata)
             normalized_title_page = normalize_text(unnormalized_title_page)
             final_content = normalized_title_page + chapter_content
-        
         s_book_title = clean_filename_part(book_metadata.get("title", "book"))
         s_chapter_title = clean_filename_part(chapter_details['title'])
-        
         part_info = chapter_details.get('part_info', (1, 1))
         part_str = ""
-        if part_info[1] > 1:
-            part_str = f" - Part {part_info[0]} of {part_info[1]}"
-
+        if part_info[1] > 1: part_str = f" - Part {part_info[0]} of {part_info[1]}"
         output_filename = f"{chapter_details['number']:02d} - {s_book_title} - {s_chapter_title}{part_str}.mp3"
         safe_output_filename = secure_filename(output_filename)
         output_filepath = generated_folder / safe_output_filename
-        
         _, synthesized_text = tts.synthesize(final_content, str(output_filepath))
-        
         metadata_title = chapter_details.get('original_title', chapter_details['title'])
-        if part_info[1] > 1:
-            metadata_title += f" (Part {part_info[0]} of {part_info[1]})"
-
+        if part_info[1] > 1: metadata_title += f" (Part {part_info[0]} of {part_info[1]})"
         tag_mp3_file(
             str(output_filepath),
             metadata={'title': metadata_title, 'author': book_metadata.get("author"), 'book_title': book_metadata.get("title")},
             voice_name=voice_name
         )
-
         text_filename = output_filepath.with_suffix('.txt').name
         (generated_folder / text_filename).write_text(synthesized_text, encoding="utf-8")
-
         app.logger.info(f"Task {self.request.id} completed successfully. Output: {safe_output_filename}")
         return {'status': 'Success', 'filename': safe_output_filename, 'textfile': text_filename}
-
     except Exception as e:
         app.logger.error(f"Chapter processing failed in task {self.request.id}: {e}", exc_info=True)
         self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
@@ -421,37 +388,28 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
     try:
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Checking voice model...'})
         full_voice_path = ensure_voice_available(voice_name)
-
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Reading, cleaning, and normalizing text...'})
-        
         text_content, _ = extract_text_and_metadata(input_filepath)
         if not text_content: 
             if Path(input_filepath).suffix.lower() == '.pdf':
-                with fitz.open(input_filepath) as doc:
-                    text_content = "\n".join([page.get_text() for page in doc])
+                with fitz.open(input_filepath) as doc: text_content = "\n".join([page.get_text() for page in doc])
             elif Path(input_filepath).suffix.lower() == '.epub':
                 book = epub.read_epub(input_filepath)
                 for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
                     soup = BeautifulSoup(item.get_body_content(), 'html.parser')
                     text_content += soup.get_text() + "\n\n"
-        
-        if not text_content:
-            raise ValueError('Could not extract text from file for single-file processing.')
-
+        if not text_content: raise ValueError('Could not extract text from file for single-file processing.')
         cleaned_text = text_cleaner.clean_text(text_content)
-        
         normalized_main_text = normalize_text(cleaned_text)
-        
         enhanced_metadata = fetch_enhanced_metadata(book_title, book_author)
-        
         unnormalized_title_page = create_title_page_text(enhanced_metadata)
         normalized_title_page = normalize_text(unnormalized_title_page)
-        
         final_content_for_synthesis = normalized_title_page + normalized_main_text
-
         self.update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Synthesizing audio...'})
-        s_book_title = clean_filename_part(enhanced_metadata.get("title", book_title))
-        output_filename = f"01 - {s_book_title}.mp3"
+        
+        base_name = Path(original_filename).stem
+        output_filename = f"{base_name}.mp3"
+        
         safe_output_filename = secure_filename(output_filename)
         output_filepath = os.path.join(generated_folder, safe_output_filename)
         
@@ -466,16 +424,13 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
             try:
                 response = requests.get(cover_url, stream=True)
                 response.raise_for_status()
-                with open(temp_cover_path, 'wb') as f:
-                    shutil.copyfileobj(response.raw, f)
+                with open(temp_cover_path, 'wb') as f: shutil.copyfileobj(response.raw, f)
                 cover_path_to_use = temp_cover_path
             except requests.RequestException as e:
                 app.logger.error(f"Failed to download cover art: {e}")
-
         if not cover_path_to_use:
             if create_generic_cover_image(enhanced_metadata.get("title"), enhanced_metadata.get("author"), temp_cover_path):
                 cover_path_to_use = temp_cover_path
-        
         self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Tagging and Saving...'})
         tag_mp3_file(
             output_filepath, 
@@ -483,21 +438,17 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
             cover_image_path=cover_path_to_use, 
             voice_name=voice_name
         )
-        
         self.update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Saving text file...'})
         text_filename = Path(output_filepath).with_suffix('.txt').name
         Path(os.path.join(generated_folder, text_filename)).write_text(synthesized_text, encoding="utf-8")
-
         return {'status': 'Success', 'filename': safe_output_filename, 'textfile': text_filename}
     except Exception as e:
         app.logger.error(f"TTS Conversion failed in task {self.request.id}: {e}")
         self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
         raise e
     finally:
-        if os.path.exists(input_filepath):
-            os.remove(input_filepath)
-        if temp_cover_path and os.path.exists(temp_cover_path):
-            os.remove(temp_cover_path)
+        if os.path.exists(input_filepath): os.remove(input_filepath)
+        if temp_cover_path and os.path.exists(temp_cover_path): os.remove(temp_cover_path)
 
 def create_generic_cover_image(title, author, save_path):
     try:
@@ -635,7 +586,8 @@ def upload_file():
                 flash('Title is required for pasted text.', 'error')
                 return redirect(request.url)
             
-            original_filename = f"{secure_filename(book_title.strip())}.txt"
+            # For new pasted text, the original filename starts with 01
+            original_filename = f"01 - {secure_filename(book_title.strip())}.txt"
             unique_internal_filename = f"{uuid.uuid4().hex}.txt"
             input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
             Path(input_filepath).write_text(text_input, encoding='utf-8')
@@ -675,28 +627,91 @@ def upload_file():
                 app.logger.info(f"Chapterizer found {len(chapters)} chapters. Queuing tasks.")
                 for chapter in chapters:
                     chapter_details = {
-                        'number': chapter.number,
-                        'title': chapter.title,
-                        'original_title': chapter.original_title,
-                        'part_info': chapter.part_info
+                        'number': chapter.number, 'title': chapter.title,
+                        'original_title': chapter.original_title, 'part_info': chapter.part_info
                     }
                     task = process_chapter_task.delay(chapter.content, enhanced_metadata, chapter_details, voice_name, speed_rate)
                     tasks.append(task)
                 os.remove(input_filepath)
             else:
                 flash(f"Could not split '{original_filename}' into chapters. Processing as a single file.", "warning")
-                task = convert_to_speech_task.delay(input_filepath, original_filename, enhanced_metadata.get('title'), enhanced_metadata.get('author'), voice_name, speed_rate)
+                # For single-file books, the original filename should start with 01
+                single_file_name = f"01 - {Path(original_filename).stem}.txt"
+                task = convert_to_speech_task.delay(input_filepath, single_file_name, enhanced_metadata.get('title'), enhanced_metadata.get('author'), voice_name, speed_rate)
                 tasks.append(task)
-
         if tasks:
             flash(f'Successfully queued {len(tasks)} job(s) for processing.', 'success')
             return redirect(url_for('jobs_page'))
         else:
             flash('No processable content was found in the uploaded file(s).', 'error')
             return redirect(request.url)
-
     voices = get_piper_voices()
     return render_template('index.html', voices=voices)
+
+@app.route('/edit_text/<text_filename>')
+def edit_text_page(text_filename):
+    safe_filename = secure_filename(text_filename)
+    text_filepath = Path(app.config['GENERATED_FOLDER']) / safe_filename
+    
+    if not text_filepath.exists():
+        flash(f"Text file {safe_filename} not found.", "error")
+        return redirect(url_for('list_files'))
+
+    try:
+        content = text_filepath.read_text(encoding='utf-8')
+        voices = get_piper_voices()
+        
+        parts = text_filepath.stem.split(' - ')
+        book_title = parts[1].replace('_', ' ') if len(parts) > 1 else "Unknown"
+        chapter_title = parts[2].replace('_', ' ') if len(parts) > 2 else "Unknown"
+
+        return render_template('edit_text.html', 
+                               text_content=content,
+                               original_filename=safe_filename,
+                               book_title=book_title,
+                               chapter_title=chapter_title,
+                               voices=voices)
+    except Exception as e:
+        app.logger.error(f"Error reading file for editing: {e}")
+        flash("Could not read the text file for editing.", "error")
+        return redirect(url_for('list_files'))
+
+@app.route('/reprocess_text', methods=['POST'])
+def reprocess_text():
+    edited_text = request.form.get('edited_text')
+    original_txt_filename = request.form.get('original_filename')
+    book_title = request.form.get('book_title')
+    voice_name = request.form.get('voice')
+    speed_rate = request.form.get('speed_rate', '1.0')
+
+    if not all([edited_text, original_txt_filename, book_title, voice_name]):
+        flash("Missing data for reprocessing. Please try again.", "error")
+        return redirect(url_for('list_files'))
+
+    unique_internal_filename = f"{uuid.uuid4().hex}_edited.txt"
+    input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
+    Path(input_filepath).write_text(edited_text, encoding='utf-8')
+    
+    # --- FILENAME FIX: Preserve chapter number and add _edited suffix ---
+    original_stem = Path(original_txt_filename).stem.replace('_edited', '')
+    new_stem = original_stem + "_edited"
+    new_original_filename = f"{new_stem}.txt"
+    
+    book_author = 'Unknown'
+
+    task = convert_to_speech_task.delay(
+        input_filepath,
+        new_original_filename,
+        book_title,
+        book_author,
+        voice_name,
+        speed_rate
+    )
+
+    flash("Successfully queued edited text for reprocessing.", "success")
+    return render_template('result.html', task_id=task.id)
+
+# --- End of new feature routes ---
 
 @app.route('/files')
 def list_files():
