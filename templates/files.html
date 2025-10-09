@@ -52,7 +52,7 @@
                                         {% if file.txt_name %}<a href="{{ url_for('download_file', name=file.txt_name) }}" class="btn btn-outline-secondary btn-sm">Download Text</a>
                                         {% else %}<span class="text-muted">N/A</span>{% endif %}
                                     </td>
-                                    <td>{{ file.date }}</td>
+                                    <td data-utc-date="{{ file.date }}">Loading...</td>
                                     <td><input class="form-check-input delete-checkbox" type="checkbox" name="files_to_delete" value="{{ file.base_name }}"></td>
                                 </tr>
                                 {% endfor %}
@@ -116,6 +116,22 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('[data-utc-date]').forEach(function(cell) {
+                const utcDateString = cell.getAttribute('data-utc-date');
+                if (utcDateString) {
+                    const date = new Date(utcDateString);
+                    const options = {
+                        year: 'numeric', month: 'numeric', day: 'numeric',
+                        hour: 'numeric', minute: 'numeric', hour12: true
+                    };
+                    cell.textContent = date.toLocaleString(undefined, options);
+                } else {
+                    cell.textContent = 'N/A';
+                }
+            });
+        });
+
         const createAudiobookBtn = document.getElementById('createAudiobookBtn');
         const audiobookModal = new bootstrap.Modal(document.getElementById('audiobookModal'));
         const mainForm = document.getElementById('mainForm');
@@ -187,7 +203,7 @@
                 alert('Please select at least one item to delete.');
                 return;
             }
-            if (confirm(`Are you sure you want to delete the selected ${checkedDeleteBoxes.length} item(s) and their associated files?`)) {
+            if (confirm(`Are you sure you want to delete the selected item(s) and their associated files? This may delete entire books if chapters are selected.`)) {
                 document.querySelectorAll('input.file-checkbox').forEach(cb => cb.disabled = true);
                 mainForm.action = "{{ url_for('delete_bulk') }}";
                 mainForm.submit();

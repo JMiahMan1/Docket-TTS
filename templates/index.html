@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <title>Docket-TTS</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link 
-        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" 
+    <link
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
         rel="stylesheet">
 </head>
 <body class="bg-light">
@@ -55,9 +55,13 @@
                                 <label for="voice" class="form-label">Select Voice:</label>
                                 <div class="input-group">
                                     <select class="form-select" id="voice" name="voice">
-                                        {% for v in voices %}
-                                            <option value="{{ v.id }}">{{ v.name }}</option>
-                                        {% endfor %}
+                                        {% if voices %}
+                                            {% for v in voices %}
+                                                <option value="{{ v.id }}" {% if 'hfc_male' in v.id %}selected{% endif %}>{{ v.name }}</option>
+                                            {% endfor %}
+                                        {% else %}
+                                            <option value="" disabled>Loading voices...</option>
+                                        {% endif %}
                                     </select>
                                     <button class="btn btn-outline-secondary" type="button" id="speakSampleBtn">
                                         🔊 Sample
@@ -72,6 +76,14 @@
                                     <small class="text-muted">Faster</small>
                                     <small class="text-muted">Slower</small>
                                 </div>
+                            </div>
+
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" role="switch" id="book_mode" name="book_mode" value="true">
+                                <label class="form-check-label" for="book_mode">
+                                    Book Mode (Split into Chapters)
+                                    <small class="d-block text-muted">Generates one MP3 per chapter. Best for EPUBs.</small>
+                                </label>
                             </div>
 
                             <button type="submit" class="btn btn-primary w-100">Convert to Speech</button>
@@ -99,7 +111,12 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
     document.getElementById("speakSampleBtn").addEventListener("click", function() {
-        const voiceId = document.getElementById("voice").value;
+        const voiceSelect = document.getElementById("voice");
+        if (!voiceSelect.value) {
+            alert("Please select a voice first.");
+            return;
+        }
+        const voiceId = voiceSelect.value;
         const speedRate = document.getElementById("speed_rate").value;
         const audio = document.getElementById("sampleAudio");
         const container = document.getElementById("sampleContainer");
@@ -132,6 +149,7 @@
 
     function updateSpeedValue(value) {
         const speedDisplay = document.getElementById('speed-value');
+        // The Piper --length_scale is inverse to speed, so we adjust the display value
         const speed = (1 / parseFloat(value)).toFixed(2);
         let label = `(${speed}x)`;
         if (speed > 0.95 && speed < 1.05) {
@@ -149,7 +167,8 @@
     speedSlider.addEventListener('input', function() {
         updateSpeedValue(this.value);
     });
-
+    
+    // Initial value update on page load
     updateSpeedValue(speedSlider.value);
     </script>
 </body>
