@@ -39,24 +39,41 @@ else:
     RULES = []
 
 _inflect = inflect.engine()
-try:
-    # Ensure the language packages are downloaded and installed
-    argostranslate.package.update_package_index()
-    available_packages = argostranslate.package.get_available_packages()
-    package_to_install = next(
-        filter(
-            lambda x: x.from_code == "he" and x.to_code == "en",
-            available_packages
+HEBREW_TO_ENGLISH = None
+
+def ensure_translation_models_are_loaded():
+    """Checks for and installs translation models if they are not present."""
+    global HEBREW_TO_ENGLISH
+    if HEBREW_TO_ENGLISH:
+        return
+
+    try:
+        argostranslate.package.update_package_index()
+        available_packages = argostranslate.package.get_available_packages()
+        
+        package_to_install = next(
+            filter(
+                lambda x: x.from_code == "he" and x.to_code == "en",
+                available_packages
+            ),
+            None
         )
-    )
-    if not package_to_install.is_installed():
-        print(f"Downloading and installing Argos Translate package: {package_to_install}")
-        package_to_install.install()
-    
-    HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
-except Exception as e:
-    print(f"Warning: Could not initialize Hebrew translation model: {e}")
-    HEBREW_TO_ENGLISH = None
+        
+        if package_to_install:
+            if not package_to_install.is_installed():
+                print(f"Downloading and installing Argos Translate package: {package_to_install}")
+                package_to_install.install()
+            HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
+        else:
+            print("Warning: Hebrew to English translation package not found in Argos Translate index.")
+            
+    except Exception as e:
+        print(f"Warning: Could not initialize Hebrew translation model: {e}")
+        HEBREW_TO_ENGLISH = None
+
+# Initial load attempt
+ensure_translation_models_are_loaded()
+
 
 def _strip_diacritics(text: str) -> str:
     normalized = unicodedata.normalize('NFD', text)
@@ -65,9 +82,15 @@ def _strip_diacritics(text: str) -> str:
 def normalize_hebrew(text: str) -> str:
     def translate_match(match):
         hebrew_text = match.group(0)
+        # Ensure model is loaded before attempting to translate
+        ensure_translation_models_are_loaded()
         if HEBREW_TO_ENGLISH:
-            translated_text = HEBREW_TO_ENGLISH.translate(hebrew_text)
-            return f" {translated_text} "
+            try:
+                translated_text = HEBREW_TO_ENGLISH.translate(hebrew_text)
+                return f" {translated_text} "
+            except Exception as e:
+                print(f"Error during Hebrew translation: {e}")
+                return " [Hebrew text] "
         return " [Hebrew text] "
     return re.sub(r'[\u0590-\u05FF]+', translate_match, text)
 
@@ -76,7 +99,6 @@ def normalize_greek(text: str) -> str:
         text = text.replace(greek_word, transliteration)
 
     text = text.translate(str.maketrans(GREEK_TRANSLITERATION))
-    # This rule was added to handle a specific edge case found in testing.
     text = text.replace("’", "'")
     return text
 

@@ -10,7 +10,7 @@ DEFAULT_CONFIG = {
         # This list is now more targeted to avoid removing legitimate chapter headings.
         # It primarily targets the Table of Contents and back matter.
         r"^(Contents|Table of Contents)$": (r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\s+",),
-        r"^(Index|Bibliography|Works Cited|References|Glossary|About the Author|Author Bio|Dedication)$": (None,),
+        r"^(Index|Bibliography|Works Cited|References|Glossary|About the Author|Author Bio|Dedication)$": (r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\s+",),
         r"^(Copyright|Also by)$": (r"^\s*(Chapter|Part|Book|One|1)\s+",),
         r"^(List of Figures|List of Tables|List of Illustrations)$": (r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface)\s+",)
     },
