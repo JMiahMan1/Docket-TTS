@@ -1,4 +1,4 @@
-import re
+iimport re
 import logging
 from collections import Counter
 from typing import Dict, Any
@@ -7,7 +7,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = {
     "section_markers": {
-        r"^(Contents|Table of Contents)$": (r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\s+",),
+        # FIX: Made the Contents rule more flexible by removing the end-of-line anchor '$'
+        r"^(Contents|Table of Contents)": (r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\s+",),
+        # FIX: Added a new rule for "Praise" pages
+        r"^\s*Praise for\b": (r"^\s*(Contents|Table of Contents|Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\s+",),
         r"^(Dedication|Foreword|Preface|Introduction)$": (r"^\s*(Chapter|Part|Book|One|1)\s+",),
         r"^(Index|Bibliography|Works Cited|References|Glossary|About the Author|Author Bio)$": (None,),
         r"^(Copyright|Also by)$": (r"^\s*(Chapter|Part|Book|One|1)\s+",),
@@ -39,26 +42,20 @@ def clean_text(text: str, config: Dict[str, Any] = None) -> str:
             for start_match in reversed(matches):
                 start_index = start_match.start()
 
-                # FIX: Correctly handle both types of section rules.
-                # Case 1: The rule is to delete everything to the end of the document.
                 if end_patterns is None or end_patterns == (None,):
                     logger.info(f"Removing section '{start_match.group(0).strip()}' from index {start_index} to end of document.")
                     cleaned_text = cleaned_text[:start_index]
-                    # Since we are processing in reverse, we can continue to the next match
-                    # on the now-truncated text.
                     continue
 
-                # Case 2: The rule has specific end patterns to look for.
-                end_index = -1  # Sentinel value
+                end_index = -1
                 search_area = cleaned_text[start_match.end():]
                 for end_pattern in end_patterns:
-                    if not isinstance(end_pattern, str): continue # Skip invalid patterns like None
+                    if not isinstance(end_pattern, str): continue
                     end_match = re.search(end_pattern, search_area, re.IGNORECASE | re.MULTILINE)
                     if end_match:
                         end_index = start_match.end() + end_match.start()
                         break
                 
-                # Only perform the deletion if a valid end marker was found.
                 if end_index != -1:
                     logger.info(f"Removing section '{start_match.group(0).strip()}' from index {start_index} to {end_index}.")
                     cleaned_text = cleaned_text[:start_index] + cleaned_text[end_index:]
