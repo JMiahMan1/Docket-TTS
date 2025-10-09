@@ -60,7 +60,7 @@ def ensure_translation_models_are_loaded():
         )
         
         if package_to_install:
-            if not package_to_install.is_installed():
+            if not getattr(package_to_install, 'installed', False):
                 print(f"Downloading and installing Argos Translate package: {package_to_install}")
                 package_to_install.install()
             HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
@@ -82,7 +82,6 @@ def _strip_diacritics(text: str) -> str:
 def normalize_hebrew(text: str) -> str:
     def translate_match(match):
         hebrew_text = match.group(0)
-        # Ensure model is loaded before attempting to translate
         ensure_translation_models_are_loaded()
         if HEBREW_TO_ENGLISH:
             try:
@@ -325,6 +324,8 @@ DICTIONARY_REGISTRY = {
 }
 
 def normalize_text(text: str) -> str:
+    ensure_translation_models_are_loaded()
+    
     for rule in RULES:
         rule_type = rule.get("type")
         
