@@ -19,10 +19,14 @@ from mutagen.id3 import ID3, TIT2, TPE1, TALB, COMM, APIC
 from PIL import Image, ImageDraw, ImageFont
 from flask import current_app
 from huggingface_hub import list_repo_files, hf_hub_download
+from werkzeug.utils import secure_filename
+import subprocess
+import uuid # Added for consistency with tasks.py logic
 
 VOICES_FOLDER = '/app/voices'
 PIPER_VOICES_REPO = "rhasspy/piper-voices"
 CACHED_PIPER_VOICES = None
+ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'epub'} # Added for consistency
 
 def get_piper_voices():
     global CACHED_PIPER_VOICES
@@ -51,6 +55,7 @@ def get_piper_voices():
         current_app.logger.error(f"Could not fetch voices from Hugging Face Hub: {e}")
         return list_available_voices()
 
+# Function logic re-integrated from app_old.py, adapted to take redis_client
 def ensure_voice_available(voice_name, redis_client):
     all_voices = get_piper_voices()
     voice_info = next((v for v in all_voices if v['id'] == voice_name), None)
@@ -59,29 +64,47 @@ def ensure_voice_available(voice_name, redis_client):
         raise ValueError(f"Could not find metadata for voice '{voice_name}' to download.")
 
     full_voice_path = Path(VOICES_FOLDER) / voice_info['repo_path']
-    if full_voice_path.exists() and full_voice_path.with_suffix(full_voice_path.suffix + ".json").exists():
+    full_config_path = full_voice_path.with_suffix(full_voice_path.suffix + ".json")
+
+    if full_voice_path.exists() and full_config_path.exists():
         current_app.logger.info(f"Voice '{voice_name}' found locally at {full_voice_path}")
         return str(full_voice_path)
 
     if not redis_client:
-        current_app.logger.warning("Redis client not available. Proceeding without lock for voice download.")
+        current_app.logger.warning("Redis client not available. Proceeding without lock. This may cause issues with parallel downloads.")
     
     lock_key = f"lock:voice-download:{voice_name}"
     lock_acquired = False
     
     try:
-        if redis_client:
-            lock_acquired = redis_client.set(lock_key, "1", nx=True, ex=120)
-            if not lock_acquired:
+        wait_start_time = time.time()
+        while time.time() - wait_start_time < 120:
+            if redis_client:
+                # FIX: Use 60s timeout as in app_old.py
+                lock_acquired = redis_client.set(lock_key, "1", nx=True, ex=60)
+            
+            if lock_acquired:
+                current_app.logger.info(f"Acquired lock for downloading voice '{voice_name}'.")
+                break
+            else:
                 current_app.logger.info(f"Waiting for lock on voice '{voice_name}'...")
-                time.sleep(5)
-                return ensure_voice_available(voice_name, redis_client)
+                time.sleep(2)
+        else:
+            raise RuntimeError(f"Could not acquire lock for voice '{voice_name}' after 2 minutes.")
+        
+        # Check again in case another worker finished
+        if full_voice_path.exists() and full_config_path.exists():
+            current_app.logger.info(f"Voice '{voice_name}' was downloaded by another worker while waiting for lock.")
+            return str(full_voice_path)
 
         current_app.logger.warning(f"Voice '{voice_name}' not found locally. Starting download...")
         hf_hub_download(repo_id=PIPER_VOICES_REPO, filename=voice_info['repo_path'], local_dir=VOICES_FOLDER, local_dir_use_symlinks=False)
         hf_hub_download(repo_id=PIPER_VOICES_REPO, filename=voice_info['repo_path'] + ".json", local_dir=VOICES_FOLDER, local_dir_use_symlinks=False)
         current_app.logger.info(f"Successfully downloaded voice: {voice_name}")
         return str(full_voice_path)
+    except Exception as e:
+        current_app.logger.error(f"Failed to ensure voice {voice_name} is available: {e}")
+        raise
     finally:
         if lock_acquired and redis_client:
             redis_client.delete(lock_key)
@@ -94,7 +117,6 @@ def human_readable_size(size, decimal_places=2):
     return f"{size:.{decimal_places}f} {unit}"
 
 def allowed_file(filename):
-    ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'epub'}
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def tag_mp3_file(filepath, metadata, cover_image_path=None, voice_name=None):
@@ -123,8 +145,8 @@ def tag_mp3_file(filepath, metadata, cover_image_path=None, voice_name=None):
     except Exception as e:
         current_app.logger.error(f"Failed to tag {filepath}: {e}")
 
+# Re-integrated from app_old.py
 def parse_metadata_from_text(text_content):
-    # ... (This function remains unchanged)
     parsed_meta = {}
     search_area = text_content[:4000]
     lines = [line.strip() for line in search_area.split('\n') if line.strip()]
@@ -149,8 +171,8 @@ def parse_metadata_from_text(text_content):
         parsed_meta['title'] = best_title
     return parsed_meta
 
+# Re-integrated from app_old.py
 def extract_text_and_metadata(filepath):
-    # ... (This function remains unchanged)
     p_filepath = Path(filepath)
     extension = p_filepath.suffix.lower()
     text = ""
@@ -196,33 +218,37 @@ def extract_text_and_metadata(filepath):
     if not metadata.get('author'): metadata['author'] = 'Unknown'
     return text, metadata
 
+# Re-integrated from app_old.py
 def fetch_enhanced_metadata(title, author):
-    # ... (This function remains unchanged)
-    metadata = {'title': title, 'subtitle': None, 'author': author, 'publisher': None, 'published_date': None, 'cover_url': ''}
+    metadata = {
+        'title': title, 'subtitle': None, 'author': author,
+        'publisher': None, 'published_date': None, 'cover_url': ''
+    }
     if not title or title == "Unknown": return metadata
     try:
         query_title = title.split(':')[0].strip()
         query = f"intitle:{query_title}"
-        if author and author != 'Unknown':
-            query += f"+inauthor:{author}"
+        if author and author != 'Unknown': query += f"+inauthor:{author}"
         response = requests.get(f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=1")
         response.raise_for_status()
         data = response.json()
         if data.get('totalItems', 0) > 0:
             book_info = data['items'][0]['volumeInfo']
-            metadata['title'] = book_info.get('title', title)
-            metadata['subtitle'] = book_info.get('subtitle')
-            metadata['author'] = ", ".join(book_info.get('authors', [author]))
-            metadata['publisher'] = book_info.get('publisher')
-            metadata['published_date'] = book_info.get('publishedDate')
-            metadata['cover_url'] = book_info.get('imageLinks', {}).get('thumbnail', '')
+            metadata.update({
+                'title': book_info.get('title', title),
+                'subtitle': book_info.get('subtitle'),
+                'author': ", ".join(book_info.get('authors', [author])),
+                'publisher': book_info.get('publisher'),
+                'published_date': book_info.get('publishedDate'),
+                'cover_url': book_info.get('imageLinks', {}).get('thumbnail', '')
+            })
             current_app.logger.info(f"Google Books API found enhanced metadata for '{title}'")
     except requests.RequestException as e:
         current_app.logger.error(f"Google Books API request failed: {e}")
     return metadata
 
+# Re-integrated from app_old.py
 def list_available_voices():
-    # ... (This function remains unchanged)
     voices = []
     voice_dir = Path(VOICES_FOLDER)
     if voice_dir.is_dir():
@@ -230,34 +256,28 @@ def list_available_voices():
             voices.append({"id": voice_file.name, "name": voice_file.stem})
     return sorted(voices, key=lambda v: v['name'])
 
+# Re-integrated from app_old.py
 def clean_filename_part(name_part):
-    # ... (This function remains unchanged)
     s_name = re.sub(r'[^\w\s-]', '', name_part)
     s_name = re.sub(r'[-\s]+', ' ', s_name).strip()
     return s_name[:40]
 
+# Re-integrated from app_old.py
 def create_title_page_text(metadata):
-    # ... (This function remains unchanged)
     parts = []
     title_parts = []
-    if metadata.get('title'):
-        title_parts.append(metadata['title'].strip().rstrip('.'))
-    if metadata.get('subtitle'):
-        title_parts.append(metadata['subtitle'].strip().rstrip('.'))
-    if title_parts:
-        parts.append(" ".join(title_parts) + ".")
-    if metadata.get('author'):
-        parts.append(f"By {metadata['author']}.")
-    if metadata.get('publisher'):
-        parts.append(f"Published by {metadata['publisher']}.")
+    if metadata.get('title'): title_parts.append(metadata['title'].strip().rstrip('.'))
+    if metadata.get('subtitle'): title_parts.append(metadata['subtitle'].strip().rstrip('.'))
+    if title_parts: parts.append(" ".join(title_parts) + ".")
+    if metadata.get('author'): parts.append(f"By {metadata['author']}.")
+    if metadata.get('publisher'): parts.append(f"Published by {metadata['publisher']}.")
     if metadata.get('published_date'):
         year_match = re.search(r'\d{4}', metadata['published_date'])
-        if year_match:
-            parts.append(f"Copyright {year_match.group(0)}.")
+        if year_match: parts.append(f"Copyright {year_match.group(0)}.")
     return " ".join(parts) + "\n\n" if parts else ""
 
+# Re-integrated from app_old.py
 def create_generic_cover_image(title, author, save_path):
-    # ... (This function remains unchanged)
     try:
         width, height = 800, 1200
         image = Image.new('RGB', (width, height), color = (73, 109, 137))
@@ -278,7 +298,7 @@ def create_generic_cover_image(title, author, save_path):
         y_text += 50
         author_lines = textwrap.wrap(author, width=30)
         for line in author_lines:
-            bbox = draw.textbbox((0, 0), line, font=author)
+            bbox = draw.textbbox((0, 0), line, font=font_author)
             line_width, line_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
             draw.text(((width - line_width) / 2, y_text), line, font=font_author, fill=(255, 255, 255))
             y_text += line_height + 5
@@ -288,17 +308,23 @@ def create_generic_cover_image(title, author, save_path):
         current_app.logger.error(f"Failed to create generic cover image: {e}")
         return None
 
+# Re-integrated from app_old.py
 def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_author_from_form, cover_url, build_dir, task_self=None):
-    # ... (This function remains unchanged)
     def update_state(state, meta):
-        if task_self: task_self.update_state(state=state, meta=meta)
+        if task_self:
+            task_self.update_state(state=state, meta=meta)
+    
     generated_folder = build_dir.parent
     unique_file_list = sorted(list(set(file_list)))
+    
     first_mp3_path = generated_folder / secure_filename(unique_file_list[0])
     audio_tags = MP3(first_mp3_path, ID3=ID3)
+    
     final_audiobook_title = str(audio_tags.get('TALB', [audiobook_title_from_form])[0])
     final_audiobook_author = str(audio_tags.get('TPE1', [audiobook_author_from_form])[0])
+
     current_app.logger.info(f"Using metadata for M4B: Title='{final_audiobook_title}', Author='{final_audiobook_author}'")
+
     update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
     safe_mp3_paths = [generated_folder / secure_filename(fname) for fname in unique_file_list]
     merged_text_content = "".join(p.with_suffix('.txt').read_text(encoding='utf-8') + "\n\n" for p in safe_mp3_paths if p.with_suffix('.txt').exists())
@@ -317,6 +343,7 @@ def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_auth
         generic_cover_path = build_dir / "generic_cover.jpg"
         if create_generic_cover_image(final_audiobook_title, final_audiobook_author, generic_cover_path):
             cover_path = generic_cover_path
+            
     update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Analyzing chapters...'})
     chapters_meta_content = f";FFMETADATA1\ntitle={final_audiobook_title}\nartist={final_audiobook_author}\n\n"
     concat_list_content = ""
@@ -329,6 +356,7 @@ def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_auth
         concat_list_content += f"file '{path.resolve()}'\n"
         chapters_meta_content += f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={current_duration_ms}\nEND={current_duration_ms + duration_ms}\ntitle={chapter_title}\n\n"
         current_duration_ms += duration_ms
+        
     concat_list_path = build_dir / "concat_list.txt"
     chapters_meta_path = build_dir / "chapters.meta"
     concat_list_path.write_text(concat_list_content)
@@ -350,6 +378,9 @@ def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_auth
         mux_command.extend(['-map', '0:v', '-disposition:v', 'attached_pic'])
     mux_command.extend(['-c:a', 'copy', '-c:v', 'copy', str(output_filepath)])
     subprocess.run(mux_command, check=True, capture_output=True)
+
     text_filepath = output_filepath.with_suffix('.txt')
     text_filepath.write_text(merged_text_content, encoding='utf-8')
-    return {'status': 'Success', 'filename': output_filepath.name, 'textfile': text_filepath.name}
+    text_filename = text_filepath.name
+
+    return {'status': 'Success', 'filename': output_filename, 'textfile': text_filename}

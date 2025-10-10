@@ -9,6 +9,7 @@ from argostranslate import translate
 import argostranslate.package
 import threading
 import logging
+import os # Added for OSError check
 
 logger = logging.getLogger('werkzeug')
 
@@ -359,7 +360,10 @@ def _log_stream(stream, log_prefix):
     except Exception as e:
         logger.error(f"Error reading stream for {log_prefix}: {e}")
     finally:
-        stream.close()
+        # Note: Do not close stream here if it is stdout/stderr of a child process 
+        # that is communicating via communicate(). The parent should close the pipe 
+        # handles it owns, and communicate() handles the rest.
+        pass
 
 class TTSService:
     def __init__(self, voice_path: str, speed_rate: str = "1.0"):
@@ -370,6 +374,8 @@ class TTSService:
 
     def synthesize(self, text: str, output_path: str, debug_level: str = 'off'):
         synthesized_text = text
+        piper_process = None
+        ffmpeg_process = None
 
         if not synthesized_text or not synthesized_text.strip():
             logger.warning(f"No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
@@ -394,6 +400,7 @@ class TTSService:
             piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             
+            # Start threads to consume stderr streams immediately
             piper_stderr_thread = threading.Thread(target=_log_stream, args=(piper_process.stderr, "[Piper stderr]"))
             ffmpeg_stderr_thread = threading.Thread(target=_log_stream, args=(ffmpeg_process.stderr, "[FFmpeg stderr]"))
             piper_stderr_thread.start()
@@ -412,19 +419,36 @@ class TTSService:
             writer_thread.start()
             
             writer_thread.join()
+            
+            # CRITICAL FIX 1: Wait for Piper to finish processing text input and generate audio.
+            # This ensures FFmpeg's input pipe (Piper's stdout) can be safely closed.
+            piper_process.wait()
+            
+            # CRITICAL FIX 2: Close piper_process.stdout in the parent process. 
+            # This is essential to signal EOF to FFmpeg's stdin.
+            if piper_process.stdout:
+                piper_process.stdout.close()
+            
+            # Communicate to finish FFmpeg, read its streams, and wait for it to exit
             ffmpeg_process.communicate()
             
-            piper_process.wait()
             piper_stderr_thread.join()
             ffmpeg_stderr_thread.join()
             
             if piper_process.returncode != 0:
-                raise RuntimeError(f"Piper process failed. Check logs for [Piper stderr].")
+                raise RuntimeError(f"Piper process failed with return code {piper_process.returncode}. Check logs for [Piper stderr].")
             if ffmpeg_process.returncode != 0:
-                raise RuntimeError(f"FFmpeg encoding process failed. Check logs for [FFmpeg stderr].")
+                raise RuntimeError(f"FFmpeg encoding process failed with return code {ffmpeg_process.returncode}. Check logs for [FFmpeg stderr].")
 
         except FileNotFoundError as e:
             raise RuntimeError(f"Command not found: {e.filename}. Ensure piper-tts and ffmpeg are installed.")
+        # Catch the OSError(9, 'Bad file descriptor') specifically for better logging/debugging
+        except OSError as e:
+            if e.errno == 9:
+                piper_rc = piper_process.returncode if piper_process else 'N/A'
+                ffmpeg_rc = ffmpeg_process.returncode if ffmpeg_process else 'N/A'
+                raise RuntimeError(f"OSError: Bad file descriptor (Pipe closed prematurely). Piper RC: {piper_rc}, FFmpeg RC: {ffmpeg_rc}") from e
+            raise
         
         logger.info(f"Successfully synthesized audio to {output_path}")
         return output_path, synthesized_text
