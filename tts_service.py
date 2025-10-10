@@ -10,9 +10,7 @@ import argostranslate.package
 import threading
 import logging
 
-# Get the application logger
 logger = logging.getLogger('werkzeug')
-
 
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 RULES_PATH = Path(__file__).parent / "rules.yaml"
@@ -34,7 +32,6 @@ if NORMALIZATION_PATH.exists():
     GREEK_TRANSLITERATION = NORMALIZATION.get("greek_transliteration", {})
     SUPERSCRIPTS = NORMALIZATION.get("superscripts", [])
     SUPERSCRIPT_MAP = NORMALIZATION.get("SUPERSCRIPT_MAP", {})
-
 else:
     (ABBREVIATIONS, CI_ABBREVIATIONS, BIBLE_BOOKS, CASE_SENSITIVE_ABBRS, ROMAN_EXCEPTIONS,
      BIBLE_REFS, CONTRACTIONS, SYMBOLS, PUNCTUATION, LATIN_PHRASES, GREEK_WORDS, ARCHAIC_WORDS, GREEK_TRANSLITERATION,
@@ -49,10 +46,8 @@ _inflect = inflect.engine()
 HEBREW_TO_ENGLISH = None
 
 def ensure_translation_models_are_loaded():
-    """Checks for and installs translation models if they are not present."""
     global HEBREW_TO_ENGLISH
-    if HEBREW_TO_ENGLISH:
-        return
+    if HEBREW_TO_ENGLISH: return
     try:
         argostranslate.package.update_package_index()
         available_packages = argostranslate.package.get_available_packages()
@@ -69,7 +64,6 @@ def ensure_translation_models_are_loaded():
         HEBREW_TO_ENGLISH = None
 
 ensure_translation_models_are_loaded()
-
 
 def _strip_diacritics(text: str) -> str:
     normalized = unicodedata.normalize('NFD', text)
@@ -302,48 +296,60 @@ DICTIONARY_REGISTRY = {
     "archaic_words": ARCHAIC_WORDS
 }
 
-def normalize_text(text: str) -> str:
+def normalize_text(text: str, debug_level: str = 'off') -> str:
+    """The main normalization function, driven by rules.yaml."""
+    if debug_level in ['debug', 'trace']:
+        logger.debug(f"Starting normalization. Initial text length: {len(text)}")
+    
     ensure_translation_models_are_loaded()
     
     for rule in RULES:
+        text_before = text if debug_level == 'trace' else ''
         rule_type = rule.get("type")
         
-        if rule_type == "function":
-            func = FUNCTION_REGISTRY.get(rule["function_name"])
-            if func: text = func(text)
+        try:
+            if rule_type == "function":
+                func = FUNCTION_REGISTRY.get(rule["function_name"])
+                if func: text = func(text)
 
-        elif rule_type == "regex":
-            flags = 0
-            for flag_name in rule.get("flags", []): flags |= getattr(re, flag_name, 0)
-            text = re.sub(rule["pattern"], rule["replacement"], text, flags=flags)
+            elif rule_type == "regex":
+                flags = sum(getattr(re, flag_name, 0) for flag_name in rule.get("flags", []))
+                text = re.sub(rule["pattern"], rule["replacement"], text, flags=flags)
 
-        elif rule_type == "regex_callback":
-            func = FUNCTION_REGISTRY.get(rule["function_name"])
-            if func:
-                flags = 0
-                for flag_name in rule.get("flags", []): flags |= getattr(re, flag_name, 0)
-                text = re.sub(rule["pattern"], func, text, flags=flags)
+            elif rule_type == "regex_callback":
+                func = FUNCTION_REGISTRY.get(rule["function_name"])
+                if func:
+                    flags = sum(getattr(re, flag_name, 0) for flag_name in rule.get("flags", []))
+                    text = re.sub(rule["pattern"], func, text, flags=flags)
 
-        elif rule_type == "dict_lookup":
-            dictionary_name = rule.get("dictionary_name")
-            dictionary = DICTIONARY_REGISTRY.get(dictionary_name, {})
-            options = rule.get("options", {})
-            
-            for key, value in sorted(dictionary.items(), key=lambda item: len(item[0]), reverse=True):
-                pattern = re.escape(key)
-                if options.get("word_boundary"):
-                    pattern = r'\b' + pattern + r'\b'
+            elif rule_type == "dict_lookup":
+                dictionary = DICTIONARY_REGISTRY.get(rule.get("dictionary_name"), {})
+                options = rule.get("options", {})
                 
-                flags = 0
-                if options.get("use_case_sensitive_list"):
-                    if key not in CASE_SENSITIVE_ABBRS: flags |= re.IGNORECASE
-                elif options.get("case_insensitive"):
-                    flags |= re.IGNORECASE
-                text = re.sub(pattern, value, text, flags=flags)
-    
+                for key, value in sorted(dictionary.items(), key=lambda item: len(item[0]), reverse=True):
+                    pattern = re.escape(key)
+                    if options.get("word_boundary"):
+                        pattern = r'\b' + pattern + r'\b'
+                    
+                    flags = 0
+                    if options.get("case_insensitive"):
+                        flags |= re.IGNORECASE
+                    
+                    text = re.sub(pattern, value, text, flags=flags)
+        
+        except Exception as e:
+            rule_name = rule.get('name', rule.get('function_name', rule.get('dictionary_name', 'Unknown Rule')))
+            logger.error(f"Error applying normalization rule '{rule_name}': {e}")
+
+        if debug_level == 'trace' and text != text_before:
+            rule_name = rule.get('name', rule.get('function_name', rule.get('dictionary_name', 'Unknown Rule')))
+            logger.debug(f"  > Trace: Rule '{rule_name}' changed text length from {len(text_before)} to {len(text)}.")
+
+    if debug_level in ['debug', 'trace']:
+        logger.debug(f"Finished normalization. Final text length: {len(text)}")
     return text.strip()
 
-# --- NEW HELPER FUNCTION FOR LOGGING SUBPROCESS OUTPUT ---
+
 def _log_stream(stream, log_prefix):
     """Reads a stream line by line and logs it with a prefix."""
     try:
@@ -362,7 +368,7 @@ class TTSService:
         if not self.voice_path.exists():
             raise FileNotFoundError(f"Voice model file not found at the provided path: {self.voice_path}")
 
-    def synthesize(self, text: str, output_path: str):
+    def synthesize(self, text: str, output_path: str, debug_level: str = 'off'):
         synthesized_text = text
 
         if not synthesized_text or not synthesized_text.strip():
@@ -378,20 +384,21 @@ class TTSService:
         ffmpeg_command = ["ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1", "-i", "-", "-threads", "0", "-acodec", "libmp3lame", "-q:a", "2", output_path]
         
         try:
-            logger.info(f"Starting Piper/FFmpeg for {output_path}. Text length: {len(synthesized_text)} chars.")
-            logger.debug(f"Piper command: {' '.join(piper_command)}")
-            logger.debug(f"FFmpeg command: {' '.join(ffmpeg_command)}")
+            if debug_level in ['debug', 'trace']:
+                logger.debug(f"Starting Piper/FFmpeg for {output_path}. Text length: {len(synthesized_text)} chars.")
+            if debug_level == 'trace':
+                logger.debug(f"  > Trace: Piper command: {' '.join(piper_command)}")
+                logger.debug(f"  > Trace: FFmpeg command: {' '.join(ffmpeg_command)}")
+                logger.debug(f"  > Trace: Final text snippet sent to Piper:\n---\n{synthesized_text[:500]}\n---")
 
             piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             
-            # --- NEW: START THREADS TO LOG STDERR FROM SUBPROCESSES ---
             piper_stderr_thread = threading.Thread(target=_log_stream, args=(piper_process.stderr, "[Piper stderr]"))
             ffmpeg_stderr_thread = threading.Thread(target=_log_stream, args=(ffmpeg_process.stderr, "[FFmpeg stderr]"))
             piper_stderr_thread.start()
             ffmpeg_stderr_thread.start()
 
-            # Write text to Piper's stdin in a separate thread to avoid blocking on large texts
             def write_to_piper():
                 try:
                     piper_process.stdin.write(synthesized_text.encode('utf-8'))
@@ -404,19 +411,17 @@ class TTSService:
             writer_thread = threading.Thread(target=write_to_piper)
             writer_thread.start()
             
-            # Wait for the writer and ffmpeg to finish
             writer_thread.join()
-            ffmpeg_stdout, _ = ffmpeg_process.communicate() # stderr is being handled by its thread
+            ffmpeg_process.communicate()
             
-            # Wait for piper to finish and the logging threads to catch all output
             piper_process.wait()
             piper_stderr_thread.join()
             ffmpeg_stderr_thread.join()
             
             if piper_process.returncode != 0:
-                raise RuntimeError(f"Piper process failed with exit code {piper_process.returncode}. Check logs for [Piper stderr].")
+                raise RuntimeError(f"Piper process failed. Check logs for [Piper stderr].")
             if ffmpeg_process.returncode != 0:
-                raise RuntimeError(f"FFmpeg encoding process failed with exit code {ffmpeg_process.returncode}. Check logs for [FFmpeg stderr].")
+                raise RuntimeError(f"FFmpeg encoding process failed. Check logs for [FFmpeg stderr].")
 
         except FileNotFoundError as e:
             raise RuntimeError(f"Command not found: {e.filename}. Ensure piper-tts and ffmpeg are installed.")
