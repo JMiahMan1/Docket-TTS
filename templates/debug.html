@@ -2,41 +2,77 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Debug Tools - Docket-TTS</title>
+    <title>Debug - Docket-TTS</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
     <div class="container py-5">
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h1 class="mb-0">🛠️ Debug & Info</h1>
-            <a href="/" class="btn btn-secondary">← Back to Upload</a>
+            <h1 class="mb-0">🔧 Debug Information</h1>
+            <div>
+                <a href="/" class="btn btn-secondary">← Back to Upload</a>
+                <a href="/files" class="btn btn-secondary">View Generated Files</a>
+                <a href="/jobs" class="btn btn-info">View Running Jobs</a>
+            </div>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+              </div>
+            {% endfor %}
+        {% endwith %}
+
+        <div class="card shadow-sm border-0 rounded-3 mb-4">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">Session Debug Level</h4>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('debug_page') }}">
+                    <div class="row align-items-end">
+                        <div class="col-md-6">
+                            <label for="debug_level" class="form-label">Set logging level for this session:</label>
+                            <select class="form-select" id="debug_level" name="debug_level">
+                                <option value="off" {% if current_debug_level == 'off' %}selected{% endif %}>Off (Standard Logging)</option>
+                                <option value="debug" {% if current_debug_level == 'debug' %}selected{% endif %}>Debug (Detailed Flow)</option>
+                                <option value="trace" {% if current_debug_level == 'trace' %}selected{% endif %}>Trace (Verbose Text Snippets)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mt-3 mt-md-0">
+                             <button type="submit" class="btn btn-primary w-100">Save Setting</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
         </div>
 
         <div class="card shadow-sm border-0 rounded-3 mb-4">
-            <div class="card-header"><h4 class="mb-0">System Information</h4></div>
+            <div class="card-header"><h4 class="mb-0">🗣️ Available Voices</h4></div>
             <div class="card-body">
-                <p><strong>App Version:</strong> {{ app_version }}</p>
-                <p><strong>Available Voices:</strong></p>
-                <ul>
+                {% if voices %}
+                    <ul class="list-group">
                     {% for voice in voices %}
-                        <li>{{ voice.name }}</li>
-                    {% else %}
-                        <li>No voices found.</li>
+                        <li class="list-group-item">{{ voice.name }} <small class="text-muted">({{ voice.id }})</small></li>
                     {% endfor %}
-                </ul>
+                    </ul>
+                {% else %}
+                    <p class="text-muted">No voices found.</p>
+                {% endif %}
             </div>
         </div>
 
         <div class="card shadow-sm border-0 rounded-3 mb-4">
             <div class="card-header"><h4 class="mb-0">Normalization Tester</h4></div>
             <div class="card-body">
-                <form method="POST">
+                <form method="POST" action="{{ url_for('debug_page') }}">
                     <div class="mb-3">
-                        <label for="text_to_normalize" class="form-label">Enter text to see how it will be normalized:</label>
-                        <textarea class="form-control" id="text_to_normalize" name="text_to_normalize" rows="8">{{ original_text }}</textarea>
+                        <label for="text_to_normalize" class="form-label">Text to Normalize:</label>
+                        <textarea class="form-control" name="text_to_normalize" id="text_to_normalize" rows="5">{{ original_text }}</textarea>
                     </div>
-                    <button type="submit" class="btn btn-primary">Normalize Text</button>
+                    <button type="submit" class="btn btn-secondary">Normalize Text</button>
                 </form>
                 {% if normalized_output %}
                 <div class="mt-4">
@@ -48,12 +84,12 @@
         </div>
 
         <div class="card shadow-sm border-0 rounded-3">
-            <div class="card-header"><h4 class="mb-0">Recent Application Logs</h4></div>
+            <div class="card-header"><h4 class="mb-0">📋 Recent Application Logs</h4></div>
             <div class="card-body">
-                <pre class="bg-dark text-white p-3 rounded" style="max-height: 400px; overflow-y: auto;"><code>{{ log_content }}</code></pre>
+                <pre class="bg-dark text-white p-3 rounded" style="max-height: 600px; overflow-y: auto;"><code>{{ log_content }}</code></pre>
             </div>
         </div>
-
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
