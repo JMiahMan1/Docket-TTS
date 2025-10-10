@@ -19,6 +19,7 @@ import text_cleaner
 import chapterizer
 from bs4 import BeautifulSoup 
 import ebooklib
+import requests # Added for convert_to_speech_task
 
 class AppContextTask(Task):
     """A Celery Task that runs within the Flask application context."""
@@ -40,10 +41,12 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
     # Use current_app now that context is pushed
     generated_folder = Path(current_app.config['GENERATED_FOLDER'])
     output_filepath = None 
+    success = False # FIX: Initialize a success flag
     try:
         status_msg = f'Processing: {book_metadata.get("title", "Unknown")} - Ch. {chapter_details["number"]} "{chapter_details["title"][:20]}..."'
         self.update_state(state='PROGRESS', meta={'status': status_msg})
 
+        # FIX: Pass current_app.redis_client
         full_voice_path = ensure_voice_available(voice_name, current_app.redis_client)
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
         
@@ -75,6 +78,8 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         
         text_filename = output_filepath.with_suffix('.txt').name
         (generated_folder / text_filename).write_text(synthesized_text, encoding="utf-8")
+        
+        success = True # FIX: Set success flag
         current_app.logger.info(f"Task {self.request.id} completed successfully. Output: {safe_output_filename}")
         return {'status': 'Success', 'filename': safe_output_filename, 'textfile': text_filename}
     
@@ -83,7 +88,8 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
         raise e
     finally:
-        if output_filepath and output_filepath.exists():
+        # FIX: Only clean up if the task failed (not success) and the file was created.
+        if not success and output_filepath and output_filepath.exists():
             try:
                 os.remove(output_filepath)
                 current_app.logger.warning(f"Cleaned up partial audio file: {output_filepath.name} due to failure.")
@@ -108,6 +114,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         if not text_content: 
             p_filepath = Path(input_filepath)
             if p_filepath.suffix.lower() == '.pdf':
+                import fitz 
                 with fitz.open(input_filepath) as doc: text_content = "\n".join([page.get_text() for page in doc])
             elif p_filepath.suffix.lower() == '.epub':
                 book = ebooklib.epub.read_epub(input_filepath)
@@ -133,13 +140,16 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         _, synthesized_text = tts.synthesize(final_content_for_synthesis, output_filepath)
         
         cover_url = enhanced_metadata.get('cover_url', '')
+        import uuid 
         unique_id = str(uuid.uuid4().hex[:8])
         temp_cover_path = os.path.join(generated_folder, f"cover_{unique_id}.jpg")
         cover_path_to_use = None
         if cover_url:
             try:
+                import requests 
                 response = requests.get(cover_url, stream=True)
                 response.raise_for_status()
+                import shutil
                 with open(temp_cover_path, 'wb') as f: shutil.copyfileobj(response.raw, f)
                 cover_path_to_use = temp_cover_path
             except requests.RequestException as e:
@@ -172,6 +182,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
 @celery.task(bind=True)
 def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, cover_url=None):
     """Celery task to merge multiple MP3s into a single M4B audiobook (re-integrated from app_old.py)."""
+    from datetime import datetime # Import datetime here since it's used inside the task
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     build_dir = Path(current_app.config['GENERATED_FOLDER']) / f"audiobook_build_{timestamp}"
     os.makedirs(build_dir, exist_ok=True)

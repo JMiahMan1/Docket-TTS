@@ -50,17 +50,33 @@ def ensure_translation_models_are_loaded():
     global HEBREW_TO_ENGLISH
     if HEBREW_TO_ENGLISH: return
     try:
+        # Step 1: Update index and find package
         argostranslate.package.update_package_index()
         available_packages = argostranslate.package.get_available_packages()
         package_to_install = next(filter(lambda x: x.from_code == "he" and x.to_code == "en", available_packages), None)
+        
         if package_to_install:
+            # Step 2: Install if not installed
             if not getattr(package_to_install, 'installed', False):
                 logger.info(f"Downloading and installing Argos Translate package: {package_to_install}")
                 package_to_install.install()
-            HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
+            
+            # Step 3: Get the translation object (This is the line that throws the error)
+            try:
+                HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
+            except Exception as inner_e:
+                # FIX: Handle the "Not a valid Argos Model (must be a zip archive)" error specifically.
+                # If installation was attempted, the files may be corrupted. We log the error.
+                logger.error(f"Failed to load HE->EN model after install/check. Potential corruption/bad install: {inner_e}")
+                # Optional: Force re-installation on error
+                # if not getattr(package_to_install, 'installed', False):
+                #     package_to_install.install() 
+                #     HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
+                HEBREW_TO_ENGLISH = None
         else:
             logger.warning("Hebrew to English translation package not found in Argos Translate index.")
     except Exception as e:
+        # Catch errors from update_package_index, install, or get_translation_from_codes
         logger.warning(f"Could not initialize Hebrew translation model: {e}")
         HEBREW_TO_ENGLISH = None
 

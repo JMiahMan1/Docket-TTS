@@ -85,32 +85,89 @@ def _apply_final_processing(initial_chapters: List[Chapter], config: Dict[str, A
         logger.warning("All potential chapters were excluded after processing.")
     return [part._replace(number=i + 1) for i, part in enumerate(final_parts)]
 
-# --- NEW EPUB-SPECIFIC HELPERS (REPLACING THE OLD _chapterize_by_epub_toc) ---
-def _get_epub_toc_titles(filepath: str, debug_level: str = 'off') -> List[str]:
-    """Parses an EPUB's TOC recursively to get an accurate list of chapter titles."""
-    logger.debug("Attempting to get chapter titles from EPUB TOC.")
-    titles = []
+# --- NEW/FIXED EPUB-SPECIFIC HELPERS ---
+
+# FIX 1: Update to return list of (title, href) tuples
+def _get_epub_toc_references(filepath: str, debug_level: str = 'off') -> List[tuple[str, str]]:
+    """Parses an EPUB's TOC recursively to get an accurate list of chapter titles and their file paths."""
+    logger.debug("Attempting to get chapter titles and references from EPUB TOC.")
+    references = []
     try:
         book = epub.read_epub(filepath)
         def _recursive_parser(toc_items):
             for item in toc_items:
                 if isinstance(item, tuple) and len(item) > 1 and isinstance(item[1], list):
                     _recursive_parser(item[1])
-                elif hasattr(item, 'href'):
-                    titles.append(item.title)
+                elif hasattr(item, 'href') and hasattr(item, 'title'):
+                    # The href is the key to fetch the content later
+                    references.append((item.title, unquote(item.href)))
         _recursive_parser(book.toc)
     except Exception as e:
-        logger.error(f"Failed to parse EPUB TOC titles for {filepath}: {e}", exc_info=True)
+        logger.error(f"Failed to parse EPUB TOC references for {filepath}: {e}", exc_info=True)
         return []
-    logger.debug(f"Found {len(titles)} titles via EPUB TOC: {titles}")
-    return titles
+    logger.debug(f"Found {len(references)} references via EPUB TOC: {[r[0] for r in references]}")
+    return references
 
+# FIX 2: New function to parse EPUB content based on the TOC references
+def _chapterize_by_epub_content(filepath: str, references: List[tuple[str, str]], debug_level: str = 'off') -> List[Chapter]:
+    """Splits an EPUB into chapters by processing the linked files from the TOC."""
+    logger.debug(f"Chapterizing EPUB based on {len(references)} TOC links.")
+    initial_chapters = []
+    try:
+        book = epub.read_epub(filepath)
+    except Exception as e:
+        logger.error(f"Failed to read EPUB for content extraction: {e}")
+        return []
+        
+    for i, (title, href) in enumerate(references):
+        try:
+            # Find the item corresponding to the href
+            item = book.get_item_with_href(href)
+            if item and item.media_type == 'application/xhtml+xml':
+                # Use BeautifulSoup to get clean text from the chapter's XHTML
+                soup = BeautifulSoup(item.get_body_content(), 'html.parser')
+                content = soup.get_text()
+                
+                # Simple cleanup of leading/trailing whitespace and excessive newlines
+                cleaned_content = re.sub(r'\n{3,}', '\n\n', content).strip()
+                word_count = len(cleaned_content.split())
+                
+                if word_count > 0:
+                    # Sanitize the title - remove common chapter markers if present in title for cleaner metadata
+                    clean_title_match = re.match(r'^(Chapter|Part|Book|Section)\s+[\dIVXLCDM]+\s*[:.\-]?\s*(.*)\s*$', title.strip(), re.IGNORECASE)
+                    final_title = clean_title_match.group(2).strip().title() if clean_title_match and clean_title_match.group(2) else title.strip().title()
+                    
+                    initial_chapters.append(Chapter(
+                        number=0, 
+                        title=final_title, 
+                        original_title=title.strip(), 
+                        content=cleaned_content, 
+                        word_count=word_count
+                    ))
+            elif debug_level == 'trace':
+                logger.debug(f"  > Trace: Skipping TOC reference {title} ({href}) as it is not XHTML content.")
+        except Exception as e:
+            logger.error(f"Error processing EPUB chapter '{title}' ({href}): {e}")
+            
+    logger.debug(f"Extracted {len(initial_chapters)} chapters directly from EPUB files.")
+    return initial_chapters
+
+
+# --- RESTORED FALLBACK METHODS ---
 def _split_text_by_titles(text: str, titles: List[str]) -> List[Chapter]:
-    """Splits a block of text into chapters based on a provided list of titles."""
-    logger.debug(f"Splitting text based on {len(titles)} found titles.")
+    """
+    (FALLBACK) Splits a block of text into chapters based on a provided list of titles.
+    NOTE: This is the old, less reliable method, kept for consistency with the original plan.
+    """
+    logger.debug(f"(Fallback) Splitting text based on {len(titles)} found titles.")
     chapters = []
     title_patterns = [re.escape(title) for title in titles]
-    split_pattern = re.compile(r"^\s*(" + "|".join(title_patterns) + r")\s*$", re.IGNORECASE | re.MULTILINE)
+    # Use word boundary on all-caps titles to prevent overmatching, otherwise only at line start
+    title_pattern_str = '|'.join(
+        [r"^\s*" + p + r"\s*$" for p in title_patterns if p.upper() != p] + 
+        [r"\b" + p + r"\b" for p in title_patterns if p.upper() == p]
+    )
+    split_pattern = re.compile(r"^\s*(" + title_pattern_str + r")\s*$", re.IGNORECASE | re.MULTILINE)
     
     last_end = 0
     matches = list(split_pattern.finditer(text))
@@ -133,17 +190,16 @@ def _split_text_by_titles(text: str, titles: List[str]) -> List[Chapter]:
         if content:
             chapters.append(Chapter(0, title, title, content, len(content.split())))
 
-    logger.debug(f"Successfully constructed {len(chapters)} chapters from text split.")
+    logger.debug(f"(Fallback) Successfully constructed {len(chapters)} chapters from text split.")
     return chapters
 
-# --- RESTORED FALLBACK METHODS ---
 def _chapterize_by_pdf_heuristics(filepath: str, full_text: str, debug_level: str = 'off') -> List[Chapter]:
-    logger.debug(f"Attempting to find chapters in '{filepath}' using PDF heuristics.")
+    logger.debug(f"Attempting to find chapters in '{filepath}' using PDF heuristics. (Placeholder)")
     # This is a placeholder for the more complex PDF-specific logic
     return []
 
 def _chapterize_by_text_toc(text: str, debug_level: str = 'off') -> List[Chapter]:
-    logger.debug("Attempting to find chapters using text-based TOC parsing.")
+    logger.debug("Attempting to find chapters using text-based TOC parsing. (Placeholder)")
     # This is a placeholder for the text-based TOC logic
     return []
 
@@ -172,10 +228,10 @@ def _find_raw_chapters_by_regex(text: str, debug_level: str = 'off') -> List[Cha
     logger.debug(f"Found {len(chapters)} potential raw chapters via regex.")
     return chapters
 
-# --- MAIN DISPATCHER FUNCTION (WITH FALLBACKS RESTORED) ---
+# --- MAIN DISPATCHER FUNCTION ---
 def chapterize(
     filepath: str,
-    text_content: str,
+    text_content: str, # Note: this is the combined text blob, still used for fallbacks
     config: Dict[str, Any] = None,
     debug_level: str = 'off'
 ) -> List[Chapter]:
@@ -184,21 +240,31 @@ def chapterize(
     p_filepath = Path(filepath)
     ext = p_filepath.suffix.lower()
     initial_chapters = []
+    references = [] # Store references here for reuse in fallback
     logger.debug(f"Starting chapterization for {p_filepath.name} with debug level '{debug_level}'")
     
-    # Step 1: Attempt format-specific EPUB method
+    # Step 1: Attempt the most robust EPUB method: by TOC and file processing
     if ext == '.epub':
-        toc_titles = _get_epub_toc_titles(filepath, debug_level)
-        if toc_titles:
+        # FIX: Get full references (title, href)
+        references = _get_epub_toc_references(filepath, debug_level)
+        if references:
+            # FIX: Use the new content-based parser which is more reliable than text splitting
+            initial_chapters = _chapterize_by_epub_content(filepath, references, debug_level)
+            
+    # Step 2: Fallback to the old methods if EPUB file processing failed or for other formats
+    if not initial_chapters and ext in ['.epub', '.pdf', '.docx', '.txt']:
+        logger.warning(f"Structured EPUB parsing failed for '{p_filepath.name}'. Falling back to text heuristics.")
+        
+        # EPUB Fallback: Try splitting the text blob using TOC titles (less reliable)
+        if ext == '.epub' and references:
+            toc_titles = [r[0] for r in references] # Extract titles from references
             initial_chapters = _split_text_by_titles(text_content, toc_titles)
-    
-    # Step 2: If primary fails (or not an EPUB), try other methods
-    if not initial_chapters:
-        # NOTE: The PDF and Text-TOC methods are placeholders and will currently do nothing.
-        # They are preserved here to maintain the desired fallback structure.
-        if ext == '.pdf':
+        
+        # PDF Fallback (Placeholder)
+        if not initial_chapters and ext == '.pdf':
             initial_chapters = _chapterize_by_pdf_heuristics(filepath, text_content, debug_level)
     
+    # Text TOC Fallback (Placeholder)
     if not initial_chapters:
         initial_chapters = _chapterize_by_text_toc(text_content, debug_level)
 

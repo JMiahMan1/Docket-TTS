@@ -191,6 +191,7 @@ def extract_text_and_metadata(filepath):
             if titles: metadata['title'] = titles[0][0]
             creators = book.get_metadata('DC', 'creator')
             if creators: metadata['author'] = creators[0][0]
+            # NOTE: This only extracts text for fallbacks. The new chapterizer uses the book object itself.
             for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
                 soup = BeautifulSoup(item.get_body_content(), 'html.parser')
                 text += soup.get_text() + "\n\n"
@@ -279,6 +280,8 @@ def create_title_page_text(metadata):
 # Re-integrated from app_old.py
 def create_generic_cover_image(title, author, save_path):
     try:
+        # Use Image import from the top of the file
+        from PIL import Image, ImageDraw, ImageFont 
         width, height = 800, 1200
         image = Image.new('RGB', (width, height), color = (73, 109, 137))
         draw = ImageDraw.Draw(image)
@@ -288,6 +291,8 @@ def create_generic_cover_image(title, author, save_path):
         except IOError:
             font_title = ImageFont.load_default()
             font_author = ImageFont.load_default()
+        # Use textwrap import from the top of the file
+        import textwrap 
         title_lines = textwrap.wrap(title, width=20)
         y_text = height / 4
         for line in title_lines:
@@ -332,9 +337,11 @@ def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_auth
     cover_path = None
     if cover_url:
         try:
+            import requests # Use requests import from the top of the file
             response = requests.get(cover_url, stream=True)
             response.raise_for_status()
             cover_path = build_dir / "cover.jpg"
+            import shutil # Use shutil import from the top of the file
             with open(cover_path, 'wb') as f: shutil.copyfileobj(response.raw, f)
         except requests.RequestException as e:
             current_app.logger.error(f"Failed to download cover art: {e}")
@@ -363,6 +370,7 @@ def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_auth
     chapters_meta_path.write_text(chapters_meta_content, encoding='utf-8')
     update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Merging and encoding audio...'})
     temp_audio_path = build_dir / "temp_audio.aac"
+    import subprocess # Use subprocess import from the top of the file
     concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-threads', '0', '-c:a', 'aac', '-b:a', '128k', str(temp_audio_path)]
     subprocess.run(concat_command, check=True, capture_output=True)
     update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Assembling audiobook...'})
