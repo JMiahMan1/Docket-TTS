@@ -34,6 +34,12 @@ from extensions import celery # Use the imported celery instance
 from tts_service import TTSService, normalize_text
 import text_cleaner
 import chapterizer
+# --- REMOVED: Circular import causing the crash ---
+# from chapterizer import CHAPTER_HEADING_RE, NAMED_SECTION_RE 
+# -------------------------------------------------
+
+# NOTE: Since the regexes are only used inside upload_file(), we can locally import them
+# from the module object 'chapterizer' where they are defined, which avoids the crash.
 
 # Import utility functions (must be available in the environment)
 from utils import (
@@ -180,7 +186,7 @@ def upload_file():
             app.logger.info(f"Processing '{original_filename}'.")
             
             # chapters will be a list of DICTs from the new chapterizer.py: 
-            # [{'title': '...', 'chunk_id': 1, 'text': '...'}, ...]
+            # [{'title': 'Chapter 5 (Part 1)', 'chunk_id': 1, 'text': '...'}, ...]
             chapters = chapterizer.chapterize(filepath=input_filepath, text_content=text_content, debug_level=debug_level_str)
             
             if chapters:
@@ -188,13 +194,53 @@ def upload_file():
                 
                 # FIX: Change access from attribute (chapter.number) to dictionary key (chapter['chunk_id'])
                 for chapter in chapters:
+                    
+                    # --- FILENAME CLEANUP LOGIC START: FINAL REVISION ---
+                    # Access the regex constants directly from the imported chapterizer module
+                    CHAPTER_HEADING_RE = chapterizer.CHAPTER_HEADING_RE
+                    NAMED_SECTION_RE = chapterizer.NAMED_SECTION_RE
+                    
+                    # chapter['title'] now contains the compound name (e.g., 'Chapter 5 (Part 1)')
+                    full_chapter_title = chapter['title']
+                    
+                    # 1. Check if it contains the (Part X) notation added by split_into_chunks
+                    if re.search(r'\s+\(Part\s+\d+\)$', full_chapter_title):
+                        # If it's a split chunk, use the full compound title as the display_title
+                        display_title = full_chapter_title
+                    else:
+                        # If it's a single, unsplit logical chapter (e.g., 'Preface: A Note on the Text'), 
+                        # apply the old logic to strip the subtitle for a clean filename.
+                        display_title = full_chapter_title
+                        
+                        simple_match = CHAPTER_HEADING_RE.match(display_title) or \
+                                       NAMED_SECTION_RE.match(display_title)
+
+                        if simple_match:
+                            display_title = simple_match.group(0).strip()
+                            
+                            # Further simplify by stripping common separators for subtitles
+                            if ':' in display_title:
+                                # Keep only the part before the first colon (e.g., "Chapter 1")
+                                display_title = display_title.split(':')[0].strip()
+                            elif '-' in display_title:
+                                # If it looks like 'Chapter 1 - Title', try to keep just 'Chapter 1'
+                                parts = display_title.split('-')
+                                if len(parts) > 1 and parts[0].strip().lower().startswith(('chapter', 'part', 'book')):
+                                    display_title = parts[0].strip()
+                            
+                            # Ensure we don't end up with an empty string
+                            if not display_title:
+                                display_title = full_chapter_title
+                        
+                    # --- FILENAME CLEANUP LOGIC END ---
+
                     chapter_details = {
-                        # Map chunk_id to number
+                        # Map chunk_id to number (this is the sequential number: 1, 2, 3, ... 66)
                         'number': chapter['chunk_id'], 
-                        # Use the dictionary key 'title'
-                        'title': chapter['title'],
-                        # Use 'title' again for original_title, since the new chunker combines them
-                        'original_title': chapter['title'], 
+                        # Use the appropriate title (compound or simplified)
+                        'title': display_title,
+                        # Pass the full title (e.g., 'Chapter 5 (Part 1)') for richer metadata tags
+                        'original_title': full_chapter_title, 
                         # part_info is no longer a tuple but baked into the title; set a default
                         'part_info': (1, 1) 
                     }
@@ -369,7 +415,11 @@ def jobs_page():
                 original_filename = "N/A"
                 if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 3:
                     if 'process_chapter_task' in task.get('name', ''):
-                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                         # --- FIX: Use the logical chapter title and sequential number for clarity ---
+                         chapter_title = task_args[2].get('title', f"Ch. {task_args[2]['number']}")
+                         book_title = task_args[1].get('title', 'Book')
+                         # New format: [Book Title] - [Chapter Title (Part X)] (ID: Y)
+                         original_filename = f"{book_title} - {chapter_title} (ID: {task_args[2]['number']})"
                     else:
                          original_filename = Path(task_args[1]).name
                 running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker})
@@ -379,7 +429,11 @@ def jobs_page():
                 original_filename = "N/A"
                 if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 3:
                     if 'process_chapter_task' in task.get('name', ''):
-                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                         # --- FIX: Use the logical chapter title and sequential number for clarity ---
+                         chapter_title = task_args[2].get('title', f"Ch. {task_args[2]['number']}")
+                         book_title = task_args[1].get('title', 'Book')
+                         # New format: [Book Title] - [Chapter Title (Part X)] (ID: Y)
+                         original_filename = f"{book_title} - {chapter_title} (ID: {task_args[2]['number']})"
                     else:
                          original_filename = Path(task_args[1]).name
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
