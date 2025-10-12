@@ -148,7 +148,7 @@ def upload_file():
         
         # FIX: The old logic used a boolean 'debug_mode' which must be converted to 'debug_level_str'
         # to match the chapterizer.chapterize signature.
-        debug_level_str = 'debug' if 'debug_mode' in request.form else 'off'
+        debug_level_str = 'debug' if 'debug_mode' in request.form else 'info' # Changed from 'off' to 'info' as a safer default
         
         files = request.files.getlist('file')
         if not files or all(f.filename == '' for f in files):
@@ -179,17 +179,27 @@ def upload_file():
 
             app.logger.info(f"Processing '{original_filename}'.")
             
-            # FIX: Pass the corrected string parameter 'debug_level'
+            # chapters will be a list of DICTs from the new chapterizer.py: 
+            # [{'title': '...', 'chunk_id': 1, 'text': '...'}, ...]
             chapters = chapterizer.chapterize(filepath=input_filepath, text_content=text_content, debug_level=debug_level_str)
             
             if chapters:
                 app.logger.info(f"Chapterizer found {len(chapters)} chapters. Queuing tasks.")
+                
+                # FIX: Change access from attribute (chapter.number) to dictionary key (chapter['chunk_id'])
                 for chapter in chapters:
                     chapter_details = {
-                        'number': chapter.number, 'title': chapter.title,
-                        'original_title': chapter.original_title, 'part_info': chapter.part_info
+                        # Map chunk_id to number
+                        'number': chapter['chunk_id'], 
+                        # Use the dictionary key 'title'
+                        'title': chapter['title'],
+                        # Use 'title' again for original_title, since the new chunker combines them
+                        'original_title': chapter['title'], 
+                        # part_info is no longer a tuple but baked into the title; set a default
+                        'part_info': (1, 1) 
                     }
-                    task = process_chapter_task.delay(chapter.content, enhanced_metadata, chapter_details, voice_name, speed_rate)
+                    # The text is now in chapter['text']
+                    task = process_chapter_task.delay(chapter['text'], enhanced_metadata, chapter_details, voice_name, speed_rate)
                     tasks.append(task)
                 os.remove(input_filepath)
             else:
@@ -207,6 +217,7 @@ def upload_file():
     voices = get_piper_voices()
     return render_template('index.html', voices=voices)
 
+# ... (rest of app.py is unchanged) ...
 @app.route('/files')
 def list_files():
     file_map = {}
