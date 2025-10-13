@@ -33,13 +33,8 @@ from difflib import SequenceMatcher
 from extensions import celery # Use the imported celery instance
 from tts_service import TTSService, normalize_text
 import text_cleaner
-import chapterizer
-# --- REMOVED: Circular import causing the crash ---
-# from chapterizer import CHAPTER_HEADING_RE, NAMED_SECTION_RE 
-# -------------------------------------------------
-
-# NOTE: Since the regexes are only used inside upload_file(), we can locally import them
-# from the module object 'chapterizer' where they are defined, which avoids the crash.
+import chapterizer # Primary import
+# --- REMOVED CRASH-INDUCING LINE: from chapterizer import CHAPTER_HEADING_RE, NAMED_SECTION_RE ---
 
 # Import utility functions (must be available in the environment)
 from utils import (
@@ -49,6 +44,7 @@ from utils import (
 from tasks import process_chapter_task, convert_to_speech_task, create_audiobook_task
 
 APP_VERSION = "0.0.4" # Revert to old version
+# ... (rest of app.py setup remains unchanged) ...
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
@@ -192,14 +188,15 @@ def upload_file():
             if chapters:
                 app.logger.info(f"Chapterizer found {len(chapters)} chapters. Queuing tasks.")
                 
+                # --- Access regexes via module object to prevent crash ---
+                CHAPTER_HEADING_RE = chapterizer.CHAPTER_HEADING_RE
+                NAMED_SECTION_RE = chapterizer.NAMED_SECTION_RE
+                # ---------------------------------------------------------
+                
                 # FIX: Change access from attribute (chapter.number) to dictionary key (chapter['chunk_id'])
                 for chapter in chapters:
                     
                     # --- FILENAME CLEANUP LOGIC START: FINAL REVISION ---
-                    # Access the regex constants directly from the imported chapterizer module
-                    CHAPTER_HEADING_RE = chapterizer.CHAPTER_HEADING_RE
-                    NAMED_SECTION_RE = chapterizer.NAMED_SECTION_RE
-                    
                     # chapter['title'] now contains the compound name (e.g., 'Chapter 5 (Part 1)')
                     full_chapter_title = chapter['title']
                     
@@ -263,7 +260,7 @@ def upload_file():
     voices = get_piper_voices()
     return render_template('index.html', voices=voices)
 
-# ... (rest of app.py is unchanged) ...
+# ... (rest of app.py remains unchanged) ...
 @app.route('/files')
 def list_files():
     file_map = {}
