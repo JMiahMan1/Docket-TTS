@@ -8,29 +8,24 @@ logger = logging.getLogger('werkzeug')
 
 DEFAULT_CONFIG = {
     "section_markers": {
-        # Flexible rule for table of contents
-        r"^(Contents|Table of Contents)": (
-            r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\s+",
+        # FIX: Simplified and made patterns more robust by removing '$' anchor
+        r"^\s*(Contents|Table of Contents)": (
+            r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\b",
         ),
-        # Added rule for "Praise for" pages
         r"^\s*Praise for\b": (
-            r"^\s*(Contents|Table of Contents|Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\s+",
+            r"^\s*(Contents|Table of Contents|Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\b",
         ),
-        # Dedication, Preface, etc. — allow leading whitespace
-        r"^\s*(Dedication|Foreword|Preface|Introduction)": (
-            r"^\s*(Chapter|Part|Book|One|1)\s+",
+        r"^\s*(Dedication|Foreword|Preface|Introduction)\b": (
+            r"^\s*(Chapter|Part|Book|One|1)\b",
         ),
-        # Index and similar — allow indentation and capitalization differences
-        r"^\s*(Index|Bibliography|Works Cited|References|Glossary|About the Author|Author Bio)\s*$": (
+        r"^\s*(Index|Bibliography|Works Cited|References|Glossary|About the Author|Author Bio)\b": (
             None,
         ),
-        # Copyright and "Also by" sections
-        r"^(Copyright|Also by)$": (
-            r"^\s*(Chapter|Part|Book|One|1)\s+",
+        r"^\s*(Copyright|Also by)\b": (
+            r"^\s*(Chapter|Part|Book|One|1)\b",
         ),
-        # Lists and figure sections
-        r"^(List of Figures|List of Tables|List of Illustrations)$": (
-            r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface)\s+",
+        r"^\s*(List of Figures|List of Tables|List of Illustrations)\b": (
+            r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface)\b",
         ),
     },
     "paragraph_disallow_patterns": [
@@ -178,7 +173,6 @@ def clean_text(text: str, config: Dict[str, Any] = None, debug_level: str = 'off
     cleaned_text = re.sub(r'^\s*Page\s*\d+\s*$', '', cleaned_text, flags=re.MULTILINE)
     cleaned_text = re.sub(r'^\s*\d+\s*$', '', cleaned_text, flags=re.MULTILINE)
 
-    # --- Normalize blank lines ---
     cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text)
     
     if debug_level in ['debug', 'trace']:
