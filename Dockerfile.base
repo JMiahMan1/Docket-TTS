@@ -23,6 +23,7 @@ RUN dnf install -y dnf-plugins-core && \
         python3-mutagen \
         python3-pillow \
         python3-huggingface-hub \
+        calibre \
         wget \
         gcc \
         gcc-c++ \
