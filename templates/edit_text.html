@@ -35,7 +35,7 @@
                              <label for="voice" class="form-label">Voice</label>
                             <select class="form-select" id="voice" name="voice" required>
                                 {% for voice in voices %}
-                                    <option value="{{ voice.id }}">{{ voice.name }}</option>
+				    <option value="{{ voice.id }}" {% if 'hfc_male' in voice.id %}selected{% endif %}>{{ voice.name }}</option>
                                 {% endfor %}
                             </select>
                         </div>

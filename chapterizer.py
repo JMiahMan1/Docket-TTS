@@ -2,7 +2,7 @@
 chapterizer.py
 
 Unified multi-format book chapter extractor (EPUB primary, PDF/DOCX/TXT fallback).
-Backwards-compatible with old `chapterizer.chapterize()` interface.
+ENFORCES CALIBRE PRE-PROCESSING for EPUBs, as required for reliable splitting.
 """
 
 from __future__ import annotations
@@ -10,16 +10,21 @@ import re
 import logging
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
-
-# EPUB
+import warnings
+import shutil
+import subprocess
+from bs4 import BeautifulSoup, Tag, XMLParsedAsHTMLWarning
 from ebooklib import epub
-from bs4 import BeautifulSoup
+from os import environ
 
 # DOCX
 import docx
 
 # PDF
 import fitz  # PyMuPDF
+
+# Suppress EPUB parsing warnings
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 # ---------------------------------------------------------
 # Logging Setup
@@ -35,44 +40,26 @@ logger.setLevel(logging.INFO)
 # Configuration
 # ---------------------------------------------------------
 DEFAULT_WORD_LIMIT = 8000
-MIN_WORD_COUNT = 50 # Only applies to generic, UNNAMED sections
+MIN_WORD_COUNT = 50 
+CONVERTED_EPUB_DIR = "/tmp/converted_epub"
 
-# --- FINAL KEEP KEYWORDS (Restored 'part' to match major divisions) ---
+# --- FINAL KEEP KEYWORDS (Structural sections only) ---
 KEEP_TITLE_KEYWORDS = [
-    # Front Matter
-    r'\btitle\s*page\b',
-    r'\bpreface\b',
-    r'\bforeword\b',
-    r'\bintroduction\b',
-    r'\bprologue\b',
-    r'\bepilogue\b', 
-    # Major Content Divisions
-    r'\bchapter\b',
-    r'\bpart\b', 
-    r'\bbook\b', 
+    r'\btitle\s*page\b', r'\bpreface\b', r'\bforeword\b', r'\bintroduction\b', 
+    r'\bprologue\b', r'\bepilogue\b', r'\bchapter\b', r'\bpart\b', r'\bbook\b', 
 ]
-# ------------------------------------------------------------------------
 
 DISALLOWED_SECTION_PATTERNS = [
-    r'\btable\s+of\s+contents\b',
-    r'\bcontents\b',
-    r'\bappendix\b',
-    r'\breferences\b',
-    r'\bbibliography\b',
-    r'\bindex\b',
-    r'\bcopyright\b',
-    r'\bpermissions\b',
-    r'\bglossary\b',
-    r'\backnowledg',
-    r'\bcolophon\b',
-    r'\bdedication\b', 
+    r'\btable\s+of\s+contents\b', r'\bcontents\b', r'\bappendix\b', r'\breferences\b', 
+    r'\bbibliography\b', r'\bindex\b', r'\bcopyright\b', r'\bpermissions\b', 
+    r'\bglossary\b', r'\backnowledg', r'\bcolophon\b', r'\bdedication\b', 
     r'\babout\s+the\s+(author|publisher)\b', 
 ]
 
-KEEP_RE = re.compile('|'.join(DISALLOWED_SECTION_PATTERNS), re.IGNORECASE)
+KEEP_RE = re.compile('|'.join(KEEP_TITLE_KEYWORDS), re.IGNORECASE)
 DISALLOWED_RE = re.compile('|'.join(DISALLOWED_SECTION_PATTERNS), re.IGNORECASE)
 
-# --- REVISED CHAPTER HEADING REGEX: Includes Chapter/Book/Part + Numbering ---
+# --- REVISED CHAPTER HEADING REGEX (For confidence check and other file types) ---
 CHAPTER_HEADING_RE = re.compile(
     r'^(?P<title>(chapter|chap|book|part)\b[\s\.\-:]*[0-9IVXLCDMivxlcdm]+(?:\b.*)?|' 
     r'(?:^|\n)\bchapter\s+[ivxlcdm0-9]+\b.*)',
@@ -83,6 +70,55 @@ NAMED_SECTION_RE = re.compile(
     r'^\s*(?P<title>title\s*page|preface|foreword|introduction|prologue|epilogue)\b[:\s\-]*?(?P<rest>.*)$',
     re.IGNORECASE | re.MULTILINE
 )
+
+# ---------------------------------------------------------
+# Calibre Integration Helper
+# ---------------------------------------------------------
+def _convert_epub_to_standard_html(epub_path: str, output_dir: str) -> Optional[Path]:
+    """Uses Calibre's ebook-convert to standardize the EPUB to a single HTML file path."""
+    if shutil.which("ebook-convert") is None:
+        logger.error("Calibre's 'ebook-convert' not found in PATH. EPUB splitting WILL FAIL.")
+        return None
+
+    logger.info("Calibre's 'ebook-convert' found. Attempting pre-processing.")
+
+    if Path(output_dir).exists():
+        shutil.rmtree(output_dir)
+    
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    standard_epub_path = Path(output_dir) / "standard.epub"
+    full_content_path = Path(output_dir) / "full_standardized_content.html"
+    
+    try:
+        subprocess.run(
+            ["ebook-convert", epub_path, str(standard_epub_path)],
+            check=True, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE
+        )
+        logger.info("Calibre standardization successful (EPUB -> EPUB).")
+        
+        book = epub.read_epub(str(standard_epub_path))
+        
+        full_html_parts = []
+        from ebooklib import ITEM_DOCUMENT 
+        
+        for item in book.get_items_of_type(ITEM_DOCUMENT):
+             full_html_parts.append(item.get_body_content().decode('utf-8', errors='ignore'))
+        
+        full_content_path.write_text('\n'.join(full_html_parts), encoding='utf-8')
+        logger.info(f"Standardized HTML content aggregated to {full_content_path}")
+        
+        return full_content_path
+    
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Calibre conversion failed: {e.stderr.decode('utf-8', errors='ignore')}")
+        shutil.rmtree(output_dir, ignore_errors=True)
+        return None
+    except Exception as e:
+        logger.error(f"Error during Calibre processing: {e}")
+        shutil.rmtree(output_dir, ignore_errors=True)
+        return None
 
 # ---------------------------------------------------------
 # Cleaning helpers
@@ -100,7 +136,7 @@ def clean_whitespace(text: str) -> str:
 
 def remove_footnote_markers(text: str) -> str:
     t = re.sub(r'\[\d+\]', '', text)
-    t = re.sub(r'\s*\(\d+\)', '', t)
+    t = re.sub(r'\s*\(\d+\)', '', text)
     t = re.sub(r'(?<=\D)[\u00B9\u00B2\u00B3\u2070-\u207F]+', '', t)
     t = re.sub(r'\n\s*\d+\s*\n', '\n\n', t)
     return t
@@ -115,13 +151,11 @@ def normalize_title(title: str) -> str:
 
 
 def prune_disallowed_sections(chapters: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
-    # Note: Using DISALLOWED_RE to prune undesirable sections
     return [(t, c) for t, c in chapters if not DISALLOWED_RE.search(t)]
 
 
-# --- FUNCTION FOR AGGRESSIVE TOC REMOVAL ---
+# --- FUNCTION FOR AGGRESSIVE TOC REMOVAL (For other file types) ---
 def _remove_toc_from_text(text: str) -> str:
-    """Removes blocks of text strongly resembling a Table of Contents."""
     TOC_LINE_RE = re.compile(r'^\s*[\w\s\.\-:\(\)]+\s+[\.\-\s]+\s*\d{1,4}\s*$', re.MULTILINE)
     
     lines = text.split('\n')
@@ -130,7 +164,6 @@ def _remove_toc_from_text(text: str) -> str:
     toc_lines_count = 0
     
     for line in lines:
-        # We check for DISALLOWED keywords in the line
         if DISALLOWED_RE.search(line):
             logger.debug(f"TOC Removal: Entering potential TOC block based on title: {line.strip()}")
             in_toc_block = True
@@ -138,7 +171,6 @@ def _remove_toc_from_text(text: str) -> str:
             continue 
             
         if in_toc_block:
-            # Look for lines typical of a TOC entry (dots/numbers/etc.)
             if TOC_LINE_RE.search(line) or (line.strip() and not CHAPTER_HEADING_RE.search(line)):
                 toc_lines_count += 1
                 logger.debug(f"TOC Removal: Discarding TOC line: {line.strip()}")
@@ -162,26 +194,20 @@ def split_into_chunks(chapters: List[Dict], word_limit: int = DEFAULT_WORD_LIMIT
     global_chunk_id = 1 # Global ID to maintain task sequence across the entire book
     
     for i, ch in enumerate(chapters, start=1):
-        # We now use the original title as the base name for parts
         title = ch.get('title', f"Section {i}")
         text = clean_whitespace(ch.get('text', ''))
         
         words = text.split()
         
-        # Determine if this section is a known, required structural element
-        # Check against NAMED_SECTION_RE (Preface, Intro) and CHAPTER_HEADING_RE (Chapter X, Part I)
         is_key_structural_element = bool(CHAPTER_HEADING_RE.match(title) or NAMED_SECTION_RE.match(title))
         
-        # --- FIX: Only discard short sections if they are NOT structural elements ---
         if len(words) < MIN_WORD_COUNT and not is_key_structural_element:
             logger.warning(f"Discarding short, non-structural section '{title}' with only {len(words)} words (Min: {MIN_WORD_COUNT}).")
             continue
-        # -------------------------------------------------------------------------
         
         if not text:
             continue
 
-        # If the logical chapter is small enough, keep it as a single chunk
         if len(words) <= word_limit:
             out.append({'title': title, 'chunk_id': global_chunk_id, 'text': text})
             global_chunk_id += 1
@@ -199,26 +225,24 @@ def split_into_chunks(chapters: List[Dict], word_limit: int = DEFAULT_WORD_LIMIT
             w = len(p.split())
             if count + w > word_limit and buf:
                 
-                # Assign the chunk title with the part number
                 chunk_title = f"{title} (Part {local_chunk_id})"
                 
                 out.append({
                     'title': chunk_title, 
-                    'chunk_id': global_chunk_id, # Global ID for Celery sequencing
+                    'chunk_id': global_chunk_id, 
                     'text': '\n\n'.join(buf).strip()
                 })
                 
                 logger.debug(f"  -> Chunk {global_chunk_id}: '{chunk_title}' ({count} words)")
                 
                 global_chunk_id += 1
-                local_chunk_id += 1 # Increment local counter for the next part
+                local_chunk_id += 1 
                 buf, count = [p], w
             else:
                 buf.append(p)
                 count += w
                 
         if buf:
-            # Handle the last buffer
             if local_chunk_id > 1:
                 chunk_title = f"{title} (Part {local_chunk_id})"
             else:
@@ -239,87 +263,91 @@ def split_into_chunks(chapters: List[Dict], word_limit: int = DEFAULT_WORD_LIMIT
 # Extraction functions
 # ---------------------------------------------------------
 def _extract_epub(filepath: str) -> List[Tuple[str, str]]:
-    from ebooklib import ITEM_DOCUMENT
     logger.debug(f"Extracting EPUB: {filepath}")
+    
+    # 1. ATTEMPT CALIBRE STANDARDIZATION (Required Step)
+    standard_html_path = _convert_epub_to_standard_html(filepath, CONVERTED_EPUB_DIR)
+    
+    if standard_html_path:
+        logger.info("Calibre standardization successful. Using H1 structural extraction.")
+        try:
+            html_content = standard_html_path.read_text(encoding='utf-8')
+            soup = BeautifulSoup(html_content, 'lxml')
+            
+            # Remove junk tags that Calibre might leave behind
+            for s in soup.select('nav, .nav, .footnote, script, style, header, footer, body > .calibre_toc'):
+                s.decompose()
+            
+            chapters = []
+            current_content_blocks = []
+            current_title = "Front_Matter"
+            
+            def finalize_section():
+                nonlocal current_title, current_content_blocks
+                if current_content_blocks:
+                    text = clean_whitespace("\n\n".join(current_content_blocks))
+                    if text:
+                         chapters.append((normalize_title(current_title), text))
+                    current_content_blocks = []
+
+            # Iterate over structural tags in the standardized output
+            content_div = soup.find('body') or soup
+            # Look for H1 (chapter break) and all content tags
+            for element in content_div.find_all(['h1', 'h2', 'h3', 'p', 'div']):
+                text = clean_whitespace(element.get_text())
+                if not text:
+                    continue
+                
+                if element.name == 'h1':
+                    is_structural_heading = not DISALLOWED_RE.search(text)
+
+                    if is_structural_heading:
+                        finalize_section()
+                        current_title = text
+                        logger.debug(f"Calibre Extraction: NEW H1 SECTION START: '{current_title}'")
+                        current_content_blocks.append(text) 
+                        continue
+                
+                if element.name in ['h2', 'h3', 'p', 'div']:
+                    current_content_blocks.append(text)
+            
+            finalize_section() # Capture the last section
+            
+            logger.info(f"Calibre-assisted extraction resulted in {len(chapters)} sections.")
+            
+            if not chapters:
+                 logger.warning("Calibre extraction returned 0 structural sections. Returning fallback text method.")
+                 raise ValueError("Calibre parsing failed to find structural chapters.")
+
+            return prune_disallowed_sections(chapters)
+            
+        except Exception as e:
+            # If Calibre was successful but parsing failed (e.g., unexpected HTML structure)
+            logger.error(f"Fatal error during Calibre-assisted parsing: {e}. Cannot reliably split EPUB.")
+            
+        finally:
+             shutil.rmtree(CONVERTED_EPUB_DIR, ignore_errors=True)
+    
+    
+    # 2. DEFAULT EPUBLIB FALLBACK (Only executes if Calibre failed or was not available)
+    
+    logger.error("EPUB structural splitting FAILED. Processing as single file.")
     try:
+        from ebooklib import ITEM_DOCUMENT 
         book = epub.read_epub(filepath)
-    except Exception:
-        logger.exception("Failed to read EPUB.")
-        return []
-
-    chapters = []
-    full_text_parts = []
+        full_text_parts = []
+        for item in book.get_items_of_type(ITEM_DOCUMENT):
+            soup = BeautifulSoup(item.get_body_content(), 'html.parser')
+            text = clean_whitespace(remove_footnote_markers(soup.get_text(separator='\n')))
+            if text:
+                full_text_parts.append(text)
+        full_text = '\n\n'.join(full_text_parts)
+    except Exception as e:
+        logger.error(f"Failed to read EPUB for single file fallback: {e}")
+        full_text = "ERROR: Could not read file content."
     
-    # Pass 1: Extract text and potential section titles from EPUB items
-    for item in book.get_items_of_type(ITEM_DOCUMENT):
-        soup = BeautifulSoup(item.get_body_content(), 'html.parser')
-        # Decompose elements like navigation, footnotes, scripts, and styles
-        for s in soup.select('nav, .nav, .toc, .footnote, script, style'):
-            s.decompose()
-        
-        # Try to find a meaningful title from h1/h2 tags, or fall back to item name
-        title_el = soup.find(['h1', 'h2'])
-        title = title_el.get_text(strip=True) if title_el else item.get_name()
-        
-        # Get all text from the item
-        text = clean_whitespace(remove_footnote_markers(soup.get_text(separator='\n')))
-        
-        if text:
-            normalized_title = normalize_title(title)
-            chapters.append((normalized_title, text))
-            # Keep track of all text content for combined processing
-            full_text_parts.append(text) 
-    
-    full_text = '\n\n'.join(full_text_parts)
-    logger.debug(f"EPUB raw file-based sections: {len(chapters)}. Total text words: {len(full_text.split())}")
+    return [("Full Document", full_text)]
 
-    # --- AGGRESSIVE TOC REMOVAL ---
-    pre_toc_words = len(full_text.split())
-    full_text = _remove_toc_from_text(full_text)
-    post_toc_words = len(full_text.split())
-    logger.debug(f"EPUB TOC cleanup: Removed {pre_toc_words - post_toc_words} words.")
-    # ------------------------------
-
-    # Pass 2: Try to find chapters using regex on the combined text
-    matches = list(CHAPTER_HEADING_RE.finditer(full_text)) + list(NAMED_SECTION_RE.finditer(full_text))
-    matches.sort(key=lambda m: m.start())
-
-    regex_chapters = []
-    if matches:
-        logger.info(f"EPUB: Found {len(matches)} chapter-like headers using full-text regex. Prioritizing regex split.")
-        for i, m in enumerate(matches):
-            start, end = m.start(), matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
-            chunk = full_text[start:end].strip()
-            # The title is the full matched header
-            regex_chapters.append((normalize_title(m.group(0).strip()), clean_whitespace(remove_footnote_markers(chunk))))
-        
-        # Return the regex-split chapters if any were found
-        return prune_disallowed_sections(regex_chapters)
-
-    # Fallback 1: No strong regex matches found on combined text.
-    logger.warning("EPUB: No strong chapter headers found via regex. Falling back to strict per-file processing.")
-    
-    # Prune disallowed sections
-    chapters = prune_disallowed_sections(chapters)
-    
-    # --- AGGRESSIVE FALLBACK FILTER ---
-    # Only keep sections whose titles explicitly match a core structural keyword.
-    filtered = [
-        (t, c)
-        for t, c in chapters
-        if KEEP_RE.search(t) or NAMED_SECTION_RE.search(t)
-        # We rely on the word count filter in split_into_chunks to remove short junk
-    ]
-    logger.info(f"EPUB Fallback: {len(filtered)} sections kept after strict title filtering.")
-    
-    # Fallback 2: If the strict filter yielded nothing, return the whole book as one chunk
-    if not filtered and chapters:
-        logger.warning("EPUB Fallback: Strict filter yielded no content. Returning content as a single 'Full Document' chunk.")
-        # Combine all filtered text (after pruning disallowed sections) back into one entry
-        combined_text = '\n\n'.join(c for t, c in chapters)
-        return [("Full Document", combined_text)]
-        
-    return filtered # Return the strictly filtered list
 
 def _extract_docx(filepath: str) -> List[Tuple[str, str]]:
     logger.debug(f"Extracting DOCX: {filepath}")
@@ -342,7 +370,6 @@ def _extract_docx(filepath: str) -> List[Tuple[str, str]]:
         if not text:
             continue
         style = getattr(p.style, 'name', '').lower()
-        # Use explicit heading style or explicit title matches
         if 'heading 1' in style or re.match(r'^(chapter|preface|introduction|prologue|part)', text, re.I):
             push()
             current_title = text
@@ -359,7 +386,7 @@ def _extract_pdf(filepath: str) -> List[Tuple[str, str]]:
     try:
         doc = fitz.open(filepath)
     except Exception:
-        logger.exception("Failed to open PDF.")
+        logger.exception("Failed to read PDF.")
         return []
 
     text = "\n\n".join(clean_whitespace(page.get_text("text")) for page in doc)
@@ -467,16 +494,23 @@ def chapterize(filepath: str, text_content: Optional[str] = None, debug_level: O
     debug_level may be: 'quiet', 'info', or 'verbose'.
     """
     level = (debug_level or "info").lower()
-    if level == "quiet":
-        logger.setLevel(logging.WARNING)
-    elif level == "verbose":
-        logger.setLevel(logging.DEBUG)
-    else:
-        logger.setLevel(logging.INFO)
+    
+    # Convert debug level string to logging constant
+    level_map = {
+        'off': logging.WARNING, 
+        'info': logging.INFO, 
+        'debug': logging.DEBUG, 
+        'trace': logging.DEBUG
+    }
+    log_level = level_map.get(level, logging.INFO)
+    logger.setLevel(log_level)
 
-    logger.info(f"[chapterizer] Processing file: {filepath}")
+    # Use 'verbose' flag for internal functions that need extra detail
+    verbose = (level == "debug" or level == "trace")
+
+    logger.info(f"[chapterizer] Processing file: {filepath} (Log Level: {logging.getLevelName(log_level)})")
     try:
-        chunks = extract_book_sections(filepath, word_limit=DEFAULT_WORD_LIMIT, verbose=(level == "verbose"))
+        chunks = extract_book_sections(filepath, word_limit=DEFAULT_WORD_LIMIT, verbose=verbose)
         logger.info(f"[chapterizer] Extraction complete: {len(chunks)} chunks generated.")
         return chunks
     except Exception as e:
@@ -494,8 +528,9 @@ if __name__ == "__main__":
     parser.add_argument("--word-limit", type=int, default=DEFAULT_WORD_LIMIT)
     args = parser.parse_args()
 
-    logger.setLevel(logging.DEBUG if args.debug == "verbose" else logging.INFO)
-    chunks = chapterize(args.file, debug_level=args.debug)
+    # NOTE: CLI execution uses 'verbose' for max detail by default here
+    logger.setLevel(logging.DEBUG) 
+    chunks = extract_book_sections(args.file, word_limit=args.word_limit, verbose=True)
     print(f"\nExtracted {len(chunks)} chunks\n")
     for c in chunks[:3]:  # show first 3 chunks for preview
         print(f"[{c['chunk_id']}] {c['title']} — {len(c['text'].split())} words\n{c['text'][:500]}...\n")

@@ -10,7 +10,7 @@ import time
 import redis
 from flask import (
     Flask, request, render_template, send_from_directory,
-    flash, redirect, url_for, jsonify, current_app
+    flash, redirect, url_for, jsonify, current_app, session
 )
 from werkzeug.utils import secure_filename
 import docx
@@ -34,7 +34,8 @@ from extensions import celery # Use the imported celery instance
 from tts_service import TTSService, normalize_text
 import text_cleaner
 import chapterizer # Primary import
-# --- REMOVED CRASH-INDUCING LINE: from chapterizer import CHAPTER_HEADING_RE, NAMED_SECTION_RE ---
+from chapterizer import CHAPTER_HEADING_RE, NAMED_SECTION_RE 
+# This import is now safe because chapterizer.py is defined correctly.
 
 # Import utility functions (must be available in the environment)
 from utils import (
@@ -44,7 +45,6 @@ from utils import (
 from tasks import process_chapter_task, convert_to_speech_task, create_audiobook_task
 
 APP_VERSION = "0.0.4" # Revert to old version
-# ... (rest of app.py setup remains unchanged) ...
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
@@ -148,9 +148,8 @@ def upload_file():
 
         tasks = []
         
-        # FIX: The old logic used a boolean 'debug_mode' which must be converted to 'debug_level_str'
-        # to match the chapterizer.chapterize signature.
-        debug_level_str = 'debug' if 'debug_mode' in request.form else 'info' # Changed from 'off' to 'info' as a safer default
+        # --- FIX: Retrieve debug_level from session ---
+        debug_level_str = session.get("debug_level", "info").lower() 
         
         files = request.files.getlist('file')
         if not files or all(f.filename == '' for f in files):
@@ -188,10 +187,9 @@ def upload_file():
             if chapters:
                 app.logger.info(f"Chapterizer found {len(chapters)} chapters. Queuing tasks.")
                 
-                # --- Access regexes via module object to prevent crash ---
+                # Access the regex constants directly from the imported chapterizer module
                 CHAPTER_HEADING_RE = chapterizer.CHAPTER_HEADING_RE
                 NAMED_SECTION_RE = chapterizer.NAMED_SECTION_RE
-                # ---------------------------------------------------------
                 
                 # FIX: Change access from attribute (chapter.number) to dictionary key (chapter['chunk_id'])
                 for chapter in chapters:
@@ -246,6 +244,7 @@ def upload_file():
                     tasks.append(task)
                 os.remove(input_filepath)
             else:
+                # This executes when chapterizer.chapterize returns an empty list
                 flash(f"Could not split '{original_filename}' into chapters. Processing as a single file.", "warning")
                 # For single-file books, the original filename should start with 01
                 single_file_name = f"01 - {Path(original_filename).stem}.txt"
@@ -260,7 +259,7 @@ def upload_file():
     voices = get_piper_voices()
     return render_template('index.html', voices=voices)
 
-# ... (rest of app.py remains unchanged) ...
+# ... (rest of app.py is unchanged) ...
 @app.route('/files')
 def list_files():
     file_map = {}
@@ -441,7 +440,7 @@ def jobs_page():
             except Exception as e:
                 app.logger.error(f"Could not get queue length from Redis: {e}")
     except Exception as e:
-        app.logger.error(f"Could not inspect Celery/Redis: {e}")
+        app.logger.error(f"Could could not inspect Celery/Redis: {e}")
         flash("Could not connect to the Celery worker or Redis.", "error")
     return render_template('jobs.html', running_jobs=running_jobs, waiting_jobs=queued_jobs, unassigned_job_count=unassigned_job_count)
 
@@ -538,23 +537,53 @@ def debug_page():
     voices = get_piper_voices()
     normalized_output = ""
     original_text = ""
-    log_content = "Log file not found."
     log_file = os.path.join(app.config['GENERATED_FOLDER'], 'app.log')
+    
+    # Default is 'info'
+    current_debug_level = session.get("debug_level", "info").lower()
 
     if request.method == 'POST':
-        original_text = request.form.get('text_to_normalize', '')
-        if original_text:
-            normalized_output = normalize_text(original_text)
-    
+        if 'debug_level' in request.form:
+             # FIX: Save the new debug level to the session 
+             new_level = request.form.get("debug_level", "info").lower()
+             session["debug_level"] = new_level
+             current_debug_level = new_level
+             flash(f"Logging level set to '{current_debug_level}'. Processing new files will use this level.", "success")
+             return redirect(url_for('debug_page'))
+        
+        if 'text_to_normalize' in request.form:
+             original_text = request.form.get('text_to_normalize', '')
+             if original_text:
+                 normalized_output = normalize_text(original_text)
+
+    # Log reader logic unchanged
     try:
-        # FIX: Added encoding='utf-8' for robust file reading
+        # Determine log level filter based on the submitted level for display clarity
+        log_level_map = {'off': logging.WARNING, 'info': logging.INFO, 'debug': logging.DEBUG, 'trace': logging.DEBUG}
+        max_level = log_level_map.get(current_debug_level, logging.INFO)
+
         with open(log_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-            log_content = "".join(lines[-100:])
+            
+            filtered_lines = []
+            for line in lines:
+                is_debug_line = any(level in line for level in ['DEBUG', 'WARNING', 'ERROR'])
+                is_info_line = 'INFO' in line
+                
+                if (max_level <= logging.INFO and (is_debug_line or is_info_line)) or \
+                   (max_level == logging.WARNING and ('WARNING' in line or 'ERROR' in line)):
+                    filtered_lines.append(line)
+
+            log_content = "".join(filtered_lines[-500:]) # Show last 500 lines of filtered content
+            
     except FileNotFoundError:
         app.logger.warning(f"Log file not found at {log_file} for debug page.")
+    except Exception as e:
+        log_content = f"Error reading log file: {e}"
 
-    return render_template('debug.html', voices=voices, original_text=original_text, normalized_output=normalized_output, log_content=log_content)
+
+    return render_template('debug.html', voices=voices, original_text=original_text, normalized_output=normalized_output, log_content=log_content, current_debug_level=current_debug_level)
 
 if __name__ == '__main__':
+    # NOTE: SECRET_KEY is required for sessions to work, which is needed for debug_level persistence
     app.run(host='0.0.0.0', port=5000, debug=True)
