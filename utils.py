@@ -55,7 +55,6 @@ def get_piper_voices():
         current_app.logger.error(f"Could not fetch voices from Hugging Face Hub: {e}")
         return list_available_voices()
 
-# Function logic re-integrated from app_old.py, adapted to take redis_client
 def ensure_voice_available(voice_name, redis_client):
     all_voices = get_piper_voices()
     voice_info = next((v for v in all_voices if v['id'] == voice_name), None)
@@ -80,7 +79,6 @@ def ensure_voice_available(voice_name, redis_client):
         wait_start_time = time.time()
         while time.time() - wait_start_time < 120:
             if redis_client:
-                # FIX: Use 60s timeout as in app_old.py
                 lock_acquired = redis_client.set(lock_key, "1", nx=True, ex=60)
             
             if lock_acquired:
@@ -145,7 +143,6 @@ def tag_mp3_file(filepath, metadata, cover_image_path=None, voice_name=None):
     except Exception as e:
         current_app.logger.error(f"Failed to tag {filepath}: {e}")
 
-# Re-integrated from app_old.py
 def parse_metadata_from_text(text_content):
     parsed_meta = {}
     search_area = text_content[:4000]
@@ -171,7 +168,6 @@ def parse_metadata_from_text(text_content):
         parsed_meta['title'] = best_title
     return parsed_meta
 
-# Re-integrated from app_old.py
 def extract_text_and_metadata(filepath):
     p_filepath = Path(filepath)
     extension = p_filepath.suffix.lower()
@@ -219,36 +215,66 @@ def extract_text_and_metadata(filepath):
     if not metadata.get('author'): metadata['author'] = 'Unknown'
     return text, metadata
 
-# Re-integrated from app_old.py
 def fetch_enhanced_metadata(title, author):
     metadata = {
         'title': title, 'subtitle': None, 'author': author,
         'publisher': None, 'published_date': None, 'cover_url': ''
     }
-    if not title or title == "Unknown": return metadata
+    
+    # FIX: Use a stripped-down title for the API query to prevent misidentification,
+    # but prioritize the existing, locally extracted title/author.
+    if not title or title == "Unknown": 
+        return metadata
+
+    # Use only the main title part for the query (e.g., strip subtitle/honor parts)
+    query_title = title.split(':')[0].strip().split(' - In Honor')[0].strip()
+
+    # If the original title is already clean, the query title remains the same.
+    if not query_title:
+        query_title = title 
+        
     try:
-        query_title = title.split(':')[0].strip()
         query = f"intitle:{query_title}"
         if author and author != 'Unknown': query += f"+inauthor:{author}"
+        # Request only 1 result to keep it fast
         response = requests.get(f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=1")
         response.raise_for_status()
         data = response.json()
+        
         if data.get('totalItems', 0) > 0:
             book_info = data['items'][0]['volumeInfo']
-            metadata.update({
-                'title': book_info.get('title', title),
-                'subtitle': book_info.get('subtitle'),
-                'author': ", ".join(book_info.get('authors', [author])),
-                'publisher': book_info.get('publisher'),
-                'published_date': book_info.get('publishedDate'),
-                'cover_url': book_info.get('imageLinks', {}).get('thumbnail', '')
-            })
-            current_app.logger.info(f"Google Books API found enhanced metadata for '{title}'")
+            
+            # CRITICAL FIX: DO NOT overwrite locally extracted title/author.
+            # Only fetch the cover URL, and potentially subtitle/publisher.
+            
+            # Overwrite fields only if they are genuinely enhanced AND the title wasn't misidentified.
+            # We don't overwrite Title/Author but use the API to fill in details.
+            
+            # Check if the API title is reasonably close to the title we used in the query.
+            api_title = book_info.get('title', '')
+            
+            # If the API returns a title vastly different from our input, it's likely wrong.
+            if _similar(query_title, api_title) > 0.6 or not api_title:
+                 # Update only the secondary fields and cover URL
+                 metadata.update({
+                    'subtitle': book_info.get('subtitle'),
+                    'publisher': book_info.get('publisher'),
+                    'published_date': book_info.get('publishedDate'),
+                    'cover_url': book_info.get('imageLinks', {}).get('thumbnail', '')
+                 })
+                 # If the API provided a better Author, use it
+                 api_authors = book_info.get('authors', [])
+                 if api_authors:
+                     metadata['author'] = ", ".join(api_authors)
+                     
+                 current_app.logger.info(f"Google Books API found enhanced cover/details for '{title}'")
+            else:
+                 current_app.logger.warning(f"Google Books API returned a divergent title ('{api_title}') for query ('{query_title}'). Skipping metadata update.")
+            
     except requests.RequestException as e:
         current_app.logger.error(f"Google Books API request failed: {e}")
     return metadata
 
-# Re-integrated from app_old.py
 def list_available_voices():
     voices = []
     voice_dir = Path(VOICES_FOLDER)
@@ -257,13 +283,11 @@ def list_available_voices():
             voices.append({"id": voice_file.name, "name": voice_file.stem})
     return sorted(voices, key=lambda v: v['name'])
 
-# Re-integrated from app_old.py
 def clean_filename_part(name_part):
     s_name = re.sub(r'[^\w\s-]', '', name_part)
     s_name = re.sub(r'[-\s]+', ' ', s_name).strip()
     return s_name[:40]
 
-# Re-integrated from app_old.py
 def create_title_page_text(metadata):
     parts = []
     title_parts = []
@@ -277,7 +301,6 @@ def create_title_page_text(metadata):
         if year_match: parts.append(f"Copyright {year_match.group(0)}.")
     return " ".join(parts) + "\n\n" if parts else ""
 
-# Re-integrated from app_old.py
 def create_generic_cover_image(title, author, save_path):
     try:
         # Use Image import from the top of the file
@@ -313,7 +336,6 @@ def create_generic_cover_image(title, author, save_path):
         current_app.logger.error(f"Failed to create generic cover image: {e}")
         return None
 
-# Re-integrated from app_old.py
 def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_author_from_form, cover_url, build_dir, task_self=None):
     def update_state(state, meta):
         if task_self:

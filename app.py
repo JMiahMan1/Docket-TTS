@@ -135,7 +135,6 @@ def upload_file():
             
             # Ensure voice is available before queuing the task
             try:
-                # FIX: Pass app.redis_client
                 ensure_voice_available(voice_name, app.redis_client)
             except Exception as e:
                 flash(f"Error checking voice model: {e}", 'error')
@@ -148,7 +147,6 @@ def upload_file():
 
         tasks = []
         
-        # --- FIX: Retrieve debug_level from session ---
         debug_level_str = session.get("debug_level", "info").lower() 
         
         files = request.files.getlist('file')
@@ -158,7 +156,6 @@ def upload_file():
         
         # Ensure voice is available before starting the main loop
         try:
-            # FIX: Pass app.redis_client
             ensure_voice_available(voice_name, app.redis_client)
         except Exception as e:
             flash(f"Error checking voice model: {e}", 'error')
@@ -191,7 +188,6 @@ def upload_file():
                 CHAPTER_HEADING_RE = chapterizer.CHAPTER_HEADING_RE
                 NAMED_SECTION_RE = chapterizer.NAMED_SECTION_RE
                 
-                # FIX: Change access from attribute (chapter.number) to dictionary key (chapter['chunk_id'])
                 for chapter in chapters:
                     
                     # --- FILENAME CLEANUP LOGIC START: FINAL REVISION ---
@@ -331,7 +327,6 @@ def reprocess_text():
     input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
     Path(input_filepath).write_text(edited_text, encoding='utf-8')
     
-    # --- FILENAME FIX: Preserve chapter number and add _edited suffix ---
     original_stem = Path(original_txt_filename).stem.replace('_edited', '')
     new_stem = original_stem + "_edited"
     new_original_filename = f"{new_stem}.txt"
@@ -339,7 +334,6 @@ def reprocess_text():
     book_author = 'Unknown'
 
     try:
-        # FIX: Pass app.redis_client
         ensure_voice_available(voice_name, app.redis_client)
     except Exception as e:
         flash(f"Error checking voice model: {e}", 'error')
@@ -352,7 +346,8 @@ def reprocess_text():
         book_title,
         book_author,
         voice_name,
-        speed_rate
+        speed_rate,
+        is_reprocess=True 
     )
 
     flash("Successfully queued edited text for reprocessing.", "success")
@@ -411,10 +406,8 @@ def jobs_page():
                 original_filename = "N/A"
                 if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 3:
                     if 'process_chapter_task' in task.get('name', ''):
-                         # --- FIX: Use the logical chapter title and sequential number for clarity ---
                          chapter_title = task_args[2].get('title', f"Ch. {task_args[2]['number']}")
                          book_title = task_args[1].get('title', 'Book')
-                         # New format: [Book Title] - [Chapter Title (Part X)] (ID: Y)
                          original_filename = f"{book_title} - {chapter_title} (ID: {task_args[2]['number']})"
                     else:
                          original_filename = Path(task_args[1]).name
@@ -425,7 +418,6 @@ def jobs_page():
                 original_filename = "N/A"
                 if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 3:
                     if 'process_chapter_task' in task.get('name', ''):
-                         # --- FIX: Use the logical chapter title and sequential number for clarity ---
                          chapter_title = task_args[2].get('title', f"Ch. {task_args[2]['number']}")
                          book_title = task_args[1].get('title', 'Book')
                          # New format: [Book Title] - [Chapter Title (Part X)] (ID: Y)
@@ -433,7 +425,6 @@ def jobs_page():
                     else:
                          original_filename = Path(task_args[1]).name
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
-        # FIX: Access redis_client from app context
         if app.redis_client:
             try:
                 unassigned_job_count = app.redis_client.llen('celery')
@@ -457,7 +448,6 @@ def cancel_job(task_id):
 @app.route('/delete-bulk', methods=['POST'])
 def delete_bulk():
     app.logger.info(f"Received delete request. Form data: {request.form}")
-    # FIX: We now expect the form to send full, exact filenames (audio)
     full_filenames_to_delete = set(request.form.getlist('files_to_delete'))
     app.logger.info(f"Full filenames to delete from form (expected audio files): {full_filenames_to_delete}")
     
@@ -506,7 +496,6 @@ def speak_sample(voice_name):
     speed_rate = request.args.get('speed', '1.0')
 
     try:
-        # FIX: Pass app.redis_client
         full_voice_path = ensure_voice_available(voice_name, app.redis_client)
     except Exception as e:
         return f"Error preparing voice sample: {e}", 500
@@ -560,7 +549,6 @@ def debug_page():
 
     if request.method == 'POST':
         if 'debug_level' in request.form:
-             # FIX: Save the new debug level to the session 
              new_level = request.form.get("debug_level", "info").lower()
              session["debug_level"] = new_level
              current_debug_level = new_level
