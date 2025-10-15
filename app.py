@@ -31,8 +31,8 @@ from logging.handlers import RotatingFileHandler
 from difflib import SequenceMatcher
 
 from extensions import celery # Use the imported celery instance
-from tts_service import TTSService, normalize_text
-import text_cleaner
+from tts_service import TTSService, clean_and_normalize_text as normalize_text # NOTE: Changed to import the unified function
+# import text_cleaner # <--- REMOVED: This module was merged into tts_service.py
 import chapterizer # Primary import
 from chapterizer import CHAPTER_HEADING_RE, NAMED_SECTION_RE 
 # This import is now safe because chapterizer.py is defined correctly.
@@ -259,7 +259,7 @@ def upload_file():
     voices = get_piper_voices()
     return render_template('index.html', voices=voices)
 
-# ... (rest of app.py is unchanged) ...
+# ... (rest of app.py is unchanged until delete_bulk) ...
 @app.route('/files')
 def list_files():
     file_map = {}
@@ -457,31 +457,47 @@ def cancel_job(task_id):
 @app.route('/delete-bulk', methods=['POST'])
 def delete_bulk():
     app.logger.info(f"Received delete request. Form data: {request.form}")
-    basenames_to_delete = set(request.form.getlist('files_to_delete'))
-    app.logger.info(f"Basenames to delete from form: {basenames_to_delete}")
+    # FIX: We now expect the form to send full, exact filenames (audio)
+    full_filenames_to_delete = set(request.form.getlist('files_to_delete'))
+    app.logger.info(f"Full filenames to delete from form (expected audio files): {full_filenames_to_delete}")
     
     deleted_count = 0
-    if not basenames_to_delete:
+    if not full_filenames_to_delete:
         flash("No files selected for deletion.", "warning")
         app.logger.warning("files_to_delete was empty, no files will be deleted.")
         return redirect(url_for('list_files'))
         
-    for base_name in basenames_to_delete:
-        safe_base_name = secure_filename(base_name)
-        app.logger.info(f"Processing base_name: '{base_name}', sanitized to: '{safe_base_name}'")
+    for audio_filename in full_filenames_to_delete:
+        safe_audio_filename = secure_filename(audio_filename)
+        audio_path = Path(app.config['GENERATED_FOLDER']) / safe_audio_filename
         
-        files_found = list(Path(app.config['GENERATED_FOLDER']).glob(f"{safe_base_name}*.*"))
-        app.logger.info(f"Glob pattern '{safe_base_name}*.*' found {len(files_found)} files: {files_found}")
+        # Determine the corresponding text filename/path
+        if audio_path.suffix in ['.mp3', '.m4b']:
+            # The corresponding text file has the same stem but a .txt extension.
+            text_path = audio_path.with_suffix('.txt')
+        else:
+            app.logger.warning(f"Skipping file {safe_audio_filename}: not a recognized audio format (.mp3 or .m4b).")
+            continue
 
-        for f in files_found:
+        # 1. Delete the exact audio file
+        if audio_path.exists():
             try:
-                f.unlink()
-                app.logger.info(f"Successfully deleted {f}")
+                audio_path.unlink()
+                app.logger.info(f"Successfully deleted audio file: {audio_path.name}")
                 deleted_count += 1
             except OSError as e:
-                app.logger.error(f"Error deleting file {f}: {e}")
+                app.logger.error(f"Error deleting audio file {audio_path.name}: {e}")
+
+        # 2. Delete the associated text file
+        if text_path.exists():
+            try:
+                text_path.unlink()
+                app.logger.info(f"Successfully deleted associated text file: {text_path.name}")
+                # Note: deleted_count tracks logical items (audio files)
+            except OSError as e:
+                app.logger.error(f"Error deleting text file {text_path.name}: {e}")
                 
-    flash(f"Successfully deleted {deleted_count} file(s).", "success")
+    flash(f"Successfully deleted {deleted_count} logical item(s) (audio + text).", "success")
     return redirect(url_for('list_files'))
 
 @app.route('/speak_sample/<voice_name>')

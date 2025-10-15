@@ -14,14 +14,14 @@ import warnings
 import shutil
 import subprocess
 from bs4 import BeautifulSoup, Tag, XMLParsedAsHTMLWarning
-from ebooklib import epub
+from ebooklib import epub, ITEM_DOCUMENT
 from os import environ
 
 # DOCX
 import docx
 
 # PDF
-import fitz  # PyMuPDF
+import fitz # PyMuPDF
 
 # Suppress EPUB parsing warnings
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
@@ -40,20 +40,20 @@ logger.setLevel(logging.INFO)
 # Configuration
 # ---------------------------------------------------------
 DEFAULT_WORD_LIMIT = 8000
-MIN_WORD_COUNT = 50 
+MIN_WORD_COUNT = 50
 CONVERTED_EPUB_DIR = "/tmp/converted_epub"
 
 # --- FINAL KEEP KEYWORDS (Structural sections only) ---
 KEEP_TITLE_KEYWORDS = [
-    r'\btitle\s*page\b', r'\bpreface\b', r'\bforeword\b', r'\bintroduction\b', 
-    r'\bprologue\b', r'\bepilogue\b', r'\bchapter\b', r'\bpart\b', r'\bbook\b', 
+    r'\btitle\s*page\b', r'\bpreface\b', r'\bforeword\b', r'\bintroduction\b',
+    r'\bprologue\b', r'\bepilogue\b', r'\bchapter\b', r'\bpart\b', r'\bbook\b',
 ]
 
 DISALLOWED_SECTION_PATTERNS = [
-    r'\btable\s+of\s+contents\b', r'\bcontents\b', r'\bappendix\b', r'\breferences\b', 
-    r'\bbibliography\b', r'\bindex\b', r'\bcopyright\b', r'\bpermissions\b', 
-    r'\bglossary\b', r'\backnowledg', r'\bcolophon\b', r'\bdedication\b', 
-    r'\babout\s+the\s+(author|publisher)\b', 
+    r'\btable\s+of\s+contents\b', r'\bcontents\b', r'\bappendix\b', r'\breferences\b',
+    r'\bbibliography\b', r'\bindex\b', r'\bcopyright\b', r'\bpermissions\b',
+    r'\bglossary\b', r'\backnowledg', r'\bcolophon\b', r'\bdedication\b',
+    r'\babout\s+the\s+(author|publisher)\b',
 ]
 
 KEEP_RE = re.compile('|'.join(KEEP_TITLE_KEYWORDS), re.IGNORECASE)
@@ -61,7 +61,7 @@ DISALLOWED_RE = re.compile('|'.join(DISALLOWED_SECTION_PATTERNS), re.IGNORECASE)
 
 # --- REVISED CHAPTER HEADING REGEX (For confidence check and other file types) ---
 CHAPTER_HEADING_RE = re.compile(
-    r'^(?P<title>(chapter|chap|book|part)\b[\s\.\-:]*[0-9IVXLCDMivxlcdm]+(?:\b.*)?|' 
+    r'^(?P<title>(chapter|chap|book|part)\b[\s\.\-:]*[0-9IVXLCDMivxlcdm]+(?:\b.*)?|'
     r'(?:^|\n)\bchapter\s+[ivxlcdm0-9]+\b.*)',
     re.IGNORECASE | re.MULTILINE
 )
@@ -92,8 +92,8 @@ def _convert_epub_to_standard_html(epub_path: str, output_dir: str) -> Optional[
     try:
         subprocess.run(
             ["ebook-convert", epub_path, str(standard_epub_path)],
-            check=True, 
-            stdout=subprocess.PIPE, 
+            check=True,
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
         logger.info("Calibre standardization successful (EPUB -> EPUB).")
@@ -101,10 +101,10 @@ def _convert_epub_to_standard_html(epub_path: str, output_dir: str) -> Optional[
         book = epub.read_epub(str(standard_epub_path))
         
         full_html_parts = []
-        from ebooklib import ITEM_DOCUMENT 
+        # from ebooklib import ITEM_DOCUMENT # Already in module scope
         
         for item in book.get_items_of_type(ITEM_DOCUMENT):
-             full_html_parts.append(item.get_body_content().decode('utf-8', errors='ignore'))
+            full_html_parts.append(item.get_body_content().decode('utf-8', errors='ignore'))
         
         full_content_path.write_text('\n'.join(full_html_parts), encoding='utf-8')
         logger.info(f"Standardized HTML content aggregated to {full_content_path}")
@@ -228,15 +228,15 @@ def split_into_chunks(chapters: List[Dict], word_limit: int = DEFAULT_WORD_LIMIT
                 chunk_title = f"{title} (Part {local_chunk_id})"
                 
                 out.append({
-                    'title': chunk_title, 
-                    'chunk_id': global_chunk_id, 
+                    'title': chunk_title,
+                    'chunk_id': global_chunk_id,
                     'text': '\n\n'.join(buf).strip()
                 })
                 
                 logger.debug(f"  -> Chunk {global_chunk_id}: '{chunk_title}' ({count} words)")
                 
                 global_chunk_id += 1
-                local_chunk_id += 1 
+                local_chunk_id += 1
                 buf, count = [p], w
             else:
                 buf.append(p)
@@ -249,8 +249,8 @@ def split_into_chunks(chapters: List[Dict], word_limit: int = DEFAULT_WORD_LIMIT
                 chunk_title = title
             
             out.append({
-                'title': chunk_title, 
-                'chunk_id': global_chunk_id, 
+                'title': chunk_title,
+                'chunk_id': global_chunk_id,
                 'text': '\n\n'.join(buf).strip()
             })
             logger.debug(f"  -> Chunk {global_chunk_id}: '{chunk_title}' ({count} words)")
@@ -274,9 +274,29 @@ def _extract_epub(filepath: str) -> List[Tuple[str, str]]:
             html_content = standard_html_path.read_text(encoding='utf-8')
             soup = BeautifulSoup(html_content, 'lxml')
             
-            # Remove junk tags that Calibre might leave behind
-            for s in soup.select('nav, .nav, .footnote, script, style, header, footer, body > .calibre_toc'):
+            # --- FIX: Surgical Cleanup Logic START ---
+            
+            # 1. Elements to always decompose (nav, toc, script, style, calibre junk)
+            always_decompose_selectors = 'nav, .nav, .toc, .footnote, script, style, body > .calibre_toc'
+            for s in soup.select(always_decompose_selectors):
                 s.decompose()
+
+            # 2. Conditionally decompose header/footer: only remove if they don't contain a title.
+            # Get a list of all potential headings (h1, h2) before modifying the DOM.
+            potential_headings = soup.find_all(['h1', 'h2'])
+            
+            for selector in ['header', 'footer']:
+                for el in soup.select(selector):
+                    # Check if this element contains one of the potential headings
+                    contains_title = any(h.parent == el or h in el.descendants for h in potential_headings)
+                    
+                    # Only decompose if it does NOT contain a heading.
+                    if not contains_title:
+                        el.decompose()
+                    else:
+                        logger.debug(f"EPUB Cleanup: Preserving structural element <{el.name}> because it contains a heading.")
+            
+            # --- FIX: Surgical Cleanup Logic END ---
             
             chapters = []
             current_content_blocks = []
@@ -292,23 +312,24 @@ def _extract_epub(filepath: str) -> List[Tuple[str, str]]:
 
             # Iterate over structural tags in the standardized output
             content_div = soup.find('body') or soup
-            # Look for H1 (chapter break) and all content tags
+            # Look for H1/H2 (chapter break) and all content tags
             for element in content_div.find_all(['h1', 'h2', 'h3', 'p', 'div']):
                 text = clean_whitespace(element.get_text())
                 if not text:
                     continue
                 
-                if element.name == 'h1':
+                # Use H1/H2 for splitting after cleanup
+                if element.name in ['h1', 'h2']:
                     is_structural_heading = not DISALLOWED_RE.search(text)
 
                     if is_structural_heading:
                         finalize_section()
                         current_title = text
-                        logger.debug(f"Calibre Extraction: NEW H1 SECTION START: '{current_title}'")
+                        logger.debug(f"Calibre Extraction: NEW H1/H2 SECTION START: '{current_title}'")
                         current_content_blocks.append(text) 
                         continue
                 
-                if element.name in ['h2', 'h3', 'p', 'div']:
+                if element.name in ['h3', 'p', 'div']:
                     current_content_blocks.append(text)
             
             finalize_section() # Capture the last section
@@ -333,7 +354,7 @@ def _extract_epub(filepath: str) -> List[Tuple[str, str]]:
     
     logger.error("EPUB structural splitting FAILED. Processing as single file.")
     try:
-        from ebooklib import ITEM_DOCUMENT 
+        # from ebooklib import ITEM_DOCUMENT # Already in module scope
         book = epub.read_epub(filepath)
         full_text_parts = []
         for item in book.get_items_of_type(ITEM_DOCUMENT):
@@ -497,9 +518,9 @@ def chapterize(filepath: str, text_content: Optional[str] = None, debug_level: O
     
     # Convert debug level string to logging constant
     level_map = {
-        'off': logging.WARNING, 
-        'info': logging.INFO, 
-        'debug': logging.DEBUG, 
+        'off': logging.WARNING,
+        'info': logging.INFO,
+        'debug': logging.DEBUG,
         'trace': logging.DEBUG
     }
     log_level = level_map.get(level, logging.INFO)
@@ -529,8 +550,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # NOTE: CLI execution uses 'verbose' for max detail by default here
-    logger.setLevel(logging.DEBUG) 
+    logger.setLevel(logging.DEBUG)
     chunks = extract_book_sections(args.file, word_limit=args.word_limit, verbose=True)
     print(f"\nExtracted {len(chunks)} chunks\n")
-    for c in chunks[:3]:  # show first 3 chunks for preview
+    for c in chunks[:3]: # show first 3 chunks for preview
         print(f"[{c['chunk_id']}] {c['title']} — {len(c['text'].split())} words\n{c['text'][:500]}...\n")

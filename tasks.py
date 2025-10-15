@@ -7,6 +7,7 @@ from pathlib import Path
 from werkzeug.utils import secure_filename
 from flask import current_app 
 from celery import Task, group
+import logging # ADDED: Import logging module
 
 from extensions import celery
 from utils import (
@@ -14,8 +15,7 @@ from utils import (
     ensure_voice_available, clean_filename_part, tag_mp3_file, create_generic_cover_image,
     _create_audiobook_logic, allowed_file, parse_metadata_from_text,
 )
-from tts_service import TTSService, normalize_text
-import text_cleaner
+from tts_service import TTSService, clean_and_normalize_text 
 import chapterizer
 from bs4 import BeautifulSoup 
 import ebooklib
@@ -51,10 +51,18 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
         
         final_content = chapter_content
+        
+        # 1. Generate unnormalized title page text (if first chapter)
         if chapter_details.get("number") == 1:
             unnormalized_title_page = create_title_page_text(book_metadata)
-            normalized_title_page = normalize_text(unnormalized_title_page)
-            final_content = normalized_title_page + chapter_content
+            final_content = unnormalized_title_page + chapter_content
+            
+        # 2. Unify: Apply the full cleaning and normalization process
+        self.update_state(state='PROGRESS', meta={'status': f'Normalizing text for Ch. {chapter_details["number"]}...'})
+        
+        # FIX: Replace .level_name with safe method using logging module
+        logger_level_name = logging.getLevelName(current_app.logger.level)
+        normalized_content = clean_and_normalize_text(final_content, debug_level=logger_level_name.lower())
             
         s_book_title = clean_filename_part(book_metadata.get("title", "book"))
         s_chapter_title = clean_filename_part(chapter_details['title'])
@@ -65,7 +73,10 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         safe_output_filename = secure_filename(output_filename)
         output_filepath = generated_folder / safe_output_filename 
         
-        _, synthesized_text = tts.synthesize(final_content, str(output_filepath))
+        self.update_state(state='PROGRESS', meta={'status': f'Synthesizing audio for Ch. {chapter_details["number"]}...'})
+        
+        # 3. Synthesize the fully normalized text
+        _, synthesized_text = tts.synthesize(normalized_content, str(output_filepath), debug_level=logger_level_name.lower())
         
         metadata_title = chapter_details.get('original_title', chapter_details['title'])
         if part_info[1] > 1: metadata_title += f" (Part {part_info[0]} of {part_info[1]})"
@@ -108,7 +119,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         # FIX: Pass current_app.redis_client
         full_voice_path = ensure_voice_available(voice_name, current_app.redis_client)
         
-        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Reading, cleaning, and normalizing text...'})
+        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Reading and extracting text...'})
         
         text_content, _ = extract_text_and_metadata(input_filepath)
         if not text_content: 
@@ -123,13 +134,20 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
                     text_content += soup.get_text() + "\n\n"
         if not text_content: raise ValueError('Could not extract text from file for single-file processing.')
         
-        cleaned_text = text_cleaner.clean_text(text_content)
-        normalized_main_text = normalize_text(cleaned_text)
         enhanced_metadata = fetch_enhanced_metadata(book_title, book_author)
         unnormalized_title_page = create_title_page_text(enhanced_metadata)
-        normalized_title_page = normalize_text(unnormalized_title_page)
-        final_content_for_synthesis = normalized_title_page + normalized_main_text
-        self.update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Synthesizing audio...'})
+        
+        # 1. Prepare final unnormalized content (Title page + main text)
+        final_content_for_normalization = unnormalized_title_page + text_content
+        
+        # 2. Unify: Apply the full cleaning and normalization process
+        self.update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Cleaning and normalizing text...'})
+
+        # FIX: Replace .level_name with safe method using logging module
+        logger_level_name = logging.getLevelName(current_app.logger.level)
+        normalized_content = clean_and_normalize_text(final_content_for_normalization, debug_level=logger_level_name.lower())
+        
+        self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Synthesizing audio...'})
         
         base_name = Path(original_filename).stem.replace('01 - ', '') 
         output_filename = f"{base_name}.mp3"
@@ -137,7 +155,10 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         output_filepath = os.path.join(generated_folder, safe_output_filename) 
         
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
-        _, synthesized_text = tts.synthesize(final_content_for_synthesis, output_filepath)
+        # 3. Synthesize the fully normalized text
+        _, synthesized_text = tts.synthesize(normalized_content, output_filepath, debug_level=logger_level_name.lower())
+        
+        self.update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Tagging and Saving...'})
         
         cover_url = enhanced_metadata.get('cover_url', '')
         import uuid 
@@ -158,14 +179,13 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
             if create_generic_cover_image(enhanced_metadata.get("title"), enhanced_metadata.get("author"), temp_cover_path):
                 cover_path_to_use = temp_cover_path
         
-        self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Tagging and Saving...'})
         tag_mp3_file(
             output_filepath, 
             {'title': enhanced_metadata.get("title"), 'author': enhanced_metadata.get("author"), 'book_title': enhanced_metadata.get("title")}, 
             cover_image_path=cover_path_to_use, 
             voice_name=voice_name
         )
-        self.update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Saving text file...'})
+        
         text_filename = Path(output_filepath).with_suffix('.txt').name
         Path(os.path.join(generated_folder, text_filename)).write_text(synthesized_text, encoding="utf-8")
         

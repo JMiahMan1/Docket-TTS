@@ -9,7 +9,9 @@ from argostranslate import translate
 import argostranslate.package
 import threading
 import logging
-import os # Added for OSError check
+from collections import Counter
+from typing import Dict, Any, List, Tuple, Optional
+import os
 
 logger = logging.getLogger('werkzeug')
 
@@ -45,6 +47,188 @@ else:
 
 _inflect = inflect.engine()
 HEBREW_TO_ENGLISH = None
+
+# -------------------------------------------------------------------------
+# DOCUMENT CLEANUP LOGIC (from text_cleaner.py)
+# -------------------------------------------------------------------------
+
+DEFAULT_CLEANER_CONFIG = {
+    "section_markers": {
+        r"^\s*(Contents|Table of Contents)": (
+            r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\b",
+        ),
+        r"^\s*Praise for\b": (
+            r"^\s*(Contents|Table of Contents|Chapter|Part|Book|Introduction|Prologue|Preface|Appendix|One|1)\b",
+        ),
+        r"^\s*(Dedication|Foreword|Preface|Introduction)\b": (
+            r"^\s*(Chapter|Part|Book|One|1)\b",
+        ),
+        r"^\s*(Index|Bibliography|Works Cited|References|Glossary|About the Author|Author Bio)\b": (
+            None,
+        ),
+        r"^\s*(Copyright|Also by)\b": (
+            r"^\s*(Chapter|Part|Book|One|1)\b",
+        ),
+        r"^\s*(List of Figures|List of Tables|List of Illustrations)\b": (
+            r"^\s*(Chapter|Part|Book|Introduction|Prologue|Preface)\b",
+        ),
+    },
+    "paragraph_disallow_patterns": [
+        re.compile(
+            r"ISBN|Library of Congress|All rights reserved|Printed in the|copyright ©|www\..*\.com",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"^\s*(A division of|Published by|Manufactured in the United States of America)",
+            re.IGNORECASE,
+        ),
+        re.compile(r"\.{5,}"),  # dot leaders in ToC
+        re.compile(
+            r"^\s*\d+\.\s+.*(?:p\.|pp\.|ibid\.|(?:New York|Grand Rapids|London|Chicago):|\b(19|20)\d{2}\b)",
+            re.IGNORECASE,
+        ),
+    ],
+    "header_footer_config": {
+        "min_line_len": 3,
+        "max_line_len": 75,
+        "min_occurrence": 4,
+        "max_word_count": 10,
+    },
+}
+
+def _clean_document_text(text: str, config: Dict[str, Any] = None, debug_level: str = 'off') -> str:
+    """
+    Cleans text extracted from books or documents by removing non-narrative sections,
+    headers, footers, and boilerplate. (Merged from text_cleaner.py)
+    """
+    if config is None:
+        config = DEFAULT_CLEANER_CONFIG
+
+    if debug_level in ['debug', 'trace']:
+        logger.debug(f"Starting document text cleaning. Initial length: {len(text)} chars.")
+    
+    original_len = len(text)
+    cleaned_text = text
+
+    # --- Remove marked sections (Dedication, Index, etc.) ---
+    text_before_step = cleaned_text
+    for start_pattern, end_patterns in config["section_markers"].items():
+        try:
+            matches = list(
+                re.finditer(start_pattern, cleaned_text, re.IGNORECASE | re.MULTILINE)
+            )
+            for start_match in reversed(matches):
+                start_index = start_match.start()
+
+                if end_patterns is None or end_patterns == (None,):
+                    if debug_level in ['debug', 'trace']:
+                        logger.debug(f"Removing section '{start_match.group(0).strip()}' from index {start_index} to end.")
+                    if debug_level == 'trace':
+                        logger.debug(f"  > Trace: Removed content snippet: '{cleaned_text[start_index:][:100]}...'")
+                    cleaned_text = cleaned_text[:start_index]
+                    continue
+
+                end_index = -1
+                search_area = cleaned_text[start_match.end():]
+                for end_pattern in end_patterns:
+                    if not isinstance(end_pattern, str):
+                        continue
+                    end_match = re.search(end_pattern, search_area, re.IGNORECASE | re.MULTILINE)
+                    if end_match:
+                        end_index = start_match.end() + end_match.start()
+                        break
+
+                if end_index != -1:
+                    if debug_level in ['debug', 'trace']:
+                        logger.debug(f"Removing section '{start_match.group(0).strip()}' from index {start_index} to {end_index}.")
+                    if debug_level == 'trace':
+                        logger.debug(f"  > Trace: Removed content snippet: '{cleaned_text[start_index:end_index][:100]}...'")
+                    cleaned_text = cleaned_text[:start_index] + cleaned_text[end_index:]
+                else:
+                    if debug_level in ['debug', 'trace']:
+                        logger.debug(f"Removing section '{start_match.group(0).strip()}' from index {start_index} to end (no end marker found).")
+                    if debug_level == 'trace':
+                        logger.debug(f"  > Trace: Removed content snippet: '{cleaned_text[start_index:][:100]}...'")
+                    cleaned_text = cleaned_text[:start_index]
+
+        except Exception as e:
+            logger.error(f"Error processing section rule for '{start_pattern}': {e}")
+    
+    if debug_level == 'trace' and len(cleaned_text) != len(text_before_step):
+        logger.debug(f"  > Trace: Section removal reduced text by {len(text_before_step) - len(cleaned_text)} chars.")
+        text_before_step = cleaned_text
+
+    # --- Filter out disallowed paragraphs ---
+    paragraphs = cleaned_text.split("\n")
+    kept_paragraphs = []
+    removed_para_count = 0
+    for para in paragraphs:
+        if para.strip():
+            is_disallowed = any(
+                pattern.search(para) for pattern in config["paragraph_disallow_patterns"]
+            )
+            if not is_disallowed:
+                kept_paragraphs.append(para)
+            elif debug_level == 'trace':
+                logger.debug(f"  > Trace: Removing disallowed paragraph: '{para[:100]}...'")
+                removed_para_count += 1
+    
+    if debug_level in ['debug', 'trace'] and removed_para_count > 0:
+        logger.debug(f"Removed {removed_para_count} disallowed paragraphs.")
+    
+    cleaned_text = "\n".join(kept_paragraphs)
+    text_before_step = cleaned_text
+
+    # --- Detect and remove common headers/footers ---
+    h_config = config["header_footer_config"]
+    lines = cleaned_text.split("\n")
+
+    potential_headers = []
+    line_counts = Counter(line.strip() for line in lines if line.strip())
+    for line, count in line_counts.items():
+        line_len = len(line)
+        word_count = len(line.split())
+        is_just_number = line.isdigit() and count > 10
+        is_short_and_common = (
+            word_count <= h_config["max_word_count"]
+            and count >= h_config["min_occurrence"]
+        )
+        if (
+            (is_short_and_common or is_just_number)
+            and h_config["min_line_len"] <= line_len <= h_config["max_line_len"]
+            # FIX: Ensure we do NOT remove lines that start with Chapter/Part/Book
+            and not re.match(r"^\s*(chapter|part|book)\s+", line, re.IGNORECASE)
+            # FIX: Exclude short, title-case or all-caps headings from header/footer removal
+            and not re.match(r"^\s*[A-Z][a-zA-Z\s,:-]{2,}\s*$", line) 
+        ):
+            potential_headers.append(re.escape(line))
+
+    if potential_headers:
+        if debug_level in ['debug', 'trace']:
+            logger.debug(f"Found {len(potential_headers)} potential header/footer lines to remove.")
+        if debug_level == 'trace':
+            logger.debug(f"  > Trace: Header/footer candidates: {potential_headers[:5]}")
+        
+        header_pattern = re.compile(
+            r"^\s*(" + "|".join(potential_headers) + r")\s*$", re.MULTILINE
+        )
+        cleaned_text = header_pattern.sub("", cleaned_text)
+
+    # --- Remove single page markers like "Page 3" or "3" ---
+    cleaned_text = re.sub(r'^\s*Page\s*\d+\s*$', '', cleaned_text, flags=re.MULTILINE)
+    cleaned_text = re.sub(r'^\s*\d+\s*$', '', cleaned_text, flags=re.MULTILINE)
+
+    cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text)
+    
+    if debug_level in ['debug', 'trace']:
+        final_len = len(cleaned_text)
+        logger.debug(f"Document cleaning complete. Total characters removed: {original_len - final_len}.")
+
+    return cleaned_text.strip()
+
+# -------------------------------------------------------------------------
+# TRANSLATION AND TTS NORMALIZATION LOGIC
+# -------------------------------------------------------------------------
 
 def ensure_translation_models_are_loaded():
     global HEBREW_TO_ENGLISH
@@ -265,25 +449,46 @@ def number_replacer(match):
         return match.group(0)
 
     num_str = match.group(0).strip()
+    
+    # Placeholder for the year pronunciation
+    year_pronunciation = None
+    
     try:
         is_ordinal = any(num_str.lower().endswith(s) for s in ['st', 'nd', 'rd', 'th'])
+        
         if not is_ordinal and len(num_str) == 4 and num_str.isdigit():
             num_int = int(num_str)
+            
+            # Logic for 2000s (e.g., "two thousand ten" or "twenty ten")
             if 2000 <= num_int <= 2099:
-                if num_int < 2010: return _inflect.number_to_words(num_str).replace(" and ", " ")
-                else: return f"{_inflect.number_to_words(num_str[:2])} {_inflect.number_to_words(num_str[2:])}"
+                if num_int < 2010: 
+                    year_pronunciation = _inflect.number_to_words(num_str).replace(" and ", " ")
+                else: 
+                    year_pronunciation = f"{_inflect.number_to_words(num_str[:2])} {_inflect.number_to_words(num_str[2:])}"
+            
+            # Logic for 1100s-1900s (e.g., "nineteen sixty-three")
             elif 1100 <= num_int <= 1999:
                 first_part = _inflect.number_to_words(num_str[:2])
                 last_two_digits = num_str[2:]
+                
+                # Handle 'oh' years (e.g., 1905 -> 'nineteen oh five')
                 if '00' < last_two_digits < '10':
-                    return f"{first_part} oh {_inflect.number_to_words(last_two_digits[1])}"
+                    year_pronunciation = f"{first_part} oh {_inflect.number_to_words(last_two_digits[1])}"
                 else:
+                    # General two-part pronunciation (e.g., 1963 -> 'nineteen sixty-three')
                     second_part = _inflect.number_to_words(last_two_digits)
                     if second_part == "zero": second_part = "hundred"
-                    return f"{first_part} {second_part}"
+                    year_pronunciation = f"{first_part} {second_part}"
+        
+        if year_pronunciation:
+             return year_pronunciation
+             
+        # Fallback to general number-to-words for other numbers (e.g., 50, 1st, 1000)
         return _inflect.number_to_words(num_str)
-    except:
-        return num_str
+        
+    except Exception as e:
+        logger.warning(f"Error expanding number '{num_str}': {e}")
+        return num_str # Return original string on error
 
 def currency_replacer(match):
     num_str = match.group(1)
@@ -313,10 +518,10 @@ DICTIONARY_REGISTRY = {
     "archaic_words": ARCHAIC_WORDS
 }
 
-def normalize_text(text: str, debug_level: str = 'off') -> str:
-    """The main normalization function, driven by rules.yaml."""
+def _apply_tts_normalization_rules(text: str, debug_level: str = 'off') -> str:
+    """Applies the rules.yaml based linguistic normalization."""
     if debug_level in ['debug', 'trace']:
-        logger.debug(f"Starting normalization. Initial text length: {len(text)}")
+        logger.debug(f"Starting TTS normalization rules. Initial length: {len(text)}")
     
     ensure_translation_models_are_loaded()
     
@@ -363,8 +568,34 @@ def normalize_text(text: str, debug_level: str = 'off') -> str:
             logger.debug(f"  > Trace: Rule '{rule_name}' changed text length from {len(text_before)} to {len(text)}.")
 
     if debug_level in ['debug', 'trace']:
-        logger.debug(f"Finished normalization. Final text length: {len(text)}")
+        logger.debug(f"Finished TTS normalization rules. Final length: {len(text)}")
     return text.strip()
+
+def clean_and_normalize_text(text: str, debug_level: str = 'off') -> str:
+    """
+    Unified function to perform both document-level cleanup and TTS-specific normalization.
+    This function is the ONLY entry point for text processing before synthesis.
+    """
+    if debug_level in ['debug', 'trace']:
+        logger.debug(f"Starting unified clean_and_normalize_text. Initial length: {len(text)}")
+        
+    # 1. Document-level cleanup (remove boilerplate, headers, footers, etc.)
+    cleaned_text = _clean_document_text(text, debug_level=debug_level)
+    
+    # 2. TTS-specific linguistic normalization (expand numbers, scripture, etc. using rules.yaml)
+    normalized_text = _apply_tts_normalization_rules(cleaned_text, debug_level=debug_level)
+    
+    if debug_level in ['debug', 'trace']:
+        logger.debug(f"Finished unified clean_and_normalize_text. Final length: {len(normalized_text)}")
+        
+    return normalized_text
+
+def normalize_text(text: str, debug_level: str = 'off') -> str:
+    """
+    Backward-compatible API for the TTS normalization function.
+    Calls the unified function for consistency.
+    """
+    return clean_and_normalize_text(text, debug_level=debug_level)
 
 
 def _log_stream(stream, log_prefix):
@@ -389,7 +620,9 @@ class TTSService:
             raise FileNotFoundError(f"Voice model file not found at the provided path: {self.voice_path}")
 
     def synthesize(self, text: str, output_path: str, debug_level: str = 'off'):
-        synthesized_text = text
+        # NOTE: The text is now expected to be FULLY cleaned and normalized 
+        # BEFORE being passed to synthesize() by the calling task.
+        synthesized_text = text # Renamed from 'normalized_text' in old version
         piper_process = None
         ffmpeg_process = None
 

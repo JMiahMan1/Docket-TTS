@@ -60,7 +60,7 @@
                                         {% endif %}
                                     </td>
                                     <td data-utc-date="{{ file.date }}">Loading...</td>
-                                    <td><input class="form-check-input delete-checkbox" type="checkbox" name="files_to_delete" value="{{ file.base_name }}"></td>
+                                    <td><input class="form-check-input delete-checkbox" type="checkbox" name="files_to_delete" value="{{ file.audio_name }}"></td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
@@ -182,6 +182,7 @@
         });
 
         document.getElementById('submitAudiobook').addEventListener('click', () => {
+            // Disable delete checkboxes to prevent submission conflict
             document.querySelectorAll('input.delete-checkbox').forEach(cb => cb.disabled = true);
             mainForm.action = "{{ url_for('create_audiobook') }}";
             
@@ -210,7 +211,8 @@
                 alert('Please select at least one item to delete.');
                 return;
             }
-            if (confirm(`Are you sure you want to delete the selected item(s) and their associated files? This may delete entire books if chapters are selected.`)) {
+            if (confirm(`Are you sure you want to delete the selected item(s) and their associated files? This action is permanent and only deletes the files explicitly selected.`)) {
+                // Disable merge checkboxes to prevent submission conflict
                 document.querySelectorAll('input.file-checkbox').forEach(cb => cb.disabled = true);
                 mainForm.action = "{{ url_for('delete_bulk') }}";
                 mainForm.submit();
