@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup, Tag, XMLParsedAsHTMLWarning
 from ebooklib import epub, ITEM_DOCUMENT
 from os import environ
 from collections import Counter
+import json
 
 # DOCX
 import docx
@@ -38,11 +39,23 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 
 # ---------------------------------------------------------
-# Configuration
+# Configuration and Data Loading
 # ---------------------------------------------------------
 DEFAULT_WORD_LIMIT = 8000
 MIN_WORD_COUNT = 50
 CONVERTED_EPUB_DIR = "/tmp/converted_epub"
+NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
+
+# Load Bible Books List
+BIBLE_BOOK_NAMES = []
+if NORMALIZATION_PATH.exists():
+    try:
+        with open(NORMALIZATION_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            BIBLE_BOOK_NAMES = [name.upper() for name in data.get("bible_books", [])]
+            logger.info(f"Loaded {len(BIBLE_BOOK_NAMES)} Bible Book names for structural detection.")
+    except Exception as e:
+        logger.error(f"Failed to load Bible Book names from normalization.json: {e}")
 
 # --- FINAL KEEP KEYWORDS (Structural sections only) ---
 KEEP_TITLE_KEYWORDS = [
@@ -76,41 +89,55 @@ NAMED_SECTION_RE = re.compile(
 # Calibre Integration Helper
 # ---------------------------------------------------------
 def _convert_epub_to_standard_html(epub_path: str, output_dir: str) -> Optional[Path]:
-    """Uses Calibre's ebook-convert to standardize the EPUB to a single HTML file path."""
+    """
+    Uses Calibre's ebook-convert to standardize the EPUB and output OEB HTML files 
+    for robust processing.
+    """
     if shutil.which("ebook-convert") is None:
         logger.error("Calibre's 'ebook-convert' not found in PATH. EPUB splitting WILL FAIL.")
         return None
 
-    logger.info("Calibre's 'ebook-convert' found. Attempting pre-processing.")
+    logger.info("Calibre's 'ebook-convert' found. Attempting OEB pre-processing.")
 
     if Path(output_dir).exists():
         shutil.rmtree(output_dir)
     
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    standard_epub_path = Path(output_dir) / "standard.epub"
-    full_content_path = Path(output_dir) / "full_standardized_content.html"
+    
+    # FIX: Use the output directory name without an extension to trigger OEB output mode.
+    # Calibre will place the resulting HTML files inside this directory.
+    output_oeb_dir = Path(output_dir) / "oeb_output"
     
     try:
         subprocess.run(
-            ["ebook-convert", epub_path, str(standard_epub_path)],
+            [
+                "ebook-convert", 
+                epub_path, 
+                str(output_oeb_dir), # Output directory name (no extension) triggers OEB output
+                # Options for ensuring clean HTML structure
+                "--embed-all-fonts", 
+                "--no-default-epub-cover",
+            ],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
-        logger.info("Calibre standardization successful (EPUB -> EPUB).")
+        logger.info(f"Calibre OEB conversion successful. Files written to {output_oeb_dir}")
         
-        book = epub.read_epub(str(standard_epub_path))
+        # FIX: Aggregate the HTML content from the OEB directory.
+        # Calibre often names the main file index.html or a numerical HTML file.
+        html_files = sorted(list(output_oeb_dir.glob("*.html")) + list(output_oeb_dir.glob("*.htm")))
         
-        full_html_parts = []
-        # from ebooklib import ITEM_DOCUMENT # Already in module scope
+        if not html_files:
+            logger.error(f"Calibre OEB output directory {output_oeb_dir} contains no HTML files.")
+            shutil.rmtree(output_dir, ignore_errors=True)
+            return None
         
-        for item in book.get_items_of_type(ITEM_DOCUMENT):
-            full_html_parts.append(item.get_body_content().decode('utf-8', errors='ignore'))
+        # FIX: Return the single main file (typically the largest or first) for subsequent parsing.
+        # We assume the largest file holds the most content.
+        main_html_path = max(html_files, key=lambda p: p.stat().st_size)
         
-        full_content_path.write_text('\n'.join(full_html_parts), encoding='utf-8')
-        logger.info(f"Standardized HTML content aggregated to {full_content_path}")
-        
-        return full_content_path
+        return main_html_path
     
     except subprocess.CalledProcessError as e:
         logger.error(f"Calibre conversion failed: {e.stderr.decode('utf-8', errors='ignore')}")
@@ -274,6 +301,7 @@ def _extract_epub(filepath: str) -> List[Tuple[str, str]]:
     if standard_html_path:
         logger.info("Calibre standardization successful. Using H1 structural extraction.")
         try:
+            # FIX: Read the single, standardized HTML file directly
             html_content = standard_html_path.read_text(encoding='utf-8')
             soup = BeautifulSoup(html_content, 'lxml')
             
@@ -451,17 +479,41 @@ def _split_text_by_headings(text: str, repetitive_headings: list) -> List[Tuple[
         logger.debug("No repetitive headings found for splitting.")
         return []
 
-    # Choose the pattern that occurs most frequently in the text
-    # The counts here use a specific metric (number of times the pattern+number appears)
-    counts = Counter({k: len(re.findall(re.escape(k) + r'\s+([0-9IVXLCDM]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY).*', text, flags=re.IGNORECASE)) for k in repetitive_headings})
+    # Define known structural bases to prioritize
+    STRUCTURAL_BASES = ['DAY', 'WEEK', 'CHAPTER', 'PART', 'BOOK', 'SECTION']
     
-    # If counts is empty (no pattern found with a number), fall back immediately
-    if not counts:
+    # 1. Calculate weighted counts based on structural significance
+    weighted_counts = Counter()
+    number_pattern_regex = re.compile(r'\s+([0-9IVXLCDM]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY).*', flags=re.IGNORECASE)
+
+    for base in repetitive_headings:
+        # Determine if the base pattern is a strong structural keyword (e.g., DAY, PART, BOOK)
+        is_structural_keyword = base.upper() in STRUCTURAL_BASES
+        
+        # Count actual occurrences of the base followed by a number
+        occurrences = re.findall(re.escape(base) + number_pattern_regex.pattern, text, flags=re.IGNORECASE)
+        
+        score_multiplier = 1
+        if is_structural_keyword:
+            score_multiplier = 100 
+            
+        weighted_counts[base] += len(occurrences) * score_multiplier
+    
+    # 2. Select the best pattern
+    if not weighted_counts or all(v == 0 for v in weighted_counts.values()):
+        logger.debug("No numbered structural pattern found.")
         return []
 
-    main_pattern_base = max(counts, key=counts.get)
-    
-    # CRITICAL FIX: Broaden the regex to capture either digits, spelled-out numbers, or Roman numerals.
+    main_pattern_base = max(weighted_counts, key=weighted_counts.get)
+    best_score = weighted_counts[main_pattern_base]
+
+    # FIX: Reject high-scoring patterns that are likely running headers by checking if they are not structural bases
+    if best_score < 100 and main_pattern_base.upper() not in STRUCTURAL_BASES:
+        logger.warning(f"Rejecting repetitive pattern '{main_pattern_base}' (Score: {best_score}) as likely running head that beat the score threshold.")
+        return []
+
+
+    # --- SPLITTING LOGIC (Using the final chosen base) ---
     number_pattern = r'(\s+([0-9IVXLCDM]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY).*?)?'
     
     # The pattern should capture the base, followed by an optional number/word
