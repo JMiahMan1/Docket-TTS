@@ -7,7 +7,7 @@ from pathlib import Path
 from werkzeug.utils import secure_filename
 from flask import current_app 
 from celery import Task, group
-import logging # ADDED: Import logging module
+import logging 
 
 from extensions import celery
 from utils import (
@@ -24,6 +24,7 @@ import requests # Added for convert_to_speech_task
 class AppContextTask(Task):
     """A Celery Task that runs within the Flask application context."""
     def __call__(self, *args, **kwargs):
+        # FIX: Import the globally created Flask app instance from app.py
         from app import app as flask_app 
         
         # Line 30 in the traceback is here:
@@ -35,16 +36,17 @@ class AppContextTask(Task):
 celery.Task = AppContextTask
 
 @celery.task(bind=True)
-def process_chapter_task(self, chapter_content, book_metadata, chapter_details, voice_name, speed_rate):
+def process_chapter_task(self, chapter_content, book_metadata, chapter_details, voice_name, speed_rate, debug_level='info'):
     """Celery task for processing a single chapter (re-integrated from app_old.py)."""
     # Use current_app now that context is pushed
     generated_folder = Path(current_app.config['GENERATED_FOLDER'])
     output_filepath = None 
-    success = False
+    success = False # FIX: Initialize a success flag
     try:
         status_msg = f'Processing: {book_metadata.get("title", "Unknown")} - Ch. {chapter_details["number"]} "{chapter_details["title"][:20]}..."'
         self.update_state(state='PROGRESS', meta={'status': status_msg})
 
+        # FIX: Pass current_app.redis_client
         full_voice_path = ensure_voice_available(voice_name, current_app.redis_client)
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
         
@@ -58,8 +60,11 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         # 2. Unify: Apply the full cleaning and normalization process
         self.update_state(state='PROGRESS', meta={'status': f'Normalizing text for Ch. {chapter_details["number"]}...'})
         
-        logger_level_name = logging.getLevelName(current_app.logger.level)
-        normalized_content = clean_and_normalize_text(final_content, debug_level=logger_level_name.lower())
+        # DEBUG LOGGING: Confirm the resolved logging level in the worker
+        current_app.logger.debug(f"DEBUG: Celery task received debug level: {debug_level}")
+
+        # FIX: Pass the explicit debug_level (now guaranteed to be a string like 'debug' or 'info')
+        normalized_content = clean_and_normalize_text(final_content, debug_level=debug_level.lower())
             
         s_book_title = clean_filename_part(book_metadata.get("title", "book"))
         s_chapter_title = clean_filename_part(chapter_details['title'])
@@ -73,7 +78,7 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         self.update_state(state='PROGRESS', meta={'status': f'Synthesizing audio for Ch. {chapter_details["number"]}...'})
         
         # 3. Synthesize the fully normalized text
-        _, synthesized_text = tts.synthesize(normalized_content, str(output_filepath), debug_level=logger_level_name.lower())
+        _, synthesized_text = tts.synthesize(normalized_content, str(output_filepath), debug_level=debug_level.lower())
         
         metadata_title = chapter_details.get('original_title', chapter_details['title'])
         if part_info[1] > 1: metadata_title += f" (Part {part_info[0]} of {part_info[1]})"
@@ -87,7 +92,7 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         text_filename = output_filepath.with_suffix('.txt').name
         (generated_folder / text_filename).write_text(synthesized_text, encoding="utf-8")
         
-        success = True
+        success = True # FIX: Set success flag
         current_app.logger.info(f"Task {self.request.id} completed successfully. Output: {safe_output_filename}")
         return {'status': 'Success', 'filename': safe_output_filename, 'textfile': text_filename}
     
@@ -96,6 +101,7 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
         raise e
     finally:
+        # FIX: Only clean up if the task failed (not success) and the file was created.
         if not success and output_filepath and output_filepath.exists():
             try:
                 os.remove(output_filepath)
@@ -104,7 +110,7 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
                 current_app.logger.error(f"Failed to delete partial audio file {output_filepath.name} in cleanup: {e}")
 
 @celery.task(bind=True)
-def convert_to_speech_task(self, input_filepath, original_filename, book_title, book_author, voice_name=None, speed_rate='1.0', is_reprocess=False):
+def convert_to_speech_task(self, input_filepath, original_filename, book_title, book_author, voice_name=None, speed_rate='1.0', is_reprocess=False, debug_level='info'):
     """Celery task for single-file conversion (re-integrated from app_old.py)."""
     temp_cover_path = None
     generated_folder = current_app.config['GENERATED_FOLDER'] 
@@ -112,6 +118,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
     try:
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Checking voice model...'})
         
+        # FIX: Pass current_app.redis_client
         full_voice_path = ensure_voice_available(voice_name, current_app.redis_client)
         
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Reading and extracting text...'})
@@ -131,6 +138,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         
         enhanced_metadata = fetch_enhanced_metadata(book_title, book_author)
         
+        # FIX: Only prepend title page if this is NOT a reprocess/edit job.
         if is_reprocess:
             final_content_for_normalization = text_content
         else:
@@ -140,8 +148,11 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         # 2. Unify: Apply the full cleaning and normalization process
         self.update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Cleaning and normalizing text...'})
 
-        logger_level_name = logging.getLevelName(current_app.logger.level)
-        normalized_content = clean_and_normalize_text(final_content_for_normalization, debug_level=logger_level_name.lower())
+        # DEBUG LOGGING: Confirm the resolved logging level in the worker
+        current_app.logger.debug(f"DEBUG: Celery task received debug level: {debug_level}")
+        
+        # FIX: Pass the explicit debug_level
+        normalized_content = clean_and_normalize_text(final_content_for_normalization, debug_level=debug_level.lower())
         
         self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Synthesizing audio...'})
         
@@ -152,7 +163,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         
         tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
         # 3. Synthesize the fully normalized text
-        _, synthesized_text = tts.synthesize(normalized_content, output_filepath, debug_level=logger_level_name.lower())
+        _, synthesized_text = tts.synthesize(normalized_content, output_filepath, debug_level=debug_level.lower())
         
         self.update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Tagging and Saving...'})
         

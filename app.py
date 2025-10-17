@@ -32,7 +32,7 @@ from difflib import SequenceMatcher
 
 from extensions import celery # Use the imported celery instance
 from tts_service import TTSService, clean_and_normalize_text as normalize_text # NOTE: Changed to import the unified function
-# import text_cleaner # <--- REMOVED: This module was merged into tts_service.py
+# import text_cleaner # This module was merged into tts_service.py
 import chapterizer # Primary import
 from chapterizer import CHAPTER_HEADING_RE, NAMED_SECTION_RE 
 # This import is now safe because chapterizer.py is defined correctly.
@@ -44,7 +44,7 @@ from utils import (
 )
 from tasks import process_chapter_task, convert_to_speech_task, create_audiobook_task
 
-APP_VERSION = "0.0.4" # Revert to old version
+APP_VERSION = "0.0.4"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
@@ -81,9 +81,9 @@ def create_app():
         file_handler.setFormatter(logging.Formatter(
             '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
         ))
-        file_handler.setLevel(logging.INFO)
+        file_handler.setLevel(logging.DEBUG)
         app.logger.addHandler(file_handler)
-        app.logger.setLevel(logging.INFO)
+        app.logger.setLevel(logging.DEBUG) 
         app.logger.info('Docket TTS startup')
     except PermissionError:
         app.logger.warning("Could not configure file logger due to a permission error.")
@@ -118,6 +118,9 @@ def upload_file():
         speed_rate = request.form.get("speed_rate", "1.0")
         
         text_input = request.form.get('text_input')
+        
+        debug_level_str = session.get("debug_level", "info").lower() 
+        
         if text_input and text_input.strip():
             book_title = request.form.get('text_title')
             
@@ -141,13 +144,17 @@ def upload_file():
                 os.remove(input_filepath)
                 return redirect(request.url)
             
-            task = convert_to_speech_task.delay(input_filepath, original_filename, book_title, book_author, voice_name, speed_rate)
+            task = convert_to_speech_task.delay(
+                input_filepath, original_filename, book_title, book_author, 
+                voice_name, speed_rate,
+                debug_level=debug_level_str
+            )
             
             return render_template('result.html', task_id=task.id)
 
         tasks = []
         
-        debug_level_str = session.get("debug_level", "info").lower() 
+        # debug_level_str already retrieved above
         
         files = request.files.getlist('file')
         if not files or all(f.filename == '' for f in files):
@@ -173,7 +180,15 @@ def upload_file():
 
             text_content, metadata = extract_text_and_metadata(input_filepath)
             
+            # --- DEBUG LOGGING START ---
+            app.logger.debug(f"DEBUG: Metadata BEFORE enhancement: Title='{metadata.get('title')}', Author='{metadata.get('author')}'")
+            # --- DEBUG LOGGING END ---
+
             enhanced_metadata = fetch_enhanced_metadata(metadata.get('title'), metadata.get('author'))
+            
+            # --- DEBUG LOGGING START ---
+            app.logger.debug(f"DEBUG: Metadata AFTER enhancement: Title='{enhanced_metadata.get('title')}', Author='{enhanced_metadata.get('author')}'")
+            # --- DEBUG LOGGING END ---
 
             app.logger.info(f"Processing '{original_filename}'.")
             
@@ -236,7 +251,11 @@ def upload_file():
                         'part_info': (1, 1) 
                     }
                     # The text is now in chapter['text']
-                    task = process_chapter_task.delay(chapter['text'], enhanced_metadata, chapter_details, voice_name, speed_rate)
+                    task = process_chapter_task.delay(
+                        chapter['text'], enhanced_metadata, chapter_details, 
+                        voice_name, speed_rate,
+                        debug_level=debug_level_str
+                    )
                     tasks.append(task)
                 os.remove(input_filepath)
             else:
@@ -244,7 +263,11 @@ def upload_file():
                 flash(f"Could not split '{original_filename}' into chapters. Processing as a single file.", "warning")
                 # For single-file books, the original filename should start with 01
                 single_file_name = f"01 - {Path(original_filename).stem}.txt"
-                task = convert_to_speech_task.delay(input_filepath, single_file_name, enhanced_metadata.get('title'), enhanced_metadata.get('author'), voice_name, speed_rate)
+                task = convert_to_speech_task.delay(
+                    input_filepath, single_file_name, enhanced_metadata.get('title'), 
+                    enhanced_metadata.get('author'), voice_name, speed_rate,
+                    debug_level=debug_level_str
+                )
                 tasks.append(task)
         if tasks:
             flash(f'Successfully queued {len(tasks)} job(s) for processing.', 'success')
@@ -255,7 +278,6 @@ def upload_file():
     voices = get_piper_voices()
     return render_template('index.html', voices=voices)
 
-# ... (rest of app.py is unchanged until delete_bulk) ...
 @app.route('/files')
 def list_files():
     file_map = {}
@@ -323,6 +345,9 @@ def reprocess_text():
         flash("Missing data for reprocessing. Please try again.", "error")
         return redirect(url_for('list_files'))
 
+    # Retrieve debug level from session before spawning task
+    debug_level_str = session.get("debug_level", "info").lower()
+    
     unique_internal_filename = f"{uuid.uuid4().hex}_edited.txt"
     input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
     Path(input_filepath).write_text(edited_text, encoding='utf-8')
@@ -347,7 +372,8 @@ def reprocess_text():
         book_author,
         voice_name,
         speed_rate,
-        is_reprocess=True 
+        is_reprocess=True,
+        debug_level=debug_level_str
     )
 
     flash("Successfully queued edited text for reprocessing.", "success")
@@ -408,6 +434,7 @@ def jobs_page():
                     if 'process_chapter_task' in task.get('name', ''):
                          chapter_title = task_args[2].get('title', f"Ch. {task_args[2]['number']}")
                          book_title = task_args[1].get('title', 'Book')
+                         # New format: [Book Title] - [Chapter Title (Part X)] (ID: Y)
                          original_filename = f"{book_title} - {chapter_title} (ID: {task_args[2]['number']})"
                     else:
                          original_filename = Path(task_args[1]).name
@@ -571,11 +598,22 @@ def debug_page():
             
             filtered_lines = []
             for line in lines:
-                is_debug_line = any(level in line for level in ['DEBUG', 'WARNING', 'ERROR'])
+                # Use logging.getLevelName(level_int) to check the log line level string
+                is_debug_line = any(level_str in line for level_str in ['DEBUG', 'WARNING', 'ERROR'])
                 is_info_line = 'INFO' in line
                 
-                if (max_level <= logging.INFO and (is_debug_line or is_info_line)) or \
-                   (max_level == logging.WARNING and ('WARNING' in line or 'ERROR' in line)):
+                # Check if the line's level is greater than or equal to the minimum display level (max_level)
+                if max_level <= logging.INFO and (is_debug_line or is_info_line):
+                    # We check the actual level string for more granular control if max_level is DEBUG or TRACE
+                    if max_level <= logging.DEBUG and ('DEBUG' in line or 'TRACE' in line):
+                        filtered_lines.append(line)
+                    elif max_level <= logging.INFO and 'INFO' in line and not is_debug_line:
+                         filtered_lines.append(line)
+                    elif 'WARNING' in line or 'ERROR' in line:
+                         filtered_lines.append(line)
+                         
+                # Fallback check for critical errors
+                elif 'ERROR' in line or 'CRITICAL' in line:
                     filtered_lines.append(line)
 
             log_content = "".join(filtered_lines[-500:]) # Show last 500 lines of filtered content

@@ -312,7 +312,8 @@ def _extract_epub(filepath: str) -> List[Tuple[str, str]]:
 
             # Iterate over structural tags in the standardized output
             content_div = soup.find('body') or soup
-            # Look for H1/H2 (chapter break) and all content tags
+            
+            # REVISED: Use H1/H2 to split, and ensure the H1/H2 text IS included in the new section's content block.
             for element in content_div.find_all(['h1', 'h2', 'h3', 'p', 'div']):
                 text = clean_whitespace(element.get_text())
                 if not text:
@@ -326,11 +327,12 @@ def _extract_epub(filepath: str) -> List[Tuple[str, str]]:
                         finalize_section()
                         current_title = text
                         logger.debug(f"Calibre Extraction: NEW H1/H2 SECTION START: '{current_title}'")
+                        # CRITICAL FIX: The heading text must be the FIRST line of the content block
                         current_content_blocks.append(text) 
                         continue
                 
-                if element.name in ['h3', 'p', 'div']:
-                    current_content_blocks.append(text)
+                # Include all other text content (H3, P, DIV) in the current block
+                current_content_blocks.append(text)
             
             finalize_section() # Capture the last section
             
@@ -352,7 +354,7 @@ def _extract_epub(filepath: str) -> List[Tuple[str, str]]:
     
     # 2. DEFAULT EPUBLIB FALLBACK (Only executes if Calibre failed or was not available)
     
-    logger.error("EPUB structural splitting FAILED. Processing as single file.")
+    logger.error("EPUB structural splitting FAILED. Processing as single file. Using fallback content.")
     try:
         # from ebooklib import ITEM_DOCUMENT # Already in module scope
         book = epub.read_epub(filepath)
