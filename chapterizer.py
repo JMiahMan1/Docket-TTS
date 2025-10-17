@@ -104,8 +104,7 @@ def _convert_epub_to_standard_html(epub_path: str, output_dir: str) -> Optional[
     
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     
-    # FIX: Use the output directory name without an extension to trigger OEB output mode.
-    # Calibre will place the resulting HTML files inside this directory.
+    # Use the output directory name without an extension to trigger OEB output mode.
     output_oeb_dir = Path(output_dir) / "oeb_output"
     
     try:
@@ -124,8 +123,7 @@ def _convert_epub_to_standard_html(epub_path: str, output_dir: str) -> Optional[
         )
         logger.info(f"Calibre OEB conversion successful. Files written to {output_oeb_dir}")
         
-        # FIX: Aggregate the HTML content from the OEB directory.
-        # Calibre often names the main file index.html or a numerical HTML file.
+        # Aggregate the HTML content from the OEB directory.
         html_files = sorted(list(output_oeb_dir.glob("*.html")) + list(output_oeb_dir.glob("*.htm")))
         
         if not html_files:
@@ -133,8 +131,7 @@ def _convert_epub_to_standard_html(epub_path: str, output_dir: str) -> Optional[
             shutil.rmtree(output_dir, ignore_errors=True)
             return None
         
-        # FIX: Return the single main file (typically the largest or first) for subsequent parsing.
-        # We assume the largest file holds the most content.
+        # Return the single main file (typically the largest or first) for subsequent parsing.
         main_html_path = max(html_files, key=lambda p: p.stat().st_size)
         
         return main_html_path
@@ -164,7 +161,7 @@ def clean_whitespace(text: str) -> str:
 
 def remove_footnote_markers(text: str) -> str:
     t = re.sub(r'\[\d+\]', '', text)
-    t = re.sub(r'\s*\(\d+\)', '', text)
+    t = re.sub(r'\s*\(\d+\)', '', t)
     t = re.sub(r'(?<=\D)[\u00B9\u00B2\u00B3\u2070-\u207F]+', '', t)
     t = re.sub(r'\n\s*\d+\s*\n', '\n\n', t)
     return t
@@ -301,7 +298,7 @@ def _extract_epub(filepath: str) -> List[Tuple[str, str]]:
     if standard_html_path:
         logger.info("Calibre standardization successful. Using H1 structural extraction.")
         try:
-            # FIX: Read the single, standardized HTML file directly
+            # Read the single, standardized HTML file directly
             html_content = standard_html_path.read_text(encoding='utf-8')
             soup = BeautifulSoup(html_content, 'lxml')
             
@@ -440,121 +437,122 @@ def _find_repetitive_headings(text: str) -> list:
     """
     Detects likely section dividers based on repeated heading patterns that
     contain a number (numerical, word, or Roman).
+
+    FINAL FIX: Explicitly searches for "DAY N" or "PART N" patterns first,
+    then uses the general, numbered structural pattern as a fallback.
+    If only unnumbered text is found (like a running header), it returns empty.
     """
-    # Find all potential all-caps headings with optional numbers
-    # Retaining the original regex pattern from the user's example
-    candidates = re.findall(r'([A-Z][A-Z0-9\s\(\):\'-]{2,50})', text)
-    counts = Counter()
     
-    # Define a pattern that matches any number/word separator after the base heading
-    # This enforces rule #1: "must have a number (numerical or word)"
-    heading_number_pattern = re.compile(r'\s+([0-9IVXLCDM]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY).*$', re.IGNORECASE)
-
-
-    for c in candidates:
-        # Check if the candidate contains a number/word suffix. If not, it's likely a running head, skip it.
-        # This is the core fix to prevent unnumbered running headers from being counted.
-        if not heading_number_pattern.search(c):
-             continue
-
-        # Normalize: remove trailing numbers/whitespace (e.g., "DAY 1" -> "DAY")
-        # We only count the base word, not the number, to group repetitions correctly.
-        normalized = re.sub(r'\s+([0-9IVXLCDM]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY).*$', '', c.strip(), flags=re.IGNORECASE)
+    # 1. Primary Structural Pattern: Day/Part/Chapter N, prioritizing the numbered part
+    # Matches: DAY 1, DAY 1: Creation, PART I, CHAPTER 1
+    structural_heading_pattern = re.compile(
+        r'^\s*((DAY|PART|CHAPTER|BOOK|SECTION)\b[\s\.\-:]*[0-9IVXLCDM]+(?:\b.*)?)$',
+        re.IGNORECASE | re.MULTILINE
+    )
+    
+    # 2. Look for matches that are strongly structured (Day/Part/Chapter N)
+    structural_candidates = structural_heading_pattern.findall(text)
+    
+    if structural_candidates:
+        # Tally the structural part (e.g., 'DAY' or 'CHAPTER') from the matched lines
+        structural_bases = [re.match(r'^(DAY|PART|CHAPTER|BOOK|SECTION)', c[0].strip(), re.I).group(1).upper() 
+                            for c in structural_candidates if re.match(r'^(DAY|PART|CHAPTER|BOOK|SECTION)', c[0].strip(), re.I)]
         
-        # Further filter: ensure it doesn't contain a huge amount of common punctuation
-        if len(normalized.split()) > 1 and normalized.count(',') < 3:
-            counts[normalized] += 1
+        if structural_bases:
+            # Return the single most frequent structural base (e.g., 'DAY') for splitting
+            most_common_base = Counter(structural_bases).most_common(1)[0][0]
+            logger.debug(f"Identified primary structural base: '{most_common_base}' from matches.")
+            return [most_common_base]
 
-    # Get repetitive headings (more than 1 occurrence, i.e., 2 or more)
-    # This implements rule #1's second part: must be a repeating pattern.
-    repetitive = [k for k, v in counts.items() if v > 1] 
-    return repetitive
+    # 3. Fallback to general chapter heading pattern if no Day/Part is found
+    # This captures generic 'Chapter 1' patterns not caught above.
+    generic_heading_candidates = CHAPTER_HEADING_RE.findall(text) + NAMED_SECTION_RE.findall(text)
+    
+    if generic_heading_candidates:
+        # If the generic or named-section headings are repetitive, use the base structural regex
+        bases = [re.match(r'^(chapter|chap|book|part|preface|introduction)', c[0].strip(), re.I).group(1).upper()
+                 for c in generic_heading_candidates if re.match(r'^(chapter|chap|book|part|preface|introduction)', c[0].strip(), re.I)]
+        
+        if bases and Counter(bases).most_common(1)[0][1] > 1:
+            most_common_base = Counter(bases).most_common(1)[0][0]
+            logger.debug(f"Identified secondary structural base: '{most_common_base}' from generic/named matches.")
+            return [most_common_base]
+
+    logger.debug("No reliable, repetitive structural headings found (Day/Part/Chapter N).")
+    return []
 
 def _split_text_by_headings(text: str, repetitive_headings: list) -> List[Tuple[str, str]]:
     """
     Splits the text using the detected repetitive heading pattern, 
-    ensuring the heading line is included in the content block for pause addition.
+    ensuring the heading line is included in the content block.
     """
     if not repetitive_headings:
-        logger.debug("No repetitive headings found for splitting.")
-        return []
-
-    # Define known structural bases to prioritize
-    STRUCTURAL_BASES = ['DAY', 'WEEK', 'CHAPTER', 'PART', 'BOOK', 'SECTION']
-    
-    # 1. Calculate weighted counts based on structural significance
-    weighted_counts = Counter()
-    number_pattern_regex = re.compile(r'\s+([0-9IVXLCDM]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY).*', flags=re.IGNORECASE)
-
-    for base in repetitive_headings:
-        # Determine if the base pattern is a strong structural keyword (e.g., DAY, PART, BOOK)
-        is_structural_keyword = base.upper() in STRUCTURAL_BASES
+        # If no repetitive headings, fall back to default regex splitting on the whole document
+        logger.debug("Repetitive heading splitting skipped. Falling through to full regex match.")
+        matches = list(CHAPTER_HEADING_RE.finditer(text)) + list(NAMED_SECTION_RE.finditer(text))
+        matches.sort(key=lambda m: m.start())
         
-        # Count actual occurrences of the base followed by a number
-        occurrences = re.findall(re.escape(base) + number_pattern_regex.pattern, text, flags=re.IGNORECASE)
+        sections = []
+        if matches:
+            for i, m in enumerate(matches):
+                start, end = m.start(), matches[i + 1].start() if i + 1 < len(matches) else len(text)
+                chunk = text[start:end].strip()
+                sections.append((normalize_title(m.group(0).strip()), clean_whitespace(chunk)))
         
-        score_multiplier = 1
-        if is_structural_keyword:
-            score_multiplier = 100 
-            
-        weighted_counts[base] += len(occurrences) * score_multiplier
+        return sections if sections else [("Full Document", text)]
+
+
+    # Use the single, highest-confidence base pattern found
+    main_pattern_base = repetitive_headings[0] 
     
-    # 2. Select the best pattern
-    if not weighted_counts or all(v == 0 for v in weighted_counts.values()):
-        logger.debug("No numbered structural pattern found.")
-        return []
-
-    main_pattern_base = max(weighted_counts, key=weighted_counts.get)
-    best_score = weighted_counts[main_pattern_base]
-
-    # FIX: Reject high-scoring patterns that are likely running headers by checking if they are not structural bases
-    if best_score < 100 and main_pattern_base.upper() not in STRUCTURAL_BASES:
-        logger.warning(f"Rejecting repetitive pattern '{main_pattern_base}' (Score: {best_score}) as likely running head that beat the score threshold.")
-        return []
-
-
-    # --- SPLITTING LOGIC (Using the final chosen base) ---
+    # Pattern to match the base keyword followed by a number/word, 
+    # ensuring it's a structural break (start of line)
     number_pattern = r'(\s+([0-9IVXLCDM]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY).*?)?'
     
-    # The pattern should capture the base, followed by an optional number/word
-    # Added \n to capture the end of the line, which is required for accurate splitting.
-    # ADDED (\n|^)\s* to enforce start-of-line match against a structural break.
-    pattern = re.compile(rf"(\n|^)\s*({re.escape(main_pattern_base)}{number_pattern})\n", re.IGNORECASE)
+    # Final splitting pattern: ensures start of line (\n|^)\s* and captures the full heading line
+    # NOTE: The outer regex is designed to capture the entire line that starts with the base.
+    pattern = re.compile(
+        # Group 2 is the actual title line we want (e.g., 'DAY 1' or 'DAY 1: Creation')
+        rf"(\n|^)\s*({re.escape(main_pattern_base)}{number_pattern})\n", 
+        re.IGNORECASE
+    )
 
-    # Use split to find all boundaries, including the pre-match
-    parts = pattern.split(text)
+    # Use finditer to find all split points and extract content between them
+    matches = list(pattern.finditer(text))
     sections = []
-    current_title = "Intro"
     
-    logger.debug(f"DEBUG: Repetitive pattern chosen for split: '{main_pattern_base}'")
+    # Handle content before the first match (Front Matter/Intro)
+    first_match_start = matches[0].start() if matches else len(text)
+    front_matter = text[:first_match_start].strip()
+    
+    # Add Front Matter/Intro before the first structural match, only if it contains content
+    if front_matter:
+         sections.append(("Front_Matter", clean_whitespace(front_matter)))
 
-
-    # The result of re.split is [pre-match, (space_group), full_heading, number_group, content1, ...]
-    if parts:
-        # The first part is the pre-match content (e.g., front matter)
-        if parts[0].strip():
-             sections.append((current_title, clean_whitespace(parts[0])))
-
-    # Iterate through the rest of the parts, which come in sets of 4 
-    # (leading_newline, full_heading, number_suffix, content)
-    for i in range(1, len(parts), 4): 
-        title_line = parts[i+1].strip()
-        content_index = i + 3
-        content = parts[content_index].strip() if content_index < len(parts) else "" # The content block
+    for i, m in enumerate(matches):
+        # The content of the heading line is in group 2
+        title_line = m.group(2).strip()
+        
+        # Find the start of the next section's content
+        end_of_current = m.end()
+        start_of_next = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        
+        content = text[end_of_current:start_of_next].strip()
 
         if title_line:
             # Clean title: remove special characters that break filenames
-            current_title = re.sub(r'[\\/*?:"<>|]', '', title_line)[:60].strip()
+            current_title = normalize_title(re.sub(r'[\\/*?:"<>|]', '', title_line)[:60])
             
-            # --- DEBUG FIX: Add log for the found header ---
+            # --- DEBUGGING CONFIRMATION ---
             logger.debug(f"DEBUG: Splitting on header: '{title_line}' (Title: '{current_title}')")
             
-            # CRITICAL FIX: Ensure the title line is explicitly included and separated for the normalization process.
+            # CRITICAL FIX: Ensure the title line is explicitly included in the content block.
             chunk_content = title_line + '\n\n' + content
             
             sections.append((current_title, clean_whitespace(chunk_content)))
-        
-    return sections
+            
+    # Remove all sections that matched a DISALLOWED_SECTION_PATTERNS title (e.g., 'Table of Contents')
+    return prune_disallowed_sections(sections)
 
 
 def _extract_docx(filepath: str) -> List[Tuple[str, str]]:
