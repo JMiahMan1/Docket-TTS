@@ -16,6 +16,7 @@ import subprocess
 from bs4 import BeautifulSoup, Tag, XMLParsedAsHTMLWarning
 from ebooklib import epub, ITEM_DOCUMENT
 from os import environ
+from collections import Counter
 
 # DOCX
 import docx
@@ -56,7 +57,7 @@ DISALLOWED_SECTION_PATTERNS = [
     r'\babout\s+the\s+(author|publisher)\b',
 ]
 
-KEEP_RE = re.compile('|'.join(KEEP_TITLE_KEYWORDS), re.IGNORECASE)
+KEEP_RE = re.compile('|'.join(DISALLOWED_SECTION_PATTERNS), re.IGNORECASE)
 DISALLOWED_RE = re.compile('|'.join(DISALLOWED_SECTION_PATTERNS), re.IGNORECASE)
 
 # --- REVISED CHAPTER HEADING REGEX (For confidence check and other file types) ---
@@ -268,6 +269,8 @@ def _extract_epub(filepath: str) -> List[Tuple[str, str]]:
     # 1. ATTEMPT CALIBRE STANDARDIZATION (Required Step)
     standard_html_path = _convert_epub_to_standard_html(filepath, CONVERTED_EPUB_DIR)
     
+    raw = []
+    
     if standard_html_path:
         logger.info("Calibre standardization successful. Using H1 structural extraction.")
         try:
@@ -338,38 +341,168 @@ def _extract_epub(filepath: str) -> List[Tuple[str, str]]:
             
             logger.info(f"Calibre-assisted extraction resulted in {len(chapters)} sections.")
             
-            if not chapters:
-                 logger.warning("Calibre extraction returned 0 structural sections. Returning fallback text method.")
-                 raise ValueError("Calibre parsing failed to find structural chapters.")
-
-            return prune_disallowed_sections(chapters)
+            if chapters:
+                raw = chapters
+            
             
         except Exception as e:
             # If Calibre was successful but parsing failed (e.g., unexpected HTML structure)
-            logger.error(f"Fatal error during Calibre-assisted parsing: {e}. Cannot reliably split EPUB.")
+            logger.error(f"Fatal error during Calibre-assisted parsing: {e}. Cannot reliably split EPUB. Falling through to full text extraction.")
             
         finally:
              shutil.rmtree(CONVERTED_EPUB_DIR, ignore_errors=True)
     
+    # 2. DEFAULT EPUBLIB FALLBACK (Only runs if Calibre failed or Calibre parsing yielded 0 sections)
     
-    # 2. DEFAULT EPUBLIB FALLBACK (Only executes if Calibre failed or was not available)
+    if not raw:
+        logger.warning("Attempting full EPUB text extraction for repetitive heading / regex fallback.")
+        try:
+            book = epub.read_epub(filepath)
+            full_text_parts = []
+            for item in book.get_items_of_type(ITEM_DOCUMENT):
+                soup = BeautifulSoup(item.get_body_content(), 'html.parser')
+                text = clean_whitespace(remove_footnote_markers(soup.get_text(separator='\n')))
+                if text:
+                    full_text_parts.append(text)
+            full_text = '\n\n'.join(full_text_parts)
+        except Exception as e:
+            logger.error(f"Failed to read EPUB for full text fallback: {e}")
+            full_text = "ERROR: Could not read file content."
+            return [("Full Document", full_text)]
+
+        # --- STEP 2B: Repetitive Heading Split (New Fallback) ---
+        repetitive_headings = _find_repetitive_headings(full_text)
+        
+        if repetitive_headings:
+            logger.info(f"EPUB Fallback: Detected repetitive headings ({len(repetitive_headings)} patterns). Splitting structurally.")
+            chapters_from_headings = _split_text_by_headings(full_text, repetitive_headings)
+            
+            if chapters_from_headings and len(chapters_from_headings) > 1:
+                logger.debug(f"EPUB Repetitive Heading split yielded {len(chapters_from_headings)} sections.")
+                return prune_disallowed_sections(chapters_from_headings)
+
+        # --- STEP 2C: Final Regex Fallback (The original 'Full Document' fallback) ---
+        logger.warning("EPUB Fallback: Repetitive heading split failed. Falling back to simple regex split.")
+        
+        # Use existing PDF/TXT regex logic on the full text
+        pre_toc_words = len(full_text.split())
+        full_text = _remove_toc_from_text(full_text)
+        post_toc_words = len(full_text.split())
+        logger.debug(f"EPUB TOC cleanup: Removed {pre_toc_words - post_toc_words} words.")
+
+        matches = list(CHAPTER_HEADING_RE.finditer(full_text)) + list(NAMED_SECTION_RE.finditer(full_text))
+        matches.sort(key=lambda m: m.start())
+
+        if matches:
+            for i, m in enumerate(matches):
+                start, end = m.start(), matches[i + 1].start() if i + 1 < len(matches) else len(full_text)
+                chunk = full_text[start:end].strip()
+                raw.append((normalize_title(m.group(0).strip()), clean_whitespace(remove_footnote_markers(chunk))))
+        else:
+            raw.append(("Full Document", clean_whitespace(remove_footnote_markers(full_text))))
+        
+        logger.info(f"EPUB Final Fallback resulted in {len(raw)} sections.")
+        return prune_disallowed_sections(raw)
+        
+    return prune_disallowed_sections(raw) # Return Calibre results if successful
+
+
+# --- PDF-Specific Heading Detection ---
+def _find_repetitive_headings(text: str) -> list:
+    """
+    Detects likely section dividers based on repeated heading patterns that
+    contain a number (numerical, word, or Roman).
+    """
+    # Find all potential all-caps headings with optional numbers
+    # Retaining the original regex pattern from the user's example
+    candidates = re.findall(r'([A-Z][A-Z0-9\s\(\):\'-]{2,50})', text)
+    counts = Counter()
     
-    logger.error("EPUB structural splitting FAILED. Processing as single file. Using fallback content.")
-    try:
-        # from ebooklib import ITEM_DOCUMENT # Already in module scope
-        book = epub.read_epub(filepath)
-        full_text_parts = []
-        for item in book.get_items_of_type(ITEM_DOCUMENT):
-            soup = BeautifulSoup(item.get_body_content(), 'html.parser')
-            text = clean_whitespace(remove_footnote_markers(soup.get_text(separator='\n')))
-            if text:
-                full_text_parts.append(text)
-        full_text = '\n\n'.join(full_text_parts)
-    except Exception as e:
-        logger.error(f"Failed to read EPUB for single file fallback: {e}")
-        full_text = "ERROR: Could not read file content."
+    # Define a pattern that matches any number/word separator after the base heading
+    # This enforces rule #1: "must have a number (numerical or word)"
+    heading_number_pattern = re.compile(r'\s+([0-9IVXLCDM]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY).*$', re.IGNORECASE)
+
+
+    for c in candidates:
+        # Check if the candidate contains a number/word suffix. If not, it's likely a running head, skip it.
+        # This is the core fix to prevent unnumbered running headers from being counted.
+        if not heading_number_pattern.search(c):
+             continue
+
+        # Normalize: remove trailing numbers/whitespace (e.g., "DAY 1" -> "DAY")
+        # We only count the base word, not the number, to group repetitions correctly.
+        normalized = re.sub(r'\s+([0-9IVXLCDM]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY).*$', '', c.strip(), flags=re.IGNORECASE)
+        
+        # Further filter: ensure it doesn't contain a huge amount of common punctuation
+        if len(normalized.split()) > 1 and normalized.count(',') < 3:
+            counts[normalized] += 1
+
+    # Get repetitive headings (more than 1 occurrence, i.e., 2 or more)
+    # This implements rule #1's second part: must be a repeating pattern.
+    repetitive = [k for k, v in counts.items() if v > 1] 
+    return repetitive
+
+def _split_text_by_headings(text: str, repetitive_headings: list) -> List[Tuple[str, str]]:
+    """
+    Splits the text using the detected repetitive heading pattern, 
+    ensuring the heading line is included in the content block for pause addition.
+    """
+    if not repetitive_headings:
+        logger.debug("No repetitive headings found for splitting.")
+        return []
+
+    # Choose the pattern that occurs most frequently in the text
+    # The counts here use a specific metric (number of times the pattern+number appears)
+    counts = Counter({k: len(re.findall(re.escape(k) + r'\s+([0-9IVXLCDM]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY).*', text, flags=re.IGNORECASE)) for k in repetitive_headings})
     
-    return [("Full Document", full_text)]
+    # If counts is empty (no pattern found with a number), fall back immediately
+    if not counts:
+        return []
+
+    main_pattern_base = max(counts, key=counts.get)
+    
+    # CRITICAL FIX: Broaden the regex to capture either digits, spelled-out numbers, or Roman numerals.
+    number_pattern = r'(\s+([0-9IVXLCDM]+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY).*?)?'
+    
+    # The pattern should capture the base, followed by an optional number/word
+    # Added \n to capture the end of the line, which is required for accurate splitting.
+    # ADDED (\n|^)\s* to enforce start-of-line match against a structural break.
+    pattern = re.compile(rf"(\n|^)\s*({re.escape(main_pattern_base)}{number_pattern})\n", re.IGNORECASE)
+
+    # Use split to find all boundaries, including the pre-match
+    parts = pattern.split(text)
+    sections = []
+    current_title = "Intro"
+    
+    logger.debug(f"DEBUG: Repetitive pattern chosen for split: '{main_pattern_base}'")
+
+
+    # The result of re.split is [pre-match, (space_group), full_heading, number_group, content1, ...]
+    if parts:
+        # The first part is the pre-match content (e.g., front matter)
+        if parts[0].strip():
+             sections.append((current_title, clean_whitespace(parts[0])))
+
+    # Iterate through the rest of the parts, which come in sets of 4 
+    # (leading_newline, full_heading, number_suffix, content)
+    for i in range(1, len(parts), 4): 
+        title_line = parts[i+1].strip()
+        content_index = i + 3
+        content = parts[content_index].strip() if content_index < len(parts) else "" # The content block
+
+        if title_line:
+            # Clean title: remove special characters that break filenames
+            current_title = re.sub(r'[\\/*?:"<>|]', '', title_line)[:60].strip()
+            
+            # --- DEBUG FIX: Add log for the found header ---
+            logger.debug(f"DEBUG: Splitting on header: '{title_line}' (Title: '{current_title}')")
+            
+            # CRITICAL FIX: Ensure the title line is explicitly included and separated for the normalization process.
+            chunk_content = title_line + '\n\n' + content
+            
+            sections.append((current_title, clean_whitespace(chunk_content)))
+        
+    return sections
 
 
 def _extract_docx(filepath: str) -> List[Tuple[str, str]]:
@@ -413,14 +546,31 @@ def _extract_pdf(filepath: str) -> List[Tuple[str, str]]:
         return []
 
     text = "\n\n".join(clean_whitespace(page.get_text("text")) for page in doc)
-    text = re.sub(r'\n+\s*\d+\s*\n+', '\n\n', text)
     
-    # --- AGGRESSIVE TOC REMOVAL ---
+    # --- STEP 1: Aggressively clean up text before heading detection ---
+    text = clean_whitespace(remove_footnote_markers(text)) # Clean footnotes and normalize whitespace
+    text = re.sub(r'\n+\s*\d+\s*\n+', '\n\n', text) # Remove page numbers/junk lines
+    
+    # --- STEP 2: Use Repetitive Heading Detection ---
+    repetitive_headings = _find_repetitive_headings(text)
+    
+    if repetitive_headings:
+        logger.info(f"PDF: Detected repetitive headings ({len(repetitive_headings)} patterns). Splitting structurally.")
+        chapters = _split_text_by_headings(text, repetitive_headings)
+        
+        # If structural split worked, return it after cleanup
+        if chapters and len(chapters) > 1:
+            logger.debug(f"PDF Structural split yielded {len(chapters)} sections.")
+            return prune_disallowed_sections(chapters)
+
+    # --- STEP 3 (Fallback): Use Regex Detection ---
+    logger.info("PDF: Falling back to default structural regex splitting.")
+    
+    # Run TOC removal only if structural split failed/wasn't used
     pre_toc_words = len(text.split())
     text = _remove_toc_from_text(text)
     post_toc_words = len(text.split())
     logger.debug(f"PDF TOC cleanup: Removed {pre_toc_words - post_toc_words} words.")
-    # ------------------------------
 
     matches = list(CHAPTER_HEADING_RE.finditer(text)) + list(NAMED_SECTION_RE.finditer(text))
     matches.sort(key=lambda m: m.start())
@@ -447,6 +597,21 @@ def _extract_txt(filepath: str) -> List[Tuple[str, str]]:
         text = Path(filepath).read_text(encoding='latin-1')
 
     text = clean_whitespace(text)
+    
+    # --- STEP 1: Use Repetitive Heading Detection ---
+    repetitive_headings = _find_repetitive_headings(text)
+    
+    if repetitive_headings:
+        logger.info(f"TXT: Detected repetitive headings ({len(repetitive_headings)} patterns). Splitting structurally.")
+        chapters = _split_text_by_headings(text, repetitive_headings)
+        
+        # If structural split worked, return it after cleanup
+        if chapters and len(chapters) > 1:
+            logger.debug(f"TXT Structural split yielded {len(chapters)} sections.")
+            return prune_disallowed_sections(chapters)
+
+    # --- STEP 2 (Fallback): Default Structural Regex ---
+    logger.info("TXT: Falling back to default structural regex splitting.")
     
     # --- AGGRESSIVE TOC REMOVAL ---
     pre_toc_words = len(text.split())

@@ -13,11 +13,10 @@ normalization_rules:
     replacement: '\1'
     description: "NEW: Removes trailing footnote numbers from the end of verse citations."
 
-  # FIX: New rule to remove non-narrative enumeration prefixes (e.g., '3)', 'a)', 'i.')
   - name: "Remove common structural enumeration prefixes"
     type: "regex"
     # Matches patterns like '3)', 'a)', '1.', 'i.' at the start of a line
-    # or followed by a line break, only if it's not a Chapter/Part/Book heading.
+    # or followed by a line break, only if it's not a Chapter/Part|Book heading.
     pattern: '^\s*([a-zA-Z\d]{1,2}\.?\s*[\)])(?!\s*(Chapter|Part|Book))'
     replacement: ''
     flags: ["MULTILINE"]
@@ -36,6 +35,11 @@ normalization_rules:
     pattern: '^((?:Chapter|Part|Book|Section|Prologue|Epilogue|Introduction)\s+.*)$'
     replacement: '\g<1>.'
     flags: ["MULTILINE"]
+
+  - name: "Normalize punctuation"
+    type: "dict_lookup"
+    dictionary_name: "punctuation"
+    options: { case_insensitive: false, word_boundary: false }
 
   # === STAGE 2: SCRIPTURE NORMALIZATION ===
   - name: "Normalize all scripture references (e.g., Romans 8, Rom 8:1, etc.)"
@@ -57,7 +61,9 @@ normalization_rules:
   - name: "Expand Latin phrases"
     type: "dict_lookup"
     dictionary_name: "latin_phrases"
-    options: { case_insensitive: true, word_boundary: true }
+    options: { case_insensitive: true, word_boundary: false } 
+    # Note: If word_boundary is required, the tts_service logic must handle trailing punctuation.
+    # Setting word_boundary=false handles e.g., and i.e., easily.
 
   - name: "Strip diacritics from characters"
     type: "function"
@@ -78,7 +84,7 @@ normalization_rules:
   - name: "Expand non-Biblical abbreviations"
     type: "dict_lookup"
     dictionary_name: "non_bible_abbrs"
-    options: { use_case_sensitive_list: true, word_boundary: true }
+    options: { case_insensitive: false, word_boundary: true } 
 
   - name: "Expand contractions"
     type: "dict_lookup"
@@ -124,10 +130,7 @@ normalization_rules:
     dictionary_name: "symbols"
     options: { case_insensitive: false, word_boundary: false }
 
-  - name: "Normalize punctuation"
-    type: "dict_lookup"
-    dictionary_name: "punctuation"
-    options: { case_insensitive: false, word_boundary: false }
+  # NOTE: Punctuation normalization moved up
 
   - name: "Format all-caps headings with pauses"
     type: "regex"
