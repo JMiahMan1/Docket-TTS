@@ -54,7 +54,7 @@ jobs:
       - name: Run tests
         id: tests
         run: |
-          docker compose exec -T -e APP_BASE_URL="http://localhost:5000" web /bin/bash -c "sh tests/run_tests.sh"
+          docker compose exec -T -e APP_BASE_URL="http://localhost:5000" web /bin/bash -c "rm -rf /root/.cache/argos-translate && sh tests/run_tests.sh"
         continue-on-error: true
 
       - name: Show logs on failure

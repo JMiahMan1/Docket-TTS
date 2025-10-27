@@ -85,7 +85,6 @@ def _strip_diacritics(text: str) -> str:
 def normalize_hebrew(text: str) -> str:
     def translate_match(match):
         hebrew_text = match.group(0)
-        ensure_translation_models_are_loaded()
         if HEBREW_TO_ENGLISH:
             try:
                 translated_text = HEBREW_TO_ENGLISH.translate(hebrew_text)
