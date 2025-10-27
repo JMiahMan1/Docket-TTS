@@ -5,8 +5,6 @@ import subprocess
 import unicodedata
 import yaml
 from pathlib import Path
-from argostranslate import translate
-import argostranslate.package
 
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 RULES_PATH = Path(__file__).parent / "rules.yaml"
@@ -47,6 +45,15 @@ def ensure_translation_models_are_loaded():
     if HEBREW_TO_ENGLISH:
         return
 
+    # Import here to avoid loading argostranslate on app startup
+    try:
+        from argostranslate import translate
+        import argostranslate.package
+    except ImportError:
+        print("Warning: argostranslate not installed. Hebrew normalization will be disabled.")
+        HEBREW_TO_ENGLISH = None # Ensure it stays None
+        return
+
     try:
         argostranslate.package.update_package_index()
         available_packages = argostranslate.package.get_available_packages()
@@ -70,9 +77,6 @@ def ensure_translation_models_are_loaded():
     except Exception as e:
         print(f"Warning: Could not initialize Hebrew translation model: {e}")
         HEBREW_TO_ENGLISH = None
-
-ensure_translation_models_are_loaded()
-
 
 def _strip_diacritics(text: str) -> str:
     normalized = unicodedata.normalize('NFD', text)
