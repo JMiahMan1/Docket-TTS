@@ -8,6 +8,7 @@ from pathlib import Path
 
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 RULES_PATH = Path(__file__).parent / "rules.yaml"
+LOCK_FILE = Path("/tmp/argos_he_en_install.lock")
 
 if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
@@ -40,21 +41,53 @@ _inflect = inflect.engine()
 HEBREW_TO_ENGLISH = None
 
 def ensure_translation_models_are_loaded():
-    """Checks for and installs translation models if they are not present."""
+    """Checks for and installs translation models if they are not present, using a lock to prevent concurrent installation."""
+    # Imports moved inside to respect the user's intent to lower app startup time
+    try:
+        from argostranslate import translate
+        import argostranslate.package
+    except ImportError as e:
+        print(f"Warning: Argos Translate not installed. Cannot initialize Hebrew translation model: {e}")
+        return
+        
     global HEBREW_TO_ENGLISH
     if HEBREW_TO_ENGLISH:
         return
 
-    # Import here to avoid loading argostranslate on app startup
+    # 1. First, attempt to load the model (in case it was already installed by a previous run/process).
     try:
-        from argostranslate import translate
-        import argostranslate.package
-    except ImportError:
-        print("Warning: argostranslate not installed. Hebrew normalization will be disabled.")
-        HEBREW_TO_ENGLISH = None # Ensure it stays None
+        HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
+        if HEBREW_TO_ENGLISH:
+            return # Successfully loaded, no need to proceed with installation.
+    except Exception:
+        # Pass and proceed to installation/locking if loading failed.
+        pass
+    
+    # 2. Check for the lock file to prevent a race condition during installation.
+    if LOCK_FILE.exists():
+        # Another process is installing. Wait briefly and try to load again.
+        print("Lock file found. Waiting for other process to finish Argos installation...")
+        # Wait for up to 20 seconds to allow the other process to finish
+        for _ in range(20):
+            time.sleep(1)
+            try:
+                HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
+                if HEBREW_TO_ENGLISH:
+                    print("Successfully loaded Argos model after waiting.")
+                    return
+            except:
+                continue
+        
+        # If after waiting, we still can't load, something failed.
+        print("Warning: Timed out waiting for Argos installation lock.")
         return
 
+    # 3. If no lock, acquire the lock and proceed with installation (the critical section).
     try:
+        # Use exist_ok=False to ensure only one process creates the file (acquires the lock)
+        LOCK_FILE.touch(exist_ok=False) 
+        print("Acquired Argos installation lock. Starting download/install.")
+
         argostranslate.package.update_package_index()
         available_packages = argostranslate.package.get_available_packages()
         
@@ -67,9 +100,12 @@ def ensure_translation_models_are_loaded():
         )
         
         if package_to_install:
-            if not getattr(package_to_install, 'installed', False):
+            # Check if the package is already installed to avoid unnecessary installation attempts
+            if not getattr(package_to_install, 'installed', False): 
                 print(f"Downloading and installing Argos Translate package: {package_to_install}")
                 package_to_install.install()
+            
+            # Attempt to load the model after successful install
             HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
         else:
             print("Warning: Hebrew to English translation package not found in Argos Translate index.")
@@ -77,6 +113,11 @@ def ensure_translation_models_are_loaded():
     except Exception as e:
         print(f"Warning: Could not initialize Hebrew translation model: {e}")
         HEBREW_TO_ENGLISH = None
+    finally:
+        # 4. Ensure the lock is released (even if installation failed).
+        if LOCK_FILE.exists():
+            LOCK_FILE.unlink()
+            print("Released Argos installation lock.")
 
 def _strip_diacritics(text: str) -> str:
     normalized = unicodedata.normalize('NFD', text)
