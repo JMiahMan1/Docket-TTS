@@ -46,16 +46,9 @@ RUN rm -f /install_root/etc/resolv.conf && \
         https://github.com/explosion/spacy-models/releases/download/xx_sent_ud_sm-3.8.0/xx_sent_ud_sm-3.8.0-py3-none-any.whl
 
 # Pre-download the argostranslate models to prevent runtime downloads
-RUN mkdir -p /install_root/dev && \
-    mount --bind /dev /install_root/dev && \
-    chroot /install_root /opt/venv/bin/python -c "\
-import argostranslate.package; \
-argostranslate.package.update_package_index(); \
-available_packages = argostranslate.package.get_available_packages(); \
-package_to_install = next(filter(lambda x: x.from_code == 'he' and x.to_code == 'en', available_packages), None); \
-package_to_install.install() if package_to_install else print('Could not find he->en package to install.')\
-" && \
-    umount /install_root/dev
+RUN wget -q https://github.com/argosopentech/argos-translate/releases/latest/download/translate-he_en.argosmodel -O /tmp/he_en.argosmodel && \
+    /install_root/opt/venv/bin/argos-translate --install /tmp/he_en.argosmodel && \
+    rm /tmp/he_en.argosmodel
 
 # Define variables for Kokoro model and voice paths
 ENV KOKORO_VOICES_PATH=/app/voices
