@@ -38,7 +38,7 @@ def test_large_file_auto_triggers_book_mode(
 
     file_data = {
         'file': (BytesIO(b"large file content"), 'large_book.txt'),
-        'voice': 'en_US-hfc_male-medium.onnx',
+        'voice': 'af_bella',
         # Note: 'book_mode' is NOT included in the form data
     }
     
@@ -67,7 +67,7 @@ def test_small_file_uses_single_file_mode(
 
     file_data = {
         'file': (BytesIO(b"small file content"), 'small_article.txt'),
-        'voice': 'en_US-hfc_male-medium.onnx',
+        'voice': 'af_bella',
     }
     
     client.post('/', data=file_data, content_type='multipart/form-data')
