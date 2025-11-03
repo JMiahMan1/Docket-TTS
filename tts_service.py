@@ -6,13 +6,13 @@ import unicodedata
 import yaml
 import time
 from pathlib import Path
-import os # ADDED
-import io # ADDED
-import soundfile as sf # ADDED
-import requests # ADDED
+import os
+import io
+import soundfile as sf
+import requests 
 
 # New import for Kokoro-TTS
-from kokoro_onnx import Kokoro # ADDED
+from kokoro_onnx import Kokoro
 
 # The URL to the VOICES.md file for dynamic voice listing
 VOICES_MD_URL = "https://huggingface.co/hexgrad/Kokoro-82M/raw/main/VOICES.md" # ADDED
@@ -21,6 +21,7 @@ KOKORO_MODEL_REPO_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/do
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 RULES_PATH = Path(__file__).parent / "rules.yaml"
 LOCK_FILE = Path("/tmp/argos_he_en_install.lock")
+KOKORO_DOWNLOAD_LOCK = Path("/tmp/kokoro_model.lock")
 
 if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
@@ -439,21 +440,52 @@ def normalize_text(text: str) -> str:
     return text.strip()
 
 def _download_model_file(file_path: Path, file_name: str):
-    """Downloads a model file if it's missing."""
+    """
+    Downloads a model file if it's missing, using a lock to prevent race conditions.
+    """
+    # 1. Check if the file already exists. If so, do nothing.
+    if file_path.exists():
+        return
+
+    # 2. Check for the lock file.
+    lock_path = KOKORO_DOWNLOAD_LOCK
+    if lock_path.exists():
+        print(f"Waiting for Kokoro model download lock: {file_name}")
+        for _ in range(60): # Wait up to 60 seconds
+            if not lock_path.exists():
+                if file_path.exists(): # Check if the file was created by the other process
+                    print(f"Model {file_name} downloaded by another process.")
+                    return
+                break
+            time.sleep(1)
+        else:
+            raise RuntimeError(f"Timed out waiting for model download lock: {lock_path}")
+
+    # 3. If the file *still* doesn't exist (e.g., lock released but download failed), acquire the lock.
     if not file_path.exists():
-        print(f"WARNING: Model file not found at {file_path}. Attempting to download...")
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        url = KOKORO_MODEL_REPO_URL + file_name
         try:
-            with requests.get(url, stream=True) as r:
-                r.raise_for_status()
-                with open(file_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-            print(f"Successfully downloaded {file_name} to {file_path}")
-        except Exception as e:
-            print(f"FATAL: Failed to download model file {file_name} from {url}. Error: {e}")
-            raise
+            lock_path.touch(exist_ok=False) # Acquire lock
+            print(f"Acquired lock. Downloading {file_name}...")
+            
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            url = KOKORO_MODEL_REPO_URL + file_name
+            try:
+                with requests.get(url, stream=True) as r:
+                    r.raise_for_status()
+                    with open(file_path, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                print(f"Successfully downloaded {file_name} to {file_path}")
+            except Exception as e:
+                print(f"FATAL: Failed to download model file {file_name} from {url}. Error: {e}")
+                if file_path.exists():
+                    file_path.unlink() # Delete corrupted file on failure
+                raise
+        finally:
+            if lock_path.exists():
+                lock_path.unlink() # Release lock
+                print("Released Kokoro download lock.")
+
 
 # MODIFIED TTSService CLASS IMPLEMENTATION
 class TTSService:
@@ -474,7 +506,7 @@ class TTSService:
         self.model_path = self.voices_folder / model_file_name
         self.voices_file_path = self.voices_folder / voices_file_name
 
-        # Check and download files if they don't exist
+        # Check and download files if they don't exist, using a lock
         _download_model_file(self.model_path, model_file_name)
         _download_model_file(self.voices_file_path, voices_file_name)
 
