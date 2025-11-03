@@ -51,10 +51,11 @@ RUN set -eux; \
     mkdir -p /tmp && \
     curl -L --retry 5 --connect-timeout 15 \
       -o /tmp/he_en.argosmodel \
-      https://github.com/argosopentech/argos-translate/releases/latest/download/translate-he_en.argosmodel && \
-    echo "Installing Argos model..."; \
-    /install_root/opt/venv/bin/argos-translate --install /tmp/he_en.argosmodel || \
-      /install_root/opt/venv/bin/python -m argostranslate.package install /tmp/he_en.argosmodel && \
+      https://github.com/argosopentech/argos-translate/releases/latest/download/translate-he_en.argosmodel; \
+    echo "Ensuring packaging is installed..."; \
+    /install_root/opt/venv/bin/pip install --no-cache-dir packaging; \
+    echo "Installing Argos model via Python module..."; \
+    /install_root/opt/venv/bin/python -m argostranslate.package install /tmp/he_en.argosmodel; \
     rm -f /tmp/he_en.argosmodel
 
 # Define variables for Kokoro model and voice paths
