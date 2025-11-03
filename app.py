@@ -181,16 +181,23 @@ def ensure_voice_available(voice_name):
 
         app.logger.warning(f"Voice '{voice_name}' not found locally. Starting download from {KOKORO_VOICES_REPO}...")
         
-        # Download the file directly to the local_voice_path
-        hf_hub_download(
+        downloaded_path_str = hf_hub_download(
             repo_id=KOKORO_VOICES_REPO,
             filename=voice_repo_path,
             local_dir=VOICES_FOLDER,
             local_dir_use_symlinks=False,
-            repo_type="model",
-            local_path=local_voice_path # Explicitly set the final file path
+            repo_type="model"
         )
         
+        downloaded_path = Path(downloaded_path_str)
+        
+        if downloaded_path != local_voice_path:
+            shutil.move(downloaded_path, local_voice_path)
+            # Clean up the empty 'voices' subdirectory if it exists
+            empty_dir = downloaded_path.parent
+            if empty_dir.is_dir() and not any(empty_dir.iterdir()):
+                empty_dir.rmdir()
+
         app.logger.info(f"Successfully downloaded {voice_filename}.")
         return voice_name
 
