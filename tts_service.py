@@ -6,10 +6,22 @@ import unicodedata
 import yaml
 import time
 from pathlib import Path
+import os
+import io
+import soundfile as sf
+import requests 
+
+# New import for Kokoro-TTS
+from kokoro_onnx import Kokoro
+
+# The URL to the VOICES.md file for dynamic voice listing
+VOICES_MD_URL = "https://huggingface.co/hexgrad/Kokoro-82M/raw/main/VOICES.md" # ADDED
+KOKORO_MODEL_REPO_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 RULES_PATH = Path(__file__).parent / "rules.yaml"
 LOCK_FILE = Path("/tmp/argos_he_en_install.lock")
+KOKORO_DOWNLOAD_LOCK = Path("/tmp/kokoro_model.lock")
 
 if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
@@ -427,21 +439,108 @@ def normalize_text(text: str) -> str:
 
     return text.strip()
 
+def _download_model_file(file_path: Path, file_name: str):
+    """
+    Downloads a model file if it's missing, using a lock to prevent race conditions.
+    """
+    # 1. Check if the file already exists. If so, do nothing.
+    if file_path.exists():
+        return
+
+    # 2. Check for the lock file.
+    lock_path = KOKORO_DOWNLOAD_LOCK
+    if lock_path.exists():
+        print(f"Waiting for Kokoro model download lock: {file_name}")
+        for _ in range(60): # Wait up to 60 seconds
+            if not lock_path.exists():
+                if file_path.exists(): # Check if the file was created by the other process
+                    print(f"Model {file_name} downloaded by another process.")
+                    return
+                break
+            time.sleep(1)
+        else:
+            raise RuntimeError(f"Timed out waiting for model download lock: {lock_path}")
+
+    # 3. If the file *still* doesn't exist (e.g., lock released but download failed), acquire the lock.
+    if not file_path.exists():
+        try:
+            lock_path.touch(exist_ok=False) # Acquire lock
+            print(f"Acquired lock. Downloading {file_name}...")
+            
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            url = KOKORO_MODEL_REPO_URL + file_name
+            try:
+                with requests.get(url, stream=True) as r:
+                    r.raise_for_status()
+                    with open(file_path, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                print(f"Successfully downloaded {file_name} to {file_path}")
+            except Exception as e:
+                print(f"FATAL: Failed to download model file {file_name} from {url}. Error: {e}")
+                if file_path.exists():
+                    file_path.unlink() # Delete corrupted file on failure
+                raise
+        finally:
+            if lock_path.exists():
+                lock_path.unlink() # Release lock
+                print("Released Kokoro download lock.")
+
+
+# MODIFIED TTSService CLASS IMPLEMENTATION
 class TTSService:
-    def __init__(self, voice_path: str, speed_rate: str = "1.0"):
+    """
+    Text-to-Speech service using Kokoro-TTS (ONNX) for synthesis
+    and FFmpeg for final MP3 encoding.
+    """
+    # Renamed voice_path to voice_name to reflect it's an ID, but kept the original signature
+    def __init__(self, voice_name: str, speed_rate: str = "1.0"):
         self.speed_rate = speed_rate
-        self.voice_path = Path(voice_path)
+        self.voice = voice_name
         
-        if not self.voice_path.exists():
-            raise FileNotFoundError(f"Voice model file not found at the provided path: {self.voice_path}")
+        # --- Kokoro-TTS Initialization ---
+        model_file_name = os.environ.get("KOKORO_MODEL_FILE", "kokoro-v1.0.int8.onnx")
+        voices_file_name = os.environ.get("KOKORO_VOICES_FILE", "voices-v1.0.bin")
+        
+        self.voices_folder = Path(os.environ.get("KOKORO_VOICES_PATH", "/app/voices"))
+        self.model_path = self.voices_folder / model_file_name
+        self.voices_file_path = self.voices_folder / voices_file_name
+
+        # Check and download files if they don't exist, using a lock
+        _download_model_file(self.model_path, model_file_name)
+        _download_model_file(self.voices_file_path, voices_file_name)
+
+        print(f"DEBUG: Initializing Kokoro TTS with model: {self.model_path}")
+        
+        # Initialize the Kokoro model
+        self.kokoro = Kokoro(
+            model_path=str(self.model_path), 
+            voices_path=str(self.voices_file_path)
+        )
+        
+        # Determine language code for Kokoro's 'lang' parameter (e.g., 'en-us', 'en-gb', 'ja', etc.)
+        lang_prefix = self.voice.split('_')[0]
+        # Basic language mapping based on Kokoro conventions (af/am=en-us, bf/bm=en-gb)
+        if lang_prefix.startswith('a'):
+            self.lang = 'en-us'
+        elif lang_prefix.startswith('b'):
+            self.lang = 'en-gb'
+        elif lang_prefix == 'ja':
+            self.lang = 'ja'
+        elif lang_prefix.startswith('z'):
+            self.lang = 'cmn'
+        else:
+            self.lang = 'en' # Default fallback
+        # --- End Kokoro-TTS Initialization ---
 
     def synthesize(self, text: str, output_path: str):
         synthesized_text = text
 
         if not synthesized_text or not synthesized_text.strip():
             print(f"WARNING: No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
+            # Changed sample rate to 24000 to match Kokoro's default output
             silence_command = [
-                "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
                 "-t", "0.5", "-acodec", "libmp3lame", "-q:a", "9", output_path
             ]
             try:
@@ -450,28 +549,119 @@ class TTSService:
             except Exception as e:
                 raise RuntimeError(f"FFmpeg failed to generate silent audio: {e}")
 
-        piper_command = ["piper", "--model", str(self.voice_path), "--length_scale", str(self.speed_rate), "--output_file", "-"]
-        ffmpeg_command = ["ffmpeg", "-y", "-f", "s16le", "-ar", "22050", "-ac", "1", "-i", "-", "-threads", "0", "-acodec", "libmp3lame", "-q:a", "2", output_path]
+        # Piper's speed_rate was a length_scale (lower number = faster).
+        # Kokoro's speed parameter is a direct multiplier (higher number = faster).
         try:
-            print(f"DEBUG: Text sent to Piper for {output_path}: '{synthesized_text[:500]}...'")
+            length_scale = float(self.speed_rate)
+        except ValueError:
+            length_scale = 1.0 # Default if conversion fails
 
-            piper_process = subprocess.Popen(piper_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            ffmpeg_process = subprocess.Popen(ffmpeg_command, stdin=piper_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if length_scale <= 0.0:
+            length_scale = 1.0 
+        
+        # Convert length_scale to speed multiplier (1/length_scale)
+        kokoro_speed = 1.0 / length_scale
+        kokoro_speed = max(0.5, min(kokoro_speed, 2.0)) # Clamp for safety
+        
+        try:
+            print(f"DEBUG: Text sent to Kokoro for {output_path}: '{synthesized_text[:500]}...'")
             
-            piper_process.stdin.write(synthesized_text.encode('utf-8'))
-            piper_process.stdin.close()
-            
-            piper_process.stdout.close()
-            
-            _, ffmpeg_err = ffmpeg_process.communicate()
+            # 1. Synthesize the audio samples using Kokoro
+            # The kokoro-onnx library uses a default sample rate of 24000
+            samples, sample_rate = self.kokoro.create(
+                text=synthesized_text, 
+                voice=self.voice, # Use the stored voice name
+                speed=kokoro_speed, 
+                lang=self.lang
+            )
 
-            piper_exit_code = piper_process.wait()
+            # 2. Write the samples to a temporary in-memory WAV file
+            temp_wav_io = io.BytesIO()
+            # soundfile writes the samples to an in-memory stream as a WAV format
+            sf.write(temp_wav_io, samples, sample_rate, format='wav') 
+            temp_wav_io.seek(0)
+            
+            # 3. Convert the in-memory WAV data to the final MP3 file using FFmpeg
+            ffmpeg_command = [
+                "ffmpeg", "-y", 
+                "-i", "pipe:",  # -i pipe: reads from stdin
+                "-threads", "0", 
+                "-acodec", "libmp3lame", 
+                "-q:a", "2", # VBR quality setting
+                output_path
+            ]
+            
+            print(f"DEBUG: Running FFmpeg conversion to MP3 for {output_path}")
 
-            if piper_exit_code != 0:
-                piper_err_output = piper_process.stderr.read().decode(errors='replace')
-                raise RuntimeError(f"Piper process failed with exit code {piper_exit_code}: {piper_err_output}")
+            # Pipe the in-memory WAV data (from soundfile) to ffmpeg's stdin
+            ffmpeg_process = subprocess.Popen(
+                ffmpeg_command, 
+                stdin=subprocess.PIPE, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE
+            )
+            _, ffmpeg_err = ffmpeg_process.communicate(input=temp_wav_io.read())
+            
             if ffmpeg_process.returncode != 0:
                 raise RuntimeError(f"FFmpeg encoding process failed: {ffmpeg_err.decode()}")
+
         except FileNotFoundError as e:
-            raise RuntimeError(f"Command not found: {e.filename}. Ensure piper-tts and ffmpeg are installed.")
+            if e.filename == 'ffmpeg':
+                raise RuntimeError(f"Required command not found: {e.filename}. Please ensure FFmpeg is installed in your Docker image.") from e
+            # Removed mention of 'piper' in the error message
+            raise RuntimeError(f"A file or command was not found: {e}.") from e
+        except Exception as e:
+            raise RuntimeError(f"Kokoro or FFmpeg process failed: {e}") from e
+
         return output_path, synthesized_text
+
+# --- Dynamic voice listing function (NEW) ---
+def get_kokoro_voices() -> list[tuple[str, str, str]]:
+    """
+    Dynamically fetches the list of available Kokoro voices from the VOICES.md file 
+    in the Hugging Face repository, as requested.
+    Returns: A list of (value, display_name, description) tuples.
+    """
+    voices = []
+    
+    # Simple, minimal fallback list if dynamic fetch fails
+    fallback_voices = [
+        ('af_bella', 'American Female (Bella)', 'Clear, expressive American female voice.'),
+        ('am_adam', 'American Male (Adam)', 'A common American male voice.'),
+        ('bf_isabella', 'British Female (Isabella)', 'Smooth, British female accent.'),
+    ]
+    
+    try:
+        response = requests.get(VOICES_MD_URL, timeout=5)
+        response.raise_for_status()
+        content = response.text
+    except Exception:
+        print(f"WARNING: Failed to fetch voice list from {VOICES_MD_URL}. Using fallback list.")
+        return fallback_voices
+
+    current_category = "Unknown"
+    
+    # Parse the Markdown table structure
+    for line in content.splitlines():
+        # Check for headers to determine language/category
+        if line.startswith('# '):
+            current_category = line.split('#')[-1].strip()
+            continue
+        
+        # Matches lines starting with a voice name like 'af_bella' followed by '|'
+        match = re.match(r'^\s*([a-z]{2}_[a-z]+)\s*\|', line)
+        if match:
+            voice_name = match.group(1).strip()
+            
+            # Simple derivation for display name
+            parts = voice_name.split('_')
+            language = current_category.split('(')[0].strip() if current_category != "Unknown" else "Unknown"
+            gender_prefix = parts[0][1]
+            gender = 'Male' if gender_prefix == 'm' else 'Female'
+            name_part = parts[-1].capitalize() if len(parts) > 1 else 'Unknown'
+            
+            display_name = f"{language} {gender} ({name_part})"
+            description = f"{language} voice: {voice_name}"
+            voices.append((voice_name, display_name, description))
+
+    return sorted(voices, key=lambda x: x[1]) if voices else fallback_voices

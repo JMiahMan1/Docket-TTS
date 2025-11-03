@@ -20,7 +20,7 @@ def test_sample_generation_with_speed_control():
     Tests that the sample generation endpoint produces audio of different
     durations based on the speed parameter.
     """
-    voice = "en_US-hfc_male-medium.onnx"
+    voice = "af_bella"
     
     # Generate samples at different speeds
     slow_duration = get_sample_duration(voice, "1.3")

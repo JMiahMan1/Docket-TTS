@@ -1,4 +1,5 @@
 gunicorn
-piper-tts
+kokoro-onnx
+soundfile
 argostranslate
 filetype

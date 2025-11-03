@@ -125,22 +125,33 @@ def _apply_final_processing(initial_chapters: List[Chapter], config: Dict[str, A
             logger.info(f"Excluding explicitly disallowed chapter title: '{raw_chapter.original_title}'")
             continue
 
-        cleaned_content = clean_text(raw_chapter.content)
-        normalized_content = normalize_text(cleaned_content)
-        normalized_word_count = len(normalized_content.split())
+        # 1. Separate the header from the content
+        header = raw_chapter.original_title
+        # Remove the header from the main content to avoid processing it twice
+        content_body = raw_chapter.content.replace(header, '', 1).strip()
+
+        # 2. Clean and normalize ONLY the body text
+        cleaned_content = clean_text(content_body)
+        normalized_content_body = normalize_text(cleaned_content)
+        
+        # 3. Add the header back with punctuation to create pauses
+        # This ensures a pause after the header is read.
+        final_content = f"{header}. \n\n {normalized_content_body}"
+
+        normalized_word_count = len(final_content.split())
         
         if normalized_word_count < config["min_chapter_word_count"]:
             logger.info(f"Excluding chapter '{raw_chapter.original_title}' (final word count {normalized_word_count} is below threshold).")
             continue
             
-        processed_chapter = raw_chapter._replace(content=normalized_content, word_count=normalized_word_count)
+        processed_chapter = raw_chapter._replace(content=final_content, word_count=normalized_word_count)
         parts = _split_large_chapter_into_parts(processed_chapter, config["max_chapter_word_count"])
         final_parts.extend(parts)
         
     if initial_chapters and not final_parts:
         logger.warning("All potential chapters were excluded after processing.")
         
-    return [part._replace(number=i + 1) for i, part in enumerate(final_parts)]
+    return [part._replace(number=i + 1) for i, p in enumerate(final_parts)]
 
 def chapterize(
     filepath: str,

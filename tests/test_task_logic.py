@@ -3,7 +3,6 @@ from unittest.mock import patch, MagicMock
 from app import convert_to_speech_task, app
 
 @patch("app.TTSService")
-@patch("app.ensure_voice_available")
 @patch("app.extract_text_and_metadata")
 @patch("app.text_cleaner.clean_text")
 @patch("app.tag_mp3_file")
@@ -18,7 +17,6 @@ def test_convert_to_speech_task_cleans_text(
     mock_tag,
     mock_clean_text,
     mock_extract,
-    mock_ensure_voice,
     mock_tts_service,
 ):
     mock_extract.return_value = ("Sample text with Table of Contents", {})
@@ -38,7 +36,7 @@ def test_convert_to_speech_task_cleans_text(
             original_filename="dummy.txt",
             book_title="Dummy Title",
             book_author="Dummy Author",
-            voice_name="dummy_voice",
+            voice_name="af_bella",
             speed_rate="1.0",
         )
 

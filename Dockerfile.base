@@ -3,7 +3,7 @@
 FROM fedora:42 AS base
 
 # Install all specified system dependencies, build tools, and Fedora-provided Python packages into the /install_root directory.
-RUN dnf install -y dnf-plugins-core && \
+RUN dnf install -y dnf-plugins-core curl && \
     dnf install -y --use-host-config --installroot=/install_root --releasever=42 \
         python3 python3-pip python3-virtualenv \
         poppler-utils \
@@ -40,20 +40,36 @@ RUN rm -f /install_root/etc/resolv.conf && \
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
         torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
-        argostranslate piper-tts
+        argostranslate soundfile kokoro-onnx && \
+    # Pre-install the spaCy model dependency for argostranslate from its direct URL
+    chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
+        https://github.com/explosion/spacy-models/releases/download/xx_sent_ud_sm-3.8.0/xx_sent_ud_sm-3.8.0-py3-none-any.whl
 
-# Define variables for voice paths to keep commands clean
-ENV HFC_MALE_PATH=/app/voices/en/en_US/hfc_male/medium
-ENV LIBRITTS_R_PATH=/app/voices/en/en_US/libritts_r/medium
+# Pre-download the argostranslate models to prevent runtime downloads
+RUN set -eux; \
+    echo "Downloading Argos he→en model..."; \
+    mkdir -p /tmp && \
+    curl -L --retry 5 --connect-timeout 15 \
+      -o /tmp/he_en.argosmodel \
+      https://argos-net.com/v1/translate-he_en-1_5.argosmodel; \
+    echo "Installing into chrooted venv..."; \
+    chroot /install_root /opt/venv/bin/python -m ensurepip || true; \
+    chroot /install_root /opt/venv/bin/pip install --no-cache-dir packaging argostranslate; \
+    chroot /install_root /opt/venv/bin/python -m argostranslate.package install /tmp/he_en.argosmodel || true; \
+    rm -f /tmp/he_en.argosmodel
 
-# Create the correct subdirectory structures and download the models into them
-RUN mkdir -p /install_root${HFC_MALE_PATH} && \
-    mkdir -p /install_root${LIBRITTS_R_PATH} && \
-    chroot /install_root wget -P ${HFC_MALE_PATH} -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx && \
-    chroot /install_root wget -P ${HFC_MALE_PATH} -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json && \
-    chroot /install_root wget -P ${LIBRITTS_R_PATH} -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx && \
-    chroot /install_root wget -P ${LIBRITTS_R_PATH} -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx.json
+# Define variables for Kokoro model and voice paths
+ENV KOKORO_VOICES_PATH=/app/voices
+ENV KOKORO_MODEL_FILE=kokoro-v1.0.int8.onnx
+ENV KOKORO_VOICES_FILE=voices-v1.0.bin
 
+# Create the voices directory and download the Kokoro model and voice data
+# The model and voice files below are from the kokoro-onnx GitHub project (Snippet 2.6 in search results)
+RUN mkdir -p /install_root${KOKORO_VOICES_PATH} && \
+    # Download the ONNX model file
+    chroot /install_root wget -P ${KOKORO_VOICES_PATH} -q https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/${KOKORO_MODEL_FILE} && \
+    # Download the voice data
+    chroot /install_root wget -P ${KOKORO_VOICES_PATH} -q https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/${KOKORO_VOICES_FILE}
 # ---
 
 # Stage 2: The Final, Minimal Image

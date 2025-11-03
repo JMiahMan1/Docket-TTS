@@ -45,7 +45,8 @@ def test_book_mode_upload_creates_multiple_jobs(
     mock_fetch_meta.return_value = {'title': 'Enhanced Book Title', 'author': 'Enhanced Author'}
 
     file_data = {
-        'file': (BytesIO(b"this is a test book"), 'book.txt')
+        'file': (BytesIO(b"this is a test book"), 'book.txt'),
+        'voice': 'af_bella', # Added voice to prevent error
     }
     
     response = client.post('/', data=file_data, content_type='multipart/form-data')
