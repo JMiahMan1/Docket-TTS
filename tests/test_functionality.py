@@ -15,7 +15,7 @@ def submit_and_poll_task(title, text_content, speed_rate="1.0"):
     payload = {
         'text_title': title,
         'text_input': text_content,
-        'voice': 'en_US-hfc_male-medium.onnx',
+        'voice': 'af_bella',
         'speed_rate': speed_rate
     }
     
@@ -252,7 +252,7 @@ def test_no_false_positive_on_et_al():
 def test_contextual_verse_normalization_prevents_mangling():
     """
     Tests the specific bug where a chapter context was not carried over,
-    leading to later rules mangling unprocessed verses (e.g., '1:1' -> 'one:one').
+    leading to later rules mangling unprocessed verses (e.Example: '1:1' -> 'one:one').
     """
     title = "Contextual Verse Test"
     text = """
