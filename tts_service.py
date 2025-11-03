@@ -6,18 +6,18 @@ import unicodedata
 import yaml
 import time
 from pathlib import Path
-import os # ADDED
-import io # ADDED
-import soundfile as sf # ADDED
-import requests # ADDED
+import os
+import io
+import soundfile as sf
+import requests
 import numpy as np
-import torch # ADDED
+import torch
 
 # New import for Kokoro-TTS
-from kokoro_onnx import Kokoro # ADDED
+from kokoro_onnx import Kokoro
 
 # The URL to the VOICES.md file for dynamic voice listing
-VOICES_MD_URL = "https://huggingface.co/hexgrad/Kokoro-82M/raw/main/VOICES.md" # ADDED
+VOICES_MD_URL = "https://huggingface.co/hexgrad/Kokoro-82M/raw/main/VOICES.md"
 
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 RULES_PATH = Path(__file__).parent / "rules.yaml"
@@ -524,65 +524,83 @@ class TTSService:
         try:
             print(f"DEBUG: Text sent to Kokoro for {output_path}: '{synthesized_text[:500]}...'")
             
-            # --- FIX: Chunking text to prevent IndexError crash ---
+            # --- MODIFICATION: Chunk by paragraph for long pauses ---
             
-            # 1. Split text into sentences. This regex keeps the delimiters.
-            sentence_parts = re.split(r'([.!?]+|[\.]{3,})', synthesized_text)
-            
-            # Re-combine text with its delimiter
-            sentences = []
-            if len(sentence_parts) > 1:
-                for i in range(0, len(sentence_parts) - 1, 2):
-                    sentence = (sentence_parts[i] + sentence_parts[i+1]).strip()
-                    if sentence:
-                        sentences.append(sentence)
-                if len(sentence_parts) % 2 != 0:
-                    trailing = sentence_parts[-1].strip()
-                    if trailing:
-                        sentences.append(trailing)
-            elif len(sentence_parts) == 1:
-                sentences = [sentence_parts[0].strip()]
-            
-            if not sentences:
-                print(f"WARNING: Text splitting resulted in 0 sentences for {output_path}. Synthesizing silence.")
-                return self.synthesize("", output_path)
+            current_sample_rate = 24000 # Kokoro's default
+            long_pause_duration_s = 0.75 # Insert 0.75s of silence for paragraph breaks
+            pause_samples = np.zeros(int(long_pause_duration_s * current_sample_rate))
 
             all_samples = []
-            current_sample_rate = 24000 # Kokoro's default
-
-            # 2. Synthesize audio for each sentence chunk
-            for i, sentence in enumerate(sentences):
-                if not sentence or not sentence.strip():
+            
+            # 1. Split text into paragraphs based on one or more empty lines
+            paragraphs = re.split(r'[\n\r]{2,}', synthesized_text)
+            
+            for i, paragraph in enumerate(paragraphs):
+                paragraph = paragraph.strip()
+                if not paragraph:
                     continue
+
+                # 2. Split each paragraph into sentences (the original chunking logic)
+                sentence_parts = re.split(r'([.!?]+|[\.]{3,})', paragraph)
+                sentences = []
+                if len(sentence_parts) > 1:
+                    for j in range(0, len(sentence_parts) - 1, 2):
+                        sentence = (sentence_parts[j] + sentence_parts[j+1]).strip()
+                        if sentence:
+                            sentences.append(sentence)
+                    if len(sentence_parts) % 2 != 0:
+                        trailing = sentence_parts[-1].strip()
+                        if trailing:
+                            sentences.append(trailing)
+                elif len(sentence_parts) == 1:
+                    sentences = [sentence_parts[0].strip()]
+                
+                if not sentences:
+                    continue
+
+                paragraph_samples = []
+                # 3. Synthesize audio for each sentence in the paragraph
+                for sentence in sentences:
+                    if not sentence or not sentence.strip():
+                        continue
                     
-                print(f"DEBUG: Synthesizing chunk {i+1}/{len(sentences)} for {output_path}")
-                try:
-                    samples, sample_rate = self.kokoro.create(
-                        text=sentence, 
-                        voice=self.voice_data, # Use the loaded tensor or string
-                        speed=kokoro_speed, 
-                        lang=self.lang
-                    )
-                    all_samples.append(samples)
-                    current_sample_rate = sample_rate
-                except Exception as e:
-                    print(f"ERROR: Kokoro failed on chunk: '{sentence}'. Error: {e}. Skipping chunk.")
-                    all_samples.append(np.zeros(int(0.1 * current_sample_rate)))
+                    print(f"DEBUG: Synthesizing sentence... '{sentence[:50]}...'")
+                    try:
+                        samples, sample_rate = self.kokoro.create(
+                            text=sentence, 
+                            voice=self.voice_data, # Use the loaded tensor or string
+                            speed=kokoro_speed, 
+                            lang=self.lang
+                        )
+                        paragraph_samples.append(samples)
+                        current_sample_rate = sample_rate
+                    except Exception as e:
+                        print(f"ERROR: Kokoro failed on chunk: '{sentence}'. Error: {e}. Skipping chunk.")
+                        paragraph_samples.append(np.zeros(int(0.1 * current_sample_rate)))
+
+                # 4. Stitch the sentences of this paragraph together
+                if paragraph_samples:
+                    all_samples.append(np.concatenate(paragraph_samples))
+                    
+                    # 5. Add a long pause *after* the paragraph (if it's not the last one)
+                    if i < len(paragraphs) - 1:
+                        print("DEBUG: Adding long pause between paragraphs.")
+                        all_samples.append(pause_samples)
 
             if not all_samples:
                 print(f"WARNING: No audio samples were generated for {output_path}. Synthesizing silence.")
                 return self.synthesize("", output_path)
 
-            # 3. Concatenate all audio samples into one array
+            # 6. Concatenate all paragraph audio and pauses into one array
             final_samples = np.concatenate(all_samples)
-            # --- END FIX ---
+            # --- END MODIFICATION ---
 
-            # 4. Write the concatenated samples to a temporary in-memory WAV file
+            # 7. Write the concatenated samples to a temporary in-memory WAV file
             temp_wav_io = io.BytesIO()
             sf.write(temp_wav_io, final_samples, current_sample_rate, format='wav') 
             temp_wav_io.seek(0)
             
-            # 5. Convert the in-memory WAV data to the final MP3 file using FFmpeg
+            # 8. Convert the in-memory WAV data to the final MP3 file using FFmpeg
             ffmpeg_command = [
                 "ffmpeg", "-y", 
                 "-i", "pipe:",  # -i pipe: reads from stdin
