@@ -12,11 +12,8 @@ import soundfile as sf
 import requests
 import numpy as np
 import torch
-
-# New import for Kokoro-TTS
 from kokoro_onnx import Kokoro
 
-# The URL to the VOICES.md file for dynamic voice listing
 VOICES_MD_URL = "https://huggingface.co/hexgrad/Kokoro-82M/raw/main/VOICES.md"
 
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
@@ -55,7 +52,6 @@ HEBREW_TO_ENGLISH = None
 
 def ensure_translation_models_are_loaded():
     """Checks for and installs translation models if they are not present, using a lock to prevent concurrent installation."""
-    # Imports moved inside to respect the user's intent to lower app startup time
     try:
         from argostranslate import translate
         import argostranslate.package
@@ -67,20 +63,15 @@ def ensure_translation_models_are_loaded():
     if HEBREW_TO_ENGLISH:
         return
 
-    # 1. First, attempt to load the model (in case it was already installed by a previous run/process).
     try:
         HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
         if HEBREW_TO_ENGLISH:
-            return # Successfully loaded, no need to proceed with installation.
+            return
     except Exception:
-        # Pass and proceed to installation/locking if loading failed.
         pass
     
-    # 2. Check for the lock file to prevent a race condition during installation.
     if LOCK_FILE.exists():
-        # Another process is installing. Wait briefly and try to load again.
         print("Lock file found. Waiting for other process to finish Argos installation...")
-        # Wait for up to 20 seconds to allow the other process to finish
         for _ in range(20):
             time.sleep(1)
             try:
@@ -91,13 +82,10 @@ def ensure_translation_models_are_loaded():
             except:
                 continue
         
-        # If after waiting, we still can't load, something failed.
         print("Warning: Timed out waiting for Argos installation lock.")
         return
 
-    # 3. If no lock, acquire the lock and proceed with installation (the critical section).
     try:
-        # Use exist_ok=False to ensure only one process creates the file (acquires the lock)
         LOCK_FILE.touch(exist_ok=False) 
         print("Acquired Argos installation lock. Starting download/install.")
 
@@ -113,12 +101,10 @@ def ensure_translation_models_are_loaded():
         )
         
         if package_to_install:
-            # Check if the package is already installed to avoid unnecessary installation attempts
             if not getattr(package_to_install, 'installed', False): 
                 print(f"Downloading and installing Argos Translate package: {package_to_install}")
                 package_to_install.install()
             
-            # Attempt to load the model after successful install
             HEBREW_TO_ENGLISH = translate.get_translation_from_codes("he", "en")
         else:
             print("Warning: Hebrew to English translation package not found in Argos Translate index.")
@@ -127,7 +113,6 @@ def ensure_translation_models_are_loaded():
         print(f"Warning: Could not initialize Hebrew translation model: {e}")
         HEBREW_TO_ENGLISH = None
     finally:
-        # 4. Ensure the lock is released (even if installation failed).
         if LOCK_FILE.exists():
             LOCK_FILE.unlink()
             print("Released Argos installation lock.")
@@ -366,10 +351,8 @@ def time_replacer(match):
     period_words = " ".join(list(period.lower())) # Creates "a m" or "p m"
     
     if minutes == "00":
-        # For times like 7:00 AM, say "seven a m"
         return f"{hour_words} {period_words}"
     else:
-        # For times like 8:30 AM, say "eight thirty a m"
         minutes_words = _inflect.number_to_words(int(minutes))
         return f"{hour_words} {minutes_words} {period_words}"
 
@@ -439,7 +422,6 @@ def normalize_text(text: str) -> str:
 
     return text.strip()
 
-# MODIFIED TTSService CLASS IMPLEMENTATION
 class TTSService:
     """
     Text-to-Speech service using Kokoro-TTS (ONNX) for synthesis
@@ -456,8 +438,6 @@ class TTSService:
         self.voice_name = voice_name
         self.voice_data = voice_data
         
-        # --- Kokoro-TTS Initialization ---
-        # Rely on environment variables/defaults for model/voice file paths
         self.voices_folder = Path(os.environ.get("KOKORO_VOICES_PATH", "/app/voices"))
         self.model_path = self.voices_folder / os.environ.get("KOKORO_MODEL_FILE", "kokoro-v1.0.onnx")
         self.voices_file_path = self.voices_folder / os.environ.get("KOKORO_VOICES_FILE", "voices-v1.0.bin")
@@ -469,16 +449,12 @@ class TTSService:
 
         print(f"DEBUG: Initializing Kokoro TTS with model: {self.model_path}")
         
-        # Initialize the Kokoro model
         self.kokoro = Kokoro(
             model_path=str(self.model_path), 
             voices_path=str(self.voices_file_path)
         )
         
-        # Determine language code for Kokoro's 'lang' parameter (e.g., 'en-us', 'en-gb', 'ja', etc.)
-        # This now safely uses the voice_name string
         lang_prefix = self.voice_name.split('_')[0]
-        # Basic language mapping based on Kokoro conventions (af/am=en-us, bf/bm=en-gb)
         if lang_prefix.startswith('a'):
             self.lang = 'en-us'
         elif lang_prefix.startswith('b'):
@@ -488,15 +464,13 @@ class TTSService:
         elif lang_prefix.startswith('z'):
             self.lang = 'cmn'
         else:
-            self.lang = 'en' # Default fallback
-        # --- End Kokoro-TTS Initialization ---
+            self.lang = 'en'
 
     def synthesize(self, text: str, output_path: str):
         synthesized_text = text
 
         if not synthesized_text or not synthesized_text.strip():
             print(f"WARNING: No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
-            # Changed sample rate to 24000 to match Kokoro's default output
             silence_command = [
                 "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
                 "-t", "0.5", "-acodec", "libmp3lame", "-q:a", "9", output_path
@@ -507,32 +481,26 @@ class TTSService:
             except Exception as e:
                 raise RuntimeError(f"FFmpeg failed to generate silent audio: {e}")
 
-        # Piper's speed_rate was a length_scale (lower number = faster).
-        # Kokoro's speed parameter is a direct multiplier (higher number = faster).
         try:
             length_scale = float(self.speed_rate)
         except ValueError:
-            length_scale = 1.0 # Default if conversion fails
+            length_scale = 1.0 
 
         if length_scale <= 0.0:
             length_scale = 1.0 
         
-        # Convert length_scale to speed multiplier (1/length_scale)
         kokoro_speed = 1.0 / length_scale
-        kokoro_speed = max(0.5, min(kokoro_speed, 2.0)) # Clamp for safety
+        kokoro_speed = max(0.5, min(kokoro_speed, 2.0)) 
         
         try:
             print(f"DEBUG: Text sent to Kokoro for {output_path}: '{synthesized_text[:500]}...'")
             
-            # --- MODIFICATION: Chunk by paragraph for long pauses ---
-            
-            current_sample_rate = 24000 # Kokoro's default
-            long_pause_duration_s = 0.75 # Insert 0.75s of silence for paragraph breaks
+            current_sample_rate = 24000
+            long_pause_duration_s = 0.75
             pause_samples = np.zeros(int(long_pause_duration_s * current_sample_rate))
 
             all_samples = []
             
-            # 1. Split text into paragraphs based on one or more empty lines
             paragraphs = re.split(r'[\n\r]{2,}', synthesized_text)
             
             for i, paragraph in enumerate(paragraphs):
@@ -540,8 +508,7 @@ class TTSService:
                 if not paragraph:
                     continue
 
-                # 2. Split each paragraph into sentences (the original chunking logic)
-                sentence_parts = re.split(r'([.!?]+|[\.]{3,})', paragraph)
+                sentence_parts = re.split(r'([.!?]+|[\.]{3,}|,)', paragraph)
                 sentences = []
                 if len(sentence_parts) > 1:
                     for j in range(0, len(sentence_parts) - 1, 2):
@@ -559,7 +526,6 @@ class TTSService:
                     continue
 
                 paragraph_samples = []
-                # 3. Synthesize audio for each sentence in the paragraph
                 for sentence in sentences:
                     if not sentence or not sentence.strip():
                         continue
@@ -568,7 +534,7 @@ class TTSService:
                     try:
                         samples, sample_rate = self.kokoro.create(
                             text=sentence, 
-                            voice=self.voice_data, # Use the loaded tensor or string
+                            voice=self.voice_data,
                             speed=kokoro_speed, 
                             lang=self.lang
                         )
@@ -578,11 +544,9 @@ class TTSService:
                         print(f"ERROR: Kokoro failed on chunk: '{sentence}'. Error: {e}. Skipping chunk.")
                         paragraph_samples.append(np.zeros(int(0.1 * current_sample_rate)))
 
-                # 4. Stitch the sentences of this paragraph together
                 if paragraph_samples:
                     all_samples.append(np.concatenate(paragraph_samples))
                     
-                    # 5. Add a long pause *after* the paragraph (if it's not the last one)
                     if i < len(paragraphs) - 1:
                         print("DEBUG: Adding long pause between paragraphs.")
                         all_samples.append(pause_samples)
@@ -591,22 +555,18 @@ class TTSService:
                 print(f"WARNING: No audio samples were generated for {output_path}. Synthesizing silence.")
                 return self.synthesize("", output_path)
 
-            # 6. Concatenate all paragraph audio and pauses into one array
             final_samples = np.concatenate(all_samples)
-            # --- END MODIFICATION ---
 
-            # 7. Write the concatenated samples to a temporary in-memory WAV file
             temp_wav_io = io.BytesIO()
             sf.write(temp_wav_io, final_samples, current_sample_rate, format='wav') 
             temp_wav_io.seek(0)
             
-            # 8. Convert the in-memory WAV data to the final MP3 file using FFmpeg
             ffmpeg_command = [
                 "ffmpeg", "-y", 
-                "-i", "pipe:",  # -i pipe: reads from stdin
+                "-i", "pipe:",
                 "-threads", "0", 
                 "-acodec", "libmp3lame", 
-                "-q:a", "2", # VBR quality setting
+                "-q:a", "2",
                 output_path
             ]
             
@@ -632,7 +592,6 @@ class TTSService:
 
         return output_path, synthesized_text
 
-# --- Dynamic voice listing function (NEW) ---
 def get_kokoro_voices() -> list[tuple[str, str, str]]:
     """
     Dynamically fetches the list of available Kokoro voices from the VOICES.md file 
@@ -641,7 +600,6 @@ def get_kokoro_voices() -> list[tuple[str, str, str]]:
     """
     voices = []
     
-    # Simple, minimal fallback list if dynamic fetch fails
     fallback_voices = [
         ('af_bella', 'American Female (Bella)', 'Clear, expressive American female voice.'),
         ('am_adam', 'American Male (Adam)', 'A common American male voice.'),
@@ -658,19 +616,15 @@ def get_kokoro_voices() -> list[tuple[str, str, str]]:
 
     current_category = "Unknown"
     
-    # Parse the Markdown table structure
     for line in content.splitlines():
-        # Check for headers to determine language/category
         if line.startswith('# '):
             current_category = line.split('#')[-1].strip()
             continue
         
-        # Matches lines starting with a voice name like 'af_bella' followed by '|'
         match = re.match(r'^\s*([a-z]{2}_[a-z]+)\s*\|', line)
         if match:
             voice_name = match.group(1).strip()
             
-            # Simple derivation for display name
             parts = voice_name.split('_')
             language = current_category.split('(')[0].strip() if current_category != "Unknown" else "Unknown"
             gender_prefix = parts[0][1]
