@@ -3,7 +3,7 @@
 FROM fedora:42 AS base
 
 # Install all specified system dependencies, build tools, and Fedora-provided Python packages into the /install_root directory.
-RUN dnf install -y dnf-plugins-core wget && \
+RUN dnf install -y dnf-plugins-core curl && \
     dnf install -y --use-host-config --installroot=/install_root --releasever=42 \
         python3 python3-pip python3-virtualenv \
         poppler-utils \
@@ -46,9 +46,16 @@ RUN rm -f /install_root/etc/resolv.conf && \
         https://github.com/explosion/spacy-models/releases/download/xx_sent_ud_sm-3.8.0/xx_sent_ud_sm-3.8.0-py3-none-any.whl
 
 # Pre-download the argostranslate models to prevent runtime downloads
-RUN wget -q https://github.com/argosopentech/argos-translate/releases/latest/download/translate-he_en.argosmodel -O /tmp/he_en.argosmodel && \
-    /install_root/opt/venv/bin/argos-translate --install /tmp/he_en.argosmodel && \
-    rm /tmp/he_en.argosmodel
+RUN set -eux; \
+    echo "Downloading Argos he→en model..."; \
+    mkdir -p /tmp && \
+    curl -L --retry 5 --connect-timeout 15 \
+      -o /tmp/he_en.argosmodel \
+      https://github.com/argosopentech/argos-translate/releases/latest/download/translate-he_en.argosmodel && \
+    echo "Installing Argos model..."; \
+    /install_root/opt/venv/bin/argos-translate --install /tmp/he_en.argosmodel || \
+      /install_root/opt/venv/bin/python -m argostranslate.package install /tmp/he_en.argosmodel && \
+    rm -f /tmp/he_en.argosmodel
 
 # Define variables for Kokoro model and voice paths
 ENV KOKORO_VOICES_PATH=/app/voices
