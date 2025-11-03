@@ -472,7 +472,7 @@ class TTSService:
         # Initialize the Kokoro model
         self.kokoro = Kokoro(
             model_path=str(self.model_path), 
-            voice_path=str(self.voices_file_path)
+            voices_path=str(self.voices_file_path)
         )
         
         # Determine language code for Kokoro's 'lang' parameter (e.g., 'en-us', 'en-gb', 'ja', etc.)
