@@ -40,7 +40,9 @@ RUN rm -f /install_root/etc/resolv.conf && \
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
         torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
-        argostranslate xx-sent-ud-sm soundfile kokoro-onnx
+        argostranslate soundfile kokoro-onnx && \
+    chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
+        https://github.com/explosion/spacy-models/releases/download/xx_sent_ud_sm-3.8.0/xx_sent_ud_sm-3.8.0-py3-none-any.whl
 
 # Pre-download the argostranslate models to prevent runtime downloads
 RUN chroot /install_root /opt/venv/bin/python -c " \
