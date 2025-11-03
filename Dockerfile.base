@@ -40,7 +40,18 @@ RUN rm -f /install_root/etc/resolv.conf && \
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
         torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
-        argostranslate soundfile kokoro-onnx
+        argostranslate xx-sent-ud-sm soundfile kokoro-onnx
+
+# Pre-download the argostranslate models to prevent runtime downloads
+RUN chroot /install_root /opt/venv/bin/python -c " \
+    import argostranslate.package; \
+    argostranslate.package.update_package_index(); \
+    available_packages = argostranslate.package.get_available_packages(); \
+    package_to_install = next(filter(lambda x: x.from_code == 'he' and x.to_code == 'en', available_packages), None); \
+    if package_to_install: \
+        package_to_install.install(); \
+    else: \
+        print('Could not find he->en package to install.')"
 
 # Define variables for Kokoro model and voice paths
 ENV KOKORO_VOICES_PATH=/app/voices

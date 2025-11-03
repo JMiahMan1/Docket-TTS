@@ -16,6 +16,7 @@ from kokoro_onnx import Kokoro # ADDED
 
 # The URL to the VOICES.md file for dynamic voice listing
 VOICES_MD_URL = "https://huggingface.co/hexgrad/Kokoro-82M/raw/main/VOICES.md" # ADDED
+KOKORO_MODEL_REPO_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 RULES_PATH = Path(__file__).parent / "rules.yaml"
@@ -437,6 +438,23 @@ def normalize_text(text: str) -> str:
 
     return text.strip()
 
+def _download_model_file(file_path: Path, file_name: str):
+    """Downloads a model file if it's missing."""
+    if not file_path.exists():
+        print(f"WARNING: Model file not found at {file_path}. Attempting to download...")
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        url = KOKORO_MODEL_REPO_URL + file_name
+        try:
+            with requests.get(url, stream=True) as r:
+                r.raise_for_status()
+                with open(file_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            print(f"Successfully downloaded {file_name} to {file_path}")
+        except Exception as e:
+            print(f"FATAL: Failed to download model file {file_name} from {url}. Error: {e}")
+            raise
+
 # MODIFIED TTSService CLASS IMPLEMENTATION
 class TTSService:
     """
@@ -449,15 +467,16 @@ class TTSService:
         self.voice = voice_name
         
         # --- Kokoro-TTS Initialization ---
-        # Rely on environment variables/defaults for model/voice file paths
+        model_file_name = os.environ.get("KOKORO_MODEL_FILE", "kokoro-v1.0.int8.onnx")
+        voices_file_name = os.environ.get("KOKORO_VOICES_FILE", "voices-v1.0.bin")
+        
         self.voices_folder = Path(os.environ.get("KOKORO_VOICES_PATH", "/app/voices"))
-        self.model_path = self.voices_folder / os.environ.get("KOKORO_MODEL_FILE", "kokoro-v1.0.onnx")
-        self.voices_file_path = self.voices_folder / os.environ.get("KOKORO_VOICES_FILE", "voices-v1.0.bin")
+        self.model_path = self.voices_folder / model_file_name
+        self.voices_file_path = self.voices_folder / voices_file_name
 
-        if not self.model_path.exists():
-            raise FileNotFoundError(f"Kokoro model not found at: {self.model_path}")
-        if not self.voices_file_path.exists():
-            raise FileNotFoundError(f"Kokoro voices file not found at: {self.voices_file_path}")
+        # Check and download files if they don't exist
+        _download_model_file(self.model_path, model_file_name)
+        _download_model_file(self.voices_file_path, voices_file_name)
 
         print(f"DEBUG: Initializing Kokoro TTS with model: {self.model_path}")
         

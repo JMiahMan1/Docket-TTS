@@ -57,7 +57,7 @@
                                     <select class="form-select" id="voice" name="voice">
                                         {% if voices %}
                                             {% for v in voices %}
-                                                <option value="{{ v.id }}" {% if 'hfc_male' in v.id %}selected{% endif %}>{{ v.name }}</option>
+                                                <option value="{{ v.id }}" {% if v.id == 'af_bella' %}selected{% endif %}>{{ v.name }}</option>
                                             {% endfor %}
                                         {% else %}
                                             <option value="" disabled>Loading voices...</option>
@@ -149,8 +149,7 @@
 
     function updateSpeedValue(value) {
         const speedDisplay = document.getElementById('speed-value');
-        // The Piper --length_scale is inverse to speed, so we adjust the display value
-        // MODIFIED: Simplified the comment and removed mention of 'Piper'
+        // The speed_rate value is a length_scale (inverse)
         const speed = (1 / parseFloat(value)).toFixed(2); 
         let label = `(${speed}x)`;
         if (speed > 0.95 && speed < 1.05) {

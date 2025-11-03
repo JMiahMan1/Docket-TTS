@@ -30,16 +30,14 @@ from logging.handlers import RotatingFileHandler
 from huggingface_hub import list_repo_files, hf_hub_download
 from difflib import SequenceMatcher
 
-from tts_service import TTSService, normalize_text
+from tts_service import TTSService, normalize_text, get_kokoro_voices
 import text_cleaner
 import chapterizer
 
 APP_VERSION = "0.0.4"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
-VOICES_FOLDER = '/app/voices'
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'epub'}
-PIPER_VOICES_REPO = "rhasspy/piper-voices"
 LARGE_FILE_WORD_THRESHOLD = 8000
 
 app = Flask(__name__)
@@ -89,90 +87,27 @@ except Exception as e:
 if os.environ.get('RUNNING_IN_DOCKER'):
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     os.makedirs(GENERATED_FOLDER, exist_ok=True)
-    os.makedirs(VOICES_FOLDER, exist_ok=True)
 
-CACHED_PIPER_VOICES = None
-def get_piper_voices():
-    global CACHED_PIPER_VOICES
-    if CACHED_PIPER_VOICES is not None:
-        return CACHED_PIPER_VOICES
+CACHED_VOICES = None
+def get_available_voices():
+    global CACHED_VOICES
+    if CACHED_VOICES is not None:
+        return CACHED_VOICES
     
-    app.logger.info("Fetching Piper voice list from Hugging Face Hub...")
+    app.logger.info("Fetching Kokoro voice list...")
     try:
-        repo_files = list_repo_files(PIPER_VOICES_REPO)
+        # Returns list of tuples: (value, display_name, description)
+        kokoro_voices = get_kokoro_voices()
         voices = []
-        for f in repo_files:
-            if f.startswith("en/") and f.endswith(".onnx"):
-                voice_id = Path(f).name
-                parts = voice_id.split('-')
-                if len(parts) >= 3:
-                    lang_country = parts[0]
-                    name = parts[1].replace('_', ' ').title()
-                    quality = parts[2]
-                    readable_name = f"{name} ({lang_country} - {quality})"
-                    voices.append({"id": voice_id, "name": readable_name, "repo_path": f})
+        for val, name, _ in kokoro_voices:
+            voices.append({"id": val, "name": name})
         
-        CACHED_PIPER_VOICES = sorted(voices, key=lambda v: v['name'])
-        app.logger.info(f"Successfully fetched and cached {len(CACHED_PIPER_VOICES)} voices.")
-        return CACHED_PIPER_VOICES
+        CACHED_VOICES = sorted(voices, key=lambda v: v['name'])
+        app.logger.info(f"Successfully fetched and cached {len(CACHED_VOICES)} voices.")
+        return CACHED_VOICES
     except Exception as e:
-        app.logger.error(f"Could not fetch voices from Hugging Face Hub: {e}")
-        return list_available_voices()
-
-def ensure_voice_available(voice_name):
-    all_voices = get_piper_voices()
-    voice_info = next((v for v in all_voices if v['id'] == voice_name), None)
-    
-    if not voice_info:
-        raise ValueError(f"Could not find metadata for voice '{voice_name}' to download.")
-
-    full_voice_path = Path(VOICES_FOLDER) / voice_info['repo_path']
-    full_config_path = full_voice_path.with_suffix(full_voice_path.suffix + ".json")
-
-    if full_voice_path.exists() and full_config_path.exists():
-        app.logger.info(f"Voice '{voice_name}' found locally at {full_voice_path}")
-        return str(full_voice_path)
-
-    if not redis_client:
-        app.logger.warning("Redis client not available. Proceeding without lock. This may cause issues with parallel downloads.")
-    
-    lock_key = f"lock:voice-download:{voice_name}"
-    lock_acquired = False
-    
-    try:
-        wait_start_time = time.time()
-        while time.time() - wait_start_time < 120:
-            if redis_client:
-                lock_acquired = redis_client.set(lock_key, "1", nx=True, ex=60)
-            
-            if lock_acquired:
-                app.logger.info(f"Acquired lock for downloading voice '{voice_name}'.")
-                break
-            else:
-                app.logger.info(f"Waiting for lock on voice '{voice_name}'...")
-                time.sleep(2)
-        else:
-            raise RuntimeError(f"Could not acquire lock for voice '{voice_name}' after 2 minutes.")
-
-        if full_voice_path.exists() and full_config_path.exists():
-            app.logger.info(f"Voice '{voice_name}' was downloaded by another worker while waiting for lock.")
-            return str(full_voice_path)
-
-        app.logger.warning(f"Voice '{voice_name}' not found locally. Starting download...")
-        
-        hf_hub_download(repo_id=PIPER_VOICES_REPO, filename=voice_info['repo_path'], local_dir=VOICES_FOLDER, local_dir_use_symlinks=False)
-        hf_hub_download(repo_id=PIPER_VOICES_REPO, filename=voice_info['repo_path'] + ".json", local_dir=VOICES_FOLDER, local_dir_use_symlinks=False)
-        
-        app.logger.info(f"Successfully downloaded voice: {voice_name}")
-        return str(full_voice_path)
-
-    except Exception as e:
-        app.logger.error(f"Failed to ensure voice {voice_name} is available: {e}")
-        raise
-    finally:
-        if lock_acquired and redis_client:
-            redis_client.delete(lock_key)
-            app.logger.info(f"Released lock for voice '{voice_name}'.")
+        app.logger.error(f"Could not fetch voices: {e}")
+        return [] # Return empty list on failure
 
 def human_readable_size(size, decimal_places=2):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -326,14 +261,6 @@ def fetch_enhanced_metadata(title, author):
     
     return metadata
 
-def list_available_voices():
-    voices = []
-    voice_dir = Path(VOICES_FOLDER)
-    if voice_dir.is_dir():
-        for voice_file in voice_dir.glob("*.onnx"):
-            voices.append({"id": voice_file.name, "name": voice_file.stem})
-    return sorted(voices, key=lambda v: v['name'])
-
 def clean_filename_part(name_part):
     s_name = re.sub(r'[^\w\s-]', '', name_part)
     s_name = re.sub(r'[-\s]+', ' ', s_name).strip()
@@ -370,8 +297,7 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         status_msg = f'Processing: {book_metadata.get("title", "Unknown")} - Ch. {chapter_details["number"]} "{chapter_details["title"][:20]}..."'
         self.update_state(state='PROGRESS', meta={'status': status_msg})
         
-        full_voice_path = ensure_voice_available(voice_name)
-        tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
+        tts = TTSService(voice_name=voice_name, speed_rate=speed_rate)
         
         final_content = chapter_content 
         if chapter_details.get("number") == 1:
@@ -420,7 +346,6 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
     generated_folder = current_app.config['GENERATED_FOLDER']
     try:
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Checking voice model...'})
-        full_voice_path = ensure_voice_available(voice_name)
 
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Reading, cleaning, and normalizing text...'})
         
@@ -455,7 +380,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         safe_output_filename = secure_filename(output_filename)
         output_filepath = os.path.join(generated_folder, safe_output_filename)
         
-        tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
+        tts = TTSService(voice_name=voice_name, speed_rate=speed_rate)
         _, synthesized_text = tts.synthesize(final_content_for_synthesis, output_filepath)
         
         cover_url = enhanced_metadata.get('cover_url', '')
@@ -695,7 +620,7 @@ def upload_file():
             flash('No processable content was found in the uploaded file(s).', 'error')
             return redirect(request.url)
 
-    voices = get_piper_voices()
+    voices = get_available_voices()
     return render_template('index.html', voices=voices)
 
 @app.route('/files')
@@ -847,24 +772,22 @@ def speak_sample(voice_name):
     speed_rate = request.args.get('speed', '1.0')
 
     try:
-        full_voice_path = ensure_voice_available(voice_name)
+        safe_speed = str(speed_rate).replace('.', 'p')
+        safe_voice_name = secure_filename(Path(voice_name).stem)
+        filename = f"sample_{safe_voice_name}_speed_{safe_speed}.mp3"
+        filepath = os.path.join(app.config["GENERATED_FOLDER"], filename)
+        
+        normalized_sample_text = normalize_text(sample_text)
+
+        if not os.path.exists(filepath):
+            try:
+                tts = TTSService(voice_name=voice_name, speed_rate=speed_rate)
+                tts.synthesize(normalized_sample_text, filepath)
+            except Exception as e:
+                return f"Error generating sample: {e}", 500
+        return send_from_directory(app.config["GENERATED_FOLDER"], filename)
     except Exception as e:
         return f"Error preparing voice sample: {e}", 500
-
-    safe_speed = str(speed_rate).replace('.', 'p')
-    safe_voice_name = secure_filename(Path(voice_name).stem)
-    filename = f"sample_{safe_voice_name}_speed_{safe_speed}.mp3"
-    filepath = os.path.join(app.config["GENERATED_FOLDER"], filename)
-    
-    normalized_sample_text = normalize_text(sample_text)
-
-    if not os.path.exists(filepath):
-        try:
-            tts = TTSService(voice_path=full_voice_path, speed_rate=speed_rate)
-            tts.synthesize(normalized_sample_text, filepath)
-        except Exception as e:
-            return f"Error generating sample: {e}", 500
-    return send_from_directory(app.config["GENERATED_FOLDER"], filename)
 
 @app.route('/status/<task_id>')
 def task_status(task_id):
@@ -890,7 +813,7 @@ def health_check():
 
 @app.route('/debug', methods=['GET', 'POST'])
 def debug_page():
-    voices = get_piper_voices()
+    voices = get_available_voices()
     normalized_output = ""
     original_text = ""
     log_content = "Log file not found."
