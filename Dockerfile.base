@@ -35,6 +35,8 @@ RUN dnf install -y dnf-plugins-core curl && \
     dnf clean all -y --installroot=/install_root
 
 RUN chmod 666 /dev/urandom
+RUN mkdir -p /install_root/dev && \
+    mount --bind /dev/urandom /install_root/dev/urandom || true
 RUN rm -f /install_root/etc/resolv.conf && \
     echo "nameserver 8.8.8.8" > /install_root/etc/resolv.conf && \
     chroot /install_root python3 -m venv --system-site-packages /opt/venv && \
