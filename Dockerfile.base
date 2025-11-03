@@ -23,6 +23,7 @@ RUN dnf install -y dnf-plugins-core curl && \
         python3-mutagen \
         python3-pillow \
         python3-huggingface-hub \
+        python3-numpy \
         wget \
         gcc \
         gcc-c++ \
@@ -50,8 +51,8 @@ RUN set -eux; \
     echo "Downloading Argos he→en model..."; \
     mkdir -p /tmp && \
     curl -L --retry 5 --connect-timeout 15 \
-      -o /tmp/he_en.argosmodel \
-      https://argos-net.com/v1/translate-he_en-1_5.argosmodel; \
+     -o /tmp/he_en.argosmodel \
+     https://argos-net.com/v1/translate-he_en-1_5.argosmodel; \
     echo "Installing into chrooted venv..."; \
     chroot /install_root /opt/venv/bin/python -m ensurepip || true; \
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir packaging argostranslate; \

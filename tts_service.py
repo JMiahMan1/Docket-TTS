@@ -6,22 +6,22 @@ import unicodedata
 import yaml
 import time
 from pathlib import Path
-import os
-import io
-import soundfile as sf
-import requests 
+import os # ADDED
+import io # ADDED
+import soundfile as sf # ADDED
+import requests # ADDED
+import numpy as np
+import torch # ADDED
 
 # New import for Kokoro-TTS
-from kokoro_onnx import Kokoro
+from kokoro_onnx import Kokoro # ADDED
 
 # The URL to the VOICES.md file for dynamic voice listing
 VOICES_MD_URL = "https://huggingface.co/hexgrad/Kokoro-82M/raw/main/VOICES.md" # ADDED
-KOKORO_MODEL_REPO_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 
 NORMALIZATION_PATH = Path(__file__).parent / "normalization.json"
 RULES_PATH = Path(__file__).parent / "rules.yaml"
 LOCK_FILE = Path("/tmp/argos_he_en_install.lock")
-KOKORO_DOWNLOAD_LOCK = Path("/tmp/kokoro_model.lock")
 
 if NORMALIZATION_PATH.exists():
     NORMALIZATION = json.loads(NORMALIZATION_PATH.read_text(encoding="utf-8"))
@@ -439,87 +439,45 @@ def normalize_text(text: str) -> str:
 
     return text.strip()
 
-def _download_model_file(file_path: Path, file_name: str):
-    """
-    Downloads a model file if it's missing, using a lock to prevent race conditions.
-    """
-    # 1. Check if the file already exists. If so, do nothing.
-    if file_path.exists():
-        return
-
-    # 2. Check for the lock file.
-    lock_path = KOKORO_DOWNLOAD_LOCK
-    if lock_path.exists():
-        print(f"Waiting for Kokoro model download lock: {file_name}")
-        for _ in range(60): # Wait up to 60 seconds
-            if not lock_path.exists():
-                if file_path.exists(): # Check if the file was created by the other process
-                    print(f"Model {file_name} downloaded by another process.")
-                    return
-                break
-            time.sleep(1)
-        else:
-            raise RuntimeError(f"Timed out waiting for model download lock: {lock_path}")
-
-    # 3. If the file *still* doesn't exist (e.g., lock released but download failed), acquire the lock.
-    if not file_path.exists():
-        try:
-            lock_path.touch(exist_ok=False) # Acquire lock
-            print(f"Acquired lock. Downloading {file_name}...")
-            
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            url = KOKORO_MODEL_REPO_URL + file_name
-            try:
-                with requests.get(url, stream=True) as r:
-                    r.raise_for_status()
-                    with open(file_path, 'wb') as f:
-                        for chunk in r.iter_content(chunk_size=8192):
-                            f.write(chunk)
-                print(f"Successfully downloaded {file_name} to {file_path}")
-            except Exception as e:
-                print(f"FATAL: Failed to download model file {file_name} from {url}. Error: {e}")
-                if file_path.exists():
-                    file_path.unlink() # Delete corrupted file on failure
-                raise
-        finally:
-            if lock_path.exists():
-                lock_path.unlink() # Release lock
-                print("Released Kokoro download lock.")
-
-
 # MODIFIED TTSService CLASS IMPLEMENTATION
 class TTSService:
     """
     Text-to-Speech service using Kokoro-TTS (ONNX) for synthesis
     and FFmpeg for final MP3 encoding.
     """
-    # Renamed voice_path to voice_name to reflect it's an ID, but kept the original signature
-    def __init__(self, voice_name: str, speed_rate: str = "1.0"):
+    def __init__(self, voice_name: str, voice_data: any, speed_rate: str = "1.0"):
+        """
+        Initializes the TTS service.
+        :param voice_name: The string name of the voice (e.g., "af_bella") for lang detection.
+        :param voice_data: The data to pass to Kokoro (either a string for defaults or a torch.Tensor for custom).
+        :param speed_rate: The speed rate (length scale).
+        """
         self.speed_rate = speed_rate
-        self.voice = voice_name
+        self.voice_name = voice_name
+        self.voice_data = voice_data
         
         # --- Kokoro-TTS Initialization ---
-        model_file_name = os.environ.get("KOKORO_MODEL_FILE", "kokoro-v1.0.int8.onnx")
-        voices_file_name = os.environ.get("KOKORO_VOICES_FILE", "voices-v1.0.bin")
-        
+        # Rely on environment variables/defaults for model/voice file paths
         self.voices_folder = Path(os.environ.get("KOKORO_VOICES_PATH", "/app/voices"))
-        self.model_path = self.voices_folder / model_file_name
-        self.voices_file_path = self.voices_folder / voices_file_name
+        self.model_path = self.voices_folder / os.environ.get("KOKORO_MODEL_FILE", "kokoro-v1.0.onnx")
+        self.voices_file_path = self.voices_folder / os.environ.get("KOKORO_VOICES_FILE", "voices-v1.0.bin")
 
-        # Check and download files if they don't exist, using a lock
-        _download_model_file(self.model_path, model_file_name)
-        _download_model_file(self.voices_file_path, voices_file_name)
+        if not self.model_path.exists():
+            raise FileNotFoundError(f"Kokoro model not found at: {self.model_path}")
+        if not self.voices_file_path.exists():
+            raise FileNotFoundError(f"Kokoro voices file not found at: {self.voices_file_path}")
 
         print(f"DEBUG: Initializing Kokoro TTS with model: {self.model_path}")
         
         # Initialize the Kokoro model
         self.kokoro = Kokoro(
             model_path=str(self.model_path), 
-            voices_path=str(self.voices_file_path)
+            voice_path=str(self.voices_file_path)
         )
         
         # Determine language code for Kokoro's 'lang' parameter (e.g., 'en-us', 'en-gb', 'ja', etc.)
-        lang_prefix = self.voice.split('_')[0]
+        # This now safely uses the voice_name string
+        lang_prefix = self.voice_name.split('_')[0]
         # Basic language mapping based on Kokoro conventions (af/am=en-us, bf/bm=en-gb)
         if lang_prefix.startswith('a'):
             self.lang = 'en-us'
@@ -566,22 +524,65 @@ class TTSService:
         try:
             print(f"DEBUG: Text sent to Kokoro for {output_path}: '{synthesized_text[:500]}...'")
             
-            # 1. Synthesize the audio samples using Kokoro
-            # The kokoro-onnx library uses a default sample rate of 24000
-            samples, sample_rate = self.kokoro.create(
-                text=synthesized_text, 
-                voice=self.voice, # Use the stored voice name
-                speed=kokoro_speed, 
-                lang=self.lang
-            )
+            # --- FIX: Chunking text to prevent IndexError crash ---
+            
+            # 1. Split text into sentences. This regex keeps the delimiters.
+            sentence_parts = re.split(r'([.!?]+|[\.]{3,})', synthesized_text)
+            
+            # Re-combine text with its delimiter
+            sentences = []
+            if len(sentence_parts) > 1:
+                for i in range(0, len(sentence_parts) - 1, 2):
+                    sentence = (sentence_parts[i] + sentence_parts[i+1]).strip()
+                    if sentence:
+                        sentences.append(sentence)
+                if len(sentence_parts) % 2 != 0:
+                    trailing = sentence_parts[-1].strip()
+                    if trailing:
+                        sentences.append(trailing)
+            elif len(sentence_parts) == 1:
+                sentences = [sentence_parts[0].strip()]
+            
+            if not sentences:
+                print(f"WARNING: Text splitting resulted in 0 sentences for {output_path}. Synthesizing silence.")
+                return self.synthesize("", output_path)
 
-            # 2. Write the samples to a temporary in-memory WAV file
+            all_samples = []
+            current_sample_rate = 24000 # Kokoro's default
+
+            # 2. Synthesize audio for each sentence chunk
+            for i, sentence in enumerate(sentences):
+                if not sentence or not sentence.strip():
+                    continue
+                    
+                print(f"DEBUG: Synthesizing chunk {i+1}/{len(sentences)} for {output_path}")
+                try:
+                    samples, sample_rate = self.kokoro.create(
+                        text=sentence, 
+                        voice=self.voice_data, # Use the loaded tensor or string
+                        speed=kokoro_speed, 
+                        lang=self.lang
+                    )
+                    all_samples.append(samples)
+                    current_sample_rate = sample_rate
+                except Exception as e:
+                    print(f"ERROR: Kokoro failed on chunk: '{sentence}'. Error: {e}. Skipping chunk.")
+                    all_samples.append(np.zeros(int(0.1 * current_sample_rate)))
+
+            if not all_samples:
+                print(f"WARNING: No audio samples were generated for {output_path}. Synthesizing silence.")
+                return self.synthesize("", output_path)
+
+            # 3. Concatenate all audio samples into one array
+            final_samples = np.concatenate(all_samples)
+            # --- END FIX ---
+
+            # 4. Write the concatenated samples to a temporary in-memory WAV file
             temp_wav_io = io.BytesIO()
-            # soundfile writes the samples to an in-memory stream as a WAV format
-            sf.write(temp_wav_io, samples, sample_rate, format='wav') 
+            sf.write(temp_wav_io, final_samples, current_sample_rate, format='wav') 
             temp_wav_io.seek(0)
             
-            # 3. Convert the in-memory WAV data to the final MP3 file using FFmpeg
+            # 5. Convert the in-memory WAV data to the final MP3 file using FFmpeg
             ffmpeg_command = [
                 "ffmpeg", "-y", 
                 "-i", "pipe:",  # -i pipe: reads from stdin
@@ -593,7 +594,6 @@ class TTSService:
             
             print(f"DEBUG: Running FFmpeg conversion to MP3 for {output_path}")
 
-            # Pipe the in-memory WAV data (from soundfile) to ffmpeg's stdin
             ffmpeg_process = subprocess.Popen(
                 ffmpeg_command, 
                 stdin=subprocess.PIPE, 
@@ -608,7 +608,6 @@ class TTSService:
         except FileNotFoundError as e:
             if e.filename == 'ffmpeg':
                 raise RuntimeError(f"Required command not found: {e.filename}. Please ensure FFmpeg is installed in your Docker image.") from e
-            # Removed mention of 'piper' in the error message
             raise RuntimeError(f"A file or command was not found: {e}.") from e
         except Exception as e:
             raise RuntimeError(f"Kokoro or FFmpeg process failed: {e}") from e
