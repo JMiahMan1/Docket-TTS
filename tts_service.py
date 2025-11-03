@@ -348,7 +348,7 @@ def time_replacer(match):
     hour, minutes, period = match.groups()
     
     hour_words = _inflect.number_to_words(int(hour))
-    period_words = " ".join(list(period.lower())) # Creates "a m" or "p m"
+    period_words = " ".join(list(period.lower()))
     
     if minutes == "00":
         return f"{hour_words} {period_words}"

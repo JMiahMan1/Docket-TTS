@@ -43,8 +43,6 @@ ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'epub'}
 KOKORO_VOICES_REPO = "hexgrad/Kokoro-82M"
 LARGE_FILE_WORD_THRESHOLD = 8000
 
-# These are the default voices compiled into the voices-v1.0.bin
-# They do not need to be downloaded.
 DEFAULT_KOKORO_VOICES = {'af_bella', 'am_adam', 'bf_isabella'}
 
 app = Flask(__name__)
@@ -116,13 +114,12 @@ def get_kokoro_voices():
             if f.startswith("voices/") and f.endswith(".pt"):
                 voice_id = Path(f).stem
                 if voice_id not in DEFAULT_KOKORO_VOICES:
-                    # Simple name generation
                     parts = voice_id.split('_')
                     lang_code = parts[0][:2]
                     gender = "Male" if parts[0].endswith('m') else "Female"
                     name = parts[1].capitalize()
                     
-                    lang = "American" # default
+                    lang = "American"
                     if lang_code == 'bf' or lang_code == 'bm':
                         lang = "British"
                     elif lang_code == 'ja':
@@ -138,13 +135,12 @@ def get_kokoro_voices():
         return CACHED_KOKORO_VOICES
     except Exception as e:
         app.logger.error(f"Could not fetch voices from Hugging Face Hub: {e}")
-        return voices # Return defaults on failure
+        return voices
 
 def ensure_voice_available(voice_name):
     """
-    Ensures a Kokoro voice is available.
-    If it's a default, returns the name string.
-    If it's a .pt file, downloads it and returns the loaded torch.Tensor.
+    Ensures a Kokoro .pt file is downloaded if it's not a default.
+    Always returns the voice_name string.
     """
     if voice_name in DEFAULT_KOKORO_VOICES:
         app.logger.info(f"Using default built-in voice: {voice_name}")
@@ -152,11 +148,11 @@ def ensure_voice_available(voice_name):
 
     voice_filename = f"{voice_name}.pt"
     voice_repo_path = f"voices/{voice_filename}"
-    local_voice_path = Path(VOICES_FOLDER) / voice_repo_path
+    local_voice_path = Path(VOICES_FOLDER) / voice_filename
 
     if local_voice_path.exists():
-        app.logger.info(f"Voice '{voice_name}' found locally. Loading tensor...")
-        return torch.load(local_voice_path, weights_only=True)
+        app.logger.info(f"Voice '{voice_name}' found locally.")
+        return voice_name
 
     if not redis_client:
         app.logger.warning("Redis client not available. Proceeding without lock. This may cause issues with parallel downloads.")
@@ -180,21 +176,23 @@ def ensure_voice_available(voice_name):
             raise RuntimeError(f"Could not acquire lock for voice '{voice_name}' after 2 minutes.")
 
         if local_voice_path.exists():
-            app.logger.info(f"Voice '{voice_name}' was downloaded by another worker. Loading tensor...")
-            return torch.load(local_voice_path, weights_only=True)
+            app.logger.info(f"Voice '{voice_name}' was downloaded by another worker.")
+            return voice_name
 
         app.logger.warning(f"Voice '{voice_name}' not found locally. Starting download from {KOKORO_VOICES_REPO}...")
         
+        # Download the file directly to the local_voice_path
         hf_hub_download(
             repo_id=KOKORO_VOICES_REPO,
             filename=voice_repo_path,
             local_dir=VOICES_FOLDER,
             local_dir_use_symlinks=False,
-            repo_type="model"
+            repo_type="model",
+            local_path=local_voice_path # Explicitly set the final file path
         )
         
-        app.logger.info(f"Successfully downloaded {voice_filename}. Loading tensor...")
-        return torch.load(local_voice_path, weights_only=True)
+        app.logger.info(f"Successfully downloaded {voice_filename}.")
+        return voice_name
 
     except Exception as e:
         app.logger.error(f"Failed to ensure voice {voice_name} is available: {e}")
@@ -877,7 +875,6 @@ def speak_sample(voice_name):
 
     if not os.path.exists(filepath):
         try:
-            # Load the voice data *outside* the queue for a fast sample
             voice_data = ensure_voice_available(voice_name)
             tts = TTSService(voice_name=voice_name, voice_data=voice_data, speed_rate=speed_rate)
             tts.synthesize(normalized_sample_text, filepath)
