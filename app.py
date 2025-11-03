@@ -35,7 +35,7 @@ from tts_service import TTSService, normalize_text
 import text_cleaner
 import chapterizer
 
-APP_VERSION = "0.0.5"
+APP_VERSION = "0.0.6"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
@@ -152,7 +152,7 @@ def ensure_voice_available(voice_name):
 
     voice_filename = f"{voice_name}.pt"
     voice_repo_path = f"voices/{voice_filename}"
-    local_voice_path = Path(VOICES_FOLDER) / voice_filename
+    local_voice_path = Path(VOICES_FOLDER) / voice_repo_path
 
     if local_voice_path.exists():
         app.logger.info(f"Voice '{voice_name}' found locally. Loading tensor...")
