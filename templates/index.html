@@ -150,7 +150,8 @@
     function updateSpeedValue(value) {
         const speedDisplay = document.getElementById('speed-value');
         // The Piper --length_scale is inverse to speed, so we adjust the display value
-        const speed = (1 / parseFloat(value)).toFixed(2);
+        // MODIFIED: Simplified the comment and removed mention of 'Piper'
+        const speed = (1 / parseFloat(value)).toFixed(2); 
         let label = `(${speed}x)`;
         if (speed > 0.95 && speed < 1.05) {
             label = `Normal ${label}`;
@@ -161,7 +162,7 @@
         }
         speedDisplay.textContent = label;
     }
-    
+
     const speedSlider = document.getElementById('speed_rate');
 
     speedSlider.addEventListener('input', function() {

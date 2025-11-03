@@ -40,20 +40,20 @@ RUN rm -f /install_root/etc/resolv.conf && \
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
         torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
-        argostranslate piper-tts
+        argostranslate soundfile kokoro-onnx
 
-# Define variables for voice paths to keep commands clean
-ENV HFC_MALE_PATH=/app/voices/en/en_US/hfc_male/medium
-ENV LIBRITTS_R_PATH=/app/voices/en/en_US/libritts_r/medium
+# Define variables for Kokoro model and voice paths
+ENV KOKORO_VOICES_PATH=/app/voices
+ENV KOKORO_MODEL_FILE=kokoro-v1.0.int8.onnx
+ENV KOKORO_VOICES_FILE=voices-v1.0.bin
 
-# Create the correct subdirectory structures and download the models into them
-RUN mkdir -p /install_root${HFC_MALE_PATH} && \
-    mkdir -p /install_root${LIBRITTS_R_PATH} && \
-    chroot /install_root wget -P ${HFC_MALE_PATH} -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx && \
-    chroot /install_root wget -P ${HFC_MALE_PATH} -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_male/medium/en_US-hfc_male-medium.onnx.json && \
-    chroot /install_root wget -P ${LIBRITTS_R_PATH} -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx && \
-    chroot /install_root wget -P ${LIBRITTS_R_PATH} -q https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx.json
-
+# Create the voices directory and download the Kokoro model and voice data
+# The model and voice files below are from the kokoro-onnx GitHub project (Snippet 2.6 in search results)
+RUN mkdir -p /install_root${KOKORO_VOICES_PATH} && \
+    # Download the ONNX model file
+    chroot /install_root wget -P ${KOKORO_VOICES_PATH} -q https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/${KOKORO_MODEL_FILE} && \
+    # Download the voice data
+    chroot /install_root wget -P ${KOKORO_VOICES_PATH} -q https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/${KOKORO_VOICES_FILE}
 # ---
 
 # Stage 2: The Final, Minimal Image
