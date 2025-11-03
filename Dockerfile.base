@@ -84,7 +84,10 @@ FROM scratch
 # Copy the entire populated filesystem from the "base" stage defined above.
 COPY --from=base /install_root/ /
 
-# Set the environment and working directory for any subsequent images that use this base.
+# Set runtime environment variables so the app finds the correct model files
+ENV KOKORO_VOICES_PATH=/app/voices
+ENV KOKORO_MODEL_FILE=kokoro-v1.0.int8.onnx
+ENV KOKORO_VOICES_FILE=voices-v1.0.bin
 ENV PATH="/opt/venv/bin:$PATH"
 WORKDIR /app
 
