@@ -45,19 +45,14 @@ RUN rm -f /install_root/etc/resolv.conf && \
     # Pre-install the spaCy model dependency for argostranslate from its direct URL
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
         https://github.com/explosion/spacy-models/releases/download/xx_sent_ud_sm-3.8.0/xx_sent_ud_sm-3.8.0-py3-none-any.whl
-
-# Pre-download the argostranslate models to prevent runtime downloads
-RUN set -eux; \
-    echo "Downloading Argos he→en model..."; \
-    mkdir -p /tmp && \
-    curl -L --retry 5 --connect-timeout 15 \
-     -o /tmp/he_en.argosmodel \
-     https://argos-net.com/v1/translate-he_en-1_5.argosmodel; \
-    echo "Installing into chrooted venv..."; \
-    chroot /install_root /opt/venv/bin/python -m ensurepip || true; \
-    chroot /install_root /opt/venv/bin/pip install --no-cache-dir packaging argostranslate; \
-    chroot /install_root /opt/venv/bin/python -m argostranslate.package install /tmp/he_en.argosmodel || true; \
-    rm -f /tmp/he_en.argosmodel
+    # Pre-download the argostranslate models to prevent runtime downloads
+    chroot /install_root /opt/venv/bin/python -c "\
+from argostranslate import package;\
+package.update_package_index();\
+available_packages = package.get_available_packages();\
+package_to_install = next(filter(lambda x: x.from_code == 'he' and x.to_code == 'en', available_packages));\
+package.install_from_path(package_to_install.download());\
+"
 
 # Define variables for Kokoro model and voice paths
 ENV KOKORO_VOICES_PATH=/app/voices
