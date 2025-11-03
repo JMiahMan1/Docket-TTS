@@ -44,7 +44,7 @@ RUN rm -f /install_root/etc/resolv.conf && \
         argostranslate soundfile kokoro-onnx && \
     # Pre-install the spaCy model dependency for argostranslate from its direct URL
     chroot /install_root /opt/venv/bin/pip install --no-cache-dir \
-        https://github.com/explosion/spacy-models/releases/download/xx_sent_ud_sm-3.8.0/xx_sent_ud_sm-3.8.0-py3-none-any.whl
+        https://github.com/explosion/spacy-models/releases/download/xx_sent_ud_sm-3.8.0/xx_sent_ud_sm-3.8.0-py3-none-any.whl && \
     # Pre-download the argostranslate models to prevent runtime downloads
     chroot /install_root /opt/venv/bin/python -c "\
 from argostranslate import package;\
