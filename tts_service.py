@@ -489,8 +489,13 @@ class TTSService:
         if length_scale <= 0.0:
             length_scale = 1.0 
         
-        kokoro_speed = length_scale
-        kokoro_speed = max(0.5, min(kokoro_speed, 2.0)) 
+        # FIX: Invert length_scale (from Piper) to a speed rate (for Kokoro)
+        # Piper: 0.8 = 80% duration (faster)
+        # Kokoro: 0.8 = 80% speed (slower)
+        # We need to calculate 1.0 / length_scale to get the correct rate.
+        if length_scale == 0: length_scale = 1.0 # Avoid ZeroDivisionError
+        kokoro_speed = 1.0 / length_scale
+        kokoro_speed = max(0.5, min(kokoro_speed, 2.0)) # Clamp to Kokoro's safe range
         
         try:
             print(f"DEBUG: Text sent to Kokoro for {output_path}: '{synthesized_text[:500]}...'")
@@ -538,9 +543,20 @@ class TTSService:
                     )
                     all_samples.append(samples)
                     current_sample_rate = sample_rate
+
+                    # FIX: Add a short, explicit pause after each chunk
+                    # to ensure punctuation-based splits are longer than comma-based pauses.
+                    pause_duration_seconds = 0.15 
+                    pause_samples = np.zeros(int(pause_duration_seconds * current_sample_rate))
+                    all_samples.append(pause_samples)
+
                 except Exception as e:
                     print(f"ERROR: Kokoro failed on chunk: '{sentence}'. Error: {e}. Skipping chunk.")
                     all_samples.append(np.zeros(int(0.1 * current_sample_rate)))
+
+            # FIX: Remove the last pause that was added, as it's at the end.
+            if all_samples:
+                all_samples.pop()
 
             if not all_samples:
                 print(f"WARNING: No audio samples were generated for {output_path}. Synthesizing silence.")
