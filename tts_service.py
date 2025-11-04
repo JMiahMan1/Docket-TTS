@@ -496,7 +496,7 @@ class TTSService:
             print(f"DEBUG: Text sent to Kokoro for {output_path}: '{synthesized_text[:500]}...'")
             
             current_sample_rate = 24000
-            long_pause_duration_s = 1.0
+            long_pause_duration_s = 1.25
             pause_samples = np.zeros(int(long_pause_duration_s * current_sample_rate))
 
             all_samples = []
