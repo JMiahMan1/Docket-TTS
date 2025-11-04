@@ -496,12 +496,12 @@ class TTSService:
             print(f"DEBUG: Text sent to Kokoro for {output_path}: '{synthesized_text[:500]}...'")
             
             # Replace paragraph breaks with a period and space to force a long pause
-            synthesized_text = re.sub(r'[\n\r]{2,}', '. ', synthesized_text)
+            synthesized_text = re.sub(r'[\n\r]{2,}', '"." ', synthesized_text)
             
             current_sample_rate = 24000
             all_samples = []
             
-            sentence_parts = re.split(r'([.!?]+|[\.]{3,})', synthesized_text)
+            sentence_parts = re.split(r'(["."!?]+|[\"."]{3,})', synthesized_text)
             sentences = []
             if len(sentence_parts) > 1:
                 for j in range(0, len(sentence_parts) - 1, 2):
