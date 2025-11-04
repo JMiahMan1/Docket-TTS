@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, ANY
 from io import BytesIO
 from app import app as flask_app
-from chapterizer import Chapter
+from chapterizer import Chapter, chapterize
 from pathlib import Path
 
 @pytest.fixture
@@ -63,3 +63,29 @@ def test_book_mode_upload_creates_multiple_jobs(
     assert first_call_args[0] == "Once upon a time."
     assert first_call_args[1] == {'title': 'Enhanced Book Title', 'author': 'Enhanced Author'}
     assert first_call_args[2]['title'] == 'The Beginning'
+
+
+def test_chapterizer_no_headings_avoids_nameerror(tmp_path):
+    """
+    Tests that chapterizing a document with no chapter headings
+    correctly processes the file as one chapter and does not
+    raise a NameError. This specifically tests the fix for the
+    typo in _apply_final_processing.
+    """
+    # Create a dummy text file with content, but no chapter headings
+    # Ensure it's long enough to pass the min_word_count filter
+    content = "This is a test document. " * 50
+    p = tmp_path / "test_doc.txt"
+    p.write_text(content, encoding="utf-8")
+
+    # Call the real chapterize function
+    try:
+        chapters = chapterize(filepath=str(p), text_content=content)
+    except NameError as e:
+        pytest.fail(f"chapterizer.py raised a NameError: {e}")
+
+    # The function should find "Full Document" and process it
+    assert len(chapters) == 1
+    assert chapters[0].number == 1
+    assert chapters[0].title == "Full Document"
+    assert chapters[0].word_count > 100
