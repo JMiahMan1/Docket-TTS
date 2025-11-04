@@ -489,67 +489,58 @@ class TTSService:
         if length_scale <= 0.0:
             length_scale = 1.0 
         
-        kokoro_speed = 1.0 / length_scale
+        kokoro_speed = length_scale
         kokoro_speed = max(0.5, min(kokoro_speed, 2.0)) 
         
         try:
             print(f"DEBUG: Text sent to Kokoro for {output_path}: '{synthesized_text[:500]}...'")
             
+            # Replace paragraph breaks with a period and space to force a long pause
+            synthesized_text = re.sub(r'[\n\r]{2,}', '. ', synthesized_text)
+            
             current_sample_rate = 24000
-            long_pause_duration_s = 1.25
-            pause_samples = np.zeros(int(long_pause_duration_s * current_sample_rate))
-
             all_samples = []
             
-            paragraphs = re.split(r'[\n\r]{2,}', synthesized_text)
+            sentence_parts = re.split(r'([.!?]+|[\.]{3,})', synthesized_text)
+            sentences = []
+            if len(sentence_parts) > 1:
+                for j in range(0, len(sentence_parts) - 1, 2):
+                    sentence = (sentence_parts[j] + sentence_parts[j+1]).strip()
+                    if sentence:
+                        sentences.append(sentence)
+                if len(sentence_parts) % 2 != 0:
+                    trailing = sentence_parts[-1].strip()
+                    if trailing:
+                        sentences.append(trailing)
+            elif len(sentence_parts) == 1:
+                sentences = [sentence_parts[0].strip()]
             
-            for i, paragraph in enumerate(paragraphs):
-                paragraph = paragraph.strip()
-                if not paragraph:
-                    continue
+            if not sentences:
+                # Handle cases like "First we will discuss this, then that"
+                # which have no sentence-ending punctuation.
+                if synthesized_text.strip():
+                    sentences = [synthesized_text.strip()]
+                else:
+                    print(f"WARNING: No text to synthesize for {output_path}. Synthesizing silence.")
+                    return self.synthesize("", output_path)
 
-                sentence_parts = re.split(r'([.!?]+|[\.]{3,})', paragraph)
-                sentences = []
-                if len(sentence_parts) > 1:
-                    for j in range(0, len(sentence_parts) - 1, 2):
-                        sentence = (sentence_parts[j] + sentence_parts[j+1]).strip()
-                        if sentence:
-                            sentences.append(sentence)
-                    if len(sentence_parts) % 2 != 0:
-                        trailing = sentence_parts[-1].strip()
-                        if trailing:
-                            sentences.append(trailing)
-                elif len(sentence_parts) == 1:
-                    sentences = [sentence_parts[0].strip()]
+            for sentence in sentences:
+                if not sentence or not sentence.strip():
+                    continue
                 
-                if not sentences:
-                    continue
-
-                paragraph_samples = []
-                for sentence in sentences:
-                    if not sentence or not sentence.strip():
-                        continue
-                    
-                    print(f"DEBUG: Synthesizing sentence... '{sentence[:50]}...'")
-                    try:
-                        samples, sample_rate = self.kokoro.create(
-                            text=sentence, 
-                            voice=self.voice_data,
-                            speed=kokoro_speed, 
-                            lang=self.lang
-                        )
-                        paragraph_samples.append(samples)
-                        current_sample_rate = sample_rate
-                    except Exception as e:
-                        print(f"ERROR: Kokoro failed on chunk: '{sentence}'. Error: {e}. Skipping chunk.")
-                        paragraph_samples.append(np.zeros(int(0.1 * current_sample_rate)))
-
-                if paragraph_samples:
-                    all_samples.append(np.concatenate(paragraph_samples))
-                    
-                    if i < len(paragraphs) - 1:
-                        print("DEBUG: Adding long pause between paragraphs.")
-                        all_samples.append(pause_samples)
+                print(f"DEBUG: Synthesizing sentence... '{sentence[:50]}...'")
+                try:
+                    samples, sample_rate = self.kokoro.create(
+                        text=sentence, 
+                        voice=self.voice_data,
+                        speed=kokoro_speed, 
+                        lang=self.lang
+                    )
+                    all_samples.append(samples)
+                    current_sample_rate = sample_rate
+                except Exception as e:
+                    print(f"ERROR: Kokoro failed on chunk: '{sentence}'. Error: {e}. Skipping chunk.")
+                    all_samples.append(np.zeros(int(0.1 * current_sample_rate)))
 
             if not all_samples:
                 print(f"WARNING: No audio samples were generated for {output_path}. Synthesizing silence.")
