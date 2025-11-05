@@ -139,7 +139,7 @@ def normalize_greek(text: str) -> str:
         text = text.replace(greek_word, transliteration)
 
     text = text.translate(str.maketrans(GREEK_TRANSLITERATION))
-    text = text.replace("â€™", "'")
+    text = text.replace("’", "'")
     return text
 
 def remove_superscripts(text: str) -> str:
@@ -215,9 +215,9 @@ def _format_ref_segment(book_full, chapter, verses_str):
         verses_str, suffix = verses_str[:-2].strip(), f" {BIBLE_REFS.get('ff', 'and following')}"
     elif verses_str.lower().endswith("f"):
         verses_str, suffix = verses_str[:-1].strip(), f" {BIBLE_REFS.get('f', 'and the following verse')}"
-    prefix = "verses" if any(c in verses_str for c in ",—-") else "verse"
+    prefix = "verses" if any(c in verses_str for c in ",–-") else "verse"
     verses_str = re.sub(r"(\d)([a-z])", r"\1 \2", verses_str, flags=re.IGNORECASE)
-    verses_str = verses_str.replace("—", "-").replace("-", " through ")
+    verses_str = verses_str.replace("–", "-").replace("-", " through ")
     verse_words = re.sub(r"\d+", lambda m: _inflect.number_to_words(int(m.group())), verses_str)
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
@@ -227,7 +227,7 @@ def normalize_scripture(text: str) -> str:
     book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
     book_chapter_pattern = re.compile(r'^\s*(' + book_pattern_str + r')\s+(\d+)\s*$', re.IGNORECASE | re.MULTILINE)
-    ref_pattern = re.compile(r'\b(?:(' + book_pattern_str + r')\s+)?(\d+)[:\s]([\d\w\s,.\-—]+(?:ff|f)?)', re.IGNORECASE)
+    ref_pattern = re.compile(r'\b(?:(' + book_pattern_str + r')\s+)?(\d+)[:\s]([\d\w\s,.\-–]+(?:ff|f)?)', re.IGNORECASE)
     prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
     enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
     
@@ -268,7 +268,7 @@ def normalize_scripture(text: str) -> str:
         original_match_text = match.group(0)
         opener, inner_text, closer = match.groups()
         
-        verse_abbr_match = re.match(r'^\s*v{1,2}\.\s*([\d\w\s,.\-—]+)\s*$', inner_text, re.IGNORECASE)
+        verse_abbr_match = re.match(r'^\s*v{1,2}\.\s*([\d\w\s,.\-–]+)\s*$', inner_text, re.IGNORECASE)
         if verse_abbr_match and last_context.get('book') and last_context.get('chapter'):
             verse_part = verse_abbr_match.group(1)
             book_full = CI_ABBREVIATIONS.get(last_context['book'].lower().replace('.', ''), last_context['book'])
