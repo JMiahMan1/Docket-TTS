@@ -139,7 +139,7 @@ def normalize_greek(text: str) -> str:
         text = text.replace(greek_word, transliteration)
 
     text = text.translate(str.maketrans(GREEK_TRANSLITERATION))
-    text = text.replace("’", "'")
+    text = text.replace("â€™", "'")
     return text
 
 def remove_superscripts(text: str) -> str:
@@ -215,9 +215,9 @@ def _format_ref_segment(book_full, chapter, verses_str):
         verses_str, suffix = verses_str[:-2].strip(), f" {BIBLE_REFS.get('ff', 'and following')}"
     elif verses_str.lower().endswith("f"):
         verses_str, suffix = verses_str[:-1].strip(), f" {BIBLE_REFS.get('f', 'and the following verse')}"
-    prefix = "verses" if any(c in verses_str for c in ",–-") else "verse"
+    prefix = "verses" if any(c in verses_str for c in ",â€"-") else "verse"
     verses_str = re.sub(r"(\d)([a-z])", r"\1 \2", verses_str, flags=re.IGNORECASE)
-    verses_str = verses_str.replace("–", "-").replace("-", " through ")
+    verses_str = verses_str.replace("â€"", "-").replace("-", " through ")
     verse_words = re.sub(r"\d+", lambda m: _inflect.number_to_words(int(m.group())), verses_str)
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
@@ -227,7 +227,7 @@ def normalize_scripture(text: str) -> str:
     book_keys = sorted(list(bible_abbr_keys.union(full_book_names)), key=len, reverse=True)
     book_pattern_str = '|'.join(book_keys)
     book_chapter_pattern = re.compile(r'^\s*(' + book_pattern_str + r')\s+(\d+)\s*$', re.IGNORECASE | re.MULTILINE)
-    ref_pattern = re.compile(r'\b(?:(' + book_pattern_str + r')\s+)?(\d+)[:\s]([\d\w\s,.\–-]+(?:ff|f)?)', re.IGNORECASE)
+    ref_pattern = re.compile(r'\b(?:(' + book_pattern_str + r')\s+)?(\d+)[:\s]([\d\w\s,.\â€"-]+(?:ff|f)?)', re.IGNORECASE)
     prose_pattern = re.compile(r'\b(' + book_pattern_str + r')\s+(\d+):([\d\w\s,.-]+(?:ff|f)?)', re.IGNORECASE)
     enclosed_pattern = re.compile(r'([(\[])([^)\]]+)([)\]])')
     
@@ -268,7 +268,7 @@ def normalize_scripture(text: str) -> str:
         original_match_text = match.group(0)
         opener, inner_text, closer = match.groups()
         
-        verse_abbr_match = re.match(r'^\s*v{1,2}\.\s*([\d\w\s,.\–-]+)\s*$', inner_text, re.IGNORECASE)
+        verse_abbr_match = re.match(r'^\s*v{1,2}\.\s*([\d\w\s,.\â€"-]+)\s*$', inner_text, re.IGNORECASE)
         if verse_abbr_match and last_context.get('book') and last_context.get('chapter'):
             verse_part = verse_abbr_match.group(1)
             book_full = CI_ABBREVIATIONS.get(last_context['book'].lower().replace('.', ''), last_context['book'])
@@ -432,7 +432,7 @@ class TTSService:
         Initializes the TTS service.
         :param voice_name: The string name of the voice (e.g., "af_bella") for lang detection.
         :param voice_data: The data to pass to Kokoro (either a string for defaults or a torch.Tensor for custom).
-        :param speed_rate: The speed rate (length scale).
+        :param speed_rate: The speed rate (inverse of length scale).
         """
         self.speed_rate = speed_rate
         self.voice_name = voice_name
@@ -482,31 +482,23 @@ class TTSService:
                 raise RuntimeError(f"FFmpeg failed to generate silent audio: {e}")
 
         try:
-            length_scale = float(self.speed_rate)
+            user_speed = float(self.speed_rate)
         except ValueError:
-            length_scale = 1.0 
+            user_speed = 1.0 
 
-        if length_scale <= 0.0:
-            length_scale = 1.0 
+        if user_speed <= 0.0:
+            user_speed = 1.0 
         
-        # FIX: Invert length_scale (from Piper) to a speed rate (for Kokoro)
-        # Piper: 0.8 = 80% duration (faster)
-        # Kokoro: 0.8 = 80% speed (slower)
-        # We need to calculate 1.0 / length_scale to get the correct rate.
-        if length_scale == 0: length_scale = 1.0 # Avoid ZeroDivisionError
-        kokoro_speed = 1.0 / length_scale
-        kokoro_speed = max(0.5, min(kokoro_speed, 2.0)) # Clamp to Kokoro's safe range
+        kokoro_speed = 1.0 / user_speed
+        kokoro_speed = max(0.5, min(kokoro_speed, 2.0)) 
         
         try:
             print(f"DEBUG: Text sent to Kokoro for {output_path}: '{synthesized_text[:500]}...'")
             
-            # Replace paragraph breaks with a period and space to force a long pause
-            synthesized_text = re.sub(r'[\n\r]{2,}', '"." ', synthesized_text)
-            
             current_sample_rate = 24000
             all_samples = []
             
-            sentence_parts = re.split(r'(["."!?]+|[\"."]{3,})', synthesized_text)
+            sentence_parts = re.split(r'([.!?]+|[".]{3,})', synthesized_text)
             sentences = []
             if len(sentence_parts) > 1:
                 for j in range(0, len(sentence_parts) - 1, 2):
@@ -521,8 +513,6 @@ class TTSService:
                 sentences = [sentence_parts[0].strip()]
             
             if not sentences:
-                # Handle cases like "First we will discuss this, then that"
-                # which have no sentence-ending punctuation.
                 if synthesized_text.strip():
                     sentences = [synthesized_text.strip()]
                 else:
@@ -543,20 +533,13 @@ class TTSService:
                     )
                     all_samples.append(samples)
                     current_sample_rate = sample_rate
-
-                    # FIX: Add a short, explicit pause after each chunk
-                    # to ensure punctuation-based splits are longer than comma-based pauses.
-                    pause_duration_seconds = 0.15 
-                    pause_samples = np.zeros(int(pause_duration_seconds * current_sample_rate))
-                    all_samples.append(pause_samples)
-
+                    
+                    if sentence.rstrip().endswith(('.', '!', '?')):
+                        pause_samples = np.zeros(int(0.6 * current_sample_rate))
+                        all_samples.append(pause_samples)
                 except Exception as e:
                     print(f"ERROR: Kokoro failed on chunk: '{sentence}'. Error: {e}. Skipping chunk.")
                     all_samples.append(np.zeros(int(0.1 * current_sample_rate)))
-
-            # FIX: Remove the last pause that was added, as it's at the end.
-            if all_samples:
-                all_samples.pop()
 
             if not all_samples:
                 print(f"WARNING: No audio samples were generated for {output_path}. Synthesizing silence.")
@@ -631,7 +614,6 @@ def get_kokoro_voices() -> list[tuple[str, str, str]]:
         match = re.match(r'^\s*([a-z]{2}_[a-z]+)\s*\|', line)
         if match:
             voice_name = match.group(1).strip()
-            
             parts = voice_name.split('_')
             language = current_category.split('(')[0].strip() if current_category != "Unknown" else "Unknown"
             gender_prefix = parts[0][1]
