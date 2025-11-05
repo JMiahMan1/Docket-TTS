@@ -215,9 +215,9 @@ def _format_ref_segment(book_full, chapter, verses_str):
         verses_str, suffix = verses_str[:-2].strip(), f" {BIBLE_REFS.get('ff', 'and following')}"
     elif verses_str.lower().endswith("f"):
         verses_str, suffix = verses_str[:-1].strip(), f" {BIBLE_REFS.get('f', 'and the following verse')}"
-    prefix = "verses" if any(c in verses_str for c in ",â€"-") else "verse"
+    prefix = "verses" if any(c in verses_str for c in ",—-") else "verse"
     verses_str = re.sub(r"(\d)([a-z])", r"\1 \2", verses_str, flags=re.IGNORECASE)
-    verses_str = verses_str.replace("â€"", "-").replace("-", " through ")
+    verses_str = verses_str.replace("—", "-").replace("-", " through ")
     verse_words = re.sub(r"\d+", lambda m: _inflect.number_to_words(int(m.group())), verses_str)
     return f"{book_full} chapter {chapter_words}, {prefix} {verse_words}{suffix}"
 
@@ -614,6 +614,7 @@ def get_kokoro_voices() -> list[tuple[str, str, str]]:
         match = re.match(r'^\s*([a-z]{2}_[a-z]+)\s*\|', line)
         if match:
             voice_name = match.group(1).strip()
+            
             parts = voice_name.split('_')
             language = current_category.split('(')[0].strip() if current_category != "Unknown" else "Unknown"
             gender_prefix = parts[0][1]
