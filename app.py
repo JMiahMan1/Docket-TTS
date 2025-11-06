@@ -29,16 +29,21 @@ import logging
 from logging.handlers import RotatingFileHandler
 from huggingface_hub import list_repo_files, hf_hub_download
 from difflib import SequenceMatcher
+import torch
 
-from tts_service import TTSService, normalize_text, get_kokoro_voices
+from tts_service import TTSService, normalize_text
 import text_cleaner
 import chapterizer
 
-APP_VERSION = "0.0.4"
+APP_VERSION = "0.0.6"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
+VOICES_FOLDER = '/app/voices'
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'epub'}
+KOKORO_VOICES_REPO = "hexgrad/Kokoro-82M"
 LARGE_FILE_WORD_THRESHOLD = 8000
+
+DEFAULT_KOKORO_VOICES = {'af_bella', 'am_adam', 'bf_isabella'}
 
 app = Flask(__name__)
 app.config.from_mapping(
@@ -87,27 +92,122 @@ except Exception as e:
 if os.environ.get('RUNNING_IN_DOCKER'):
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     os.makedirs(GENERATED_FOLDER, exist_ok=True)
+    os.makedirs(VOICES_FOLDER, exist_ok=True)
 
-CACHED_VOICES = None
-def get_available_voices():
-    global CACHED_VOICES
-    if CACHED_VOICES is not None:
-        return CACHED_VOICES
+CACHED_KOKORO_VOICES = None
+def get_kokoro_voices():
+    global CACHED_KOKORO_VOICES
+    if CACHED_KOKORO_VOICES is not None:
+        return CACHED_KOKORO_VOICES
     
-    app.logger.info("Fetching Kokoro voice list...")
+    app.logger.info("Fetching Kokoro voice list from Hugging Face Hub...")
+    voices = [
+        {"id": "af_bella", "name": "American Female (Bella) [Default]"},
+        {"id": "am_adam", "name": "American Male (Adam) [Default]"},
+        {"id": "bf_isabella", "name": "British Female (Isabella) [Default]"},
+    ]
+    
     try:
-        # Returns list of tuples: (value, display_name, description)
-        kokoro_voices = get_kokoro_voices()
-        voices = []
-        for val, name, _ in kokoro_voices:
-            voices.append({"id": val, "name": name})
+        repo_files = list_repo_files(KOKORO_VOICES_REPO, repo_type="model")
         
-        CACHED_VOICES = sorted(voices, key=lambda v: v['name'])
-        app.logger.info(f"Successfully fetched and cached {len(CACHED_VOICES)} voices.")
-        return CACHED_VOICES
+        for f in repo_files:
+            if f.startswith("voices/") and f.endswith(".pt"):
+                voice_id = Path(f).stem
+                if voice_id not in DEFAULT_KOKORO_VOICES:
+                    parts = voice_id.split('_')
+                    lang_code = parts[0][:2]
+                    gender = "Male" if parts[0].endswith('m') else "Female"
+                    name = parts[1].capitalize()
+                    
+                    lang = "American"
+                    if lang_code == 'bf' or lang_code == 'bm':
+                        lang = "British"
+                    elif lang_code == 'ja':
+                        lang = "Japanese"
+                    elif lang_code == 'zh':
+                        lang = "Chinese"
+                        
+                    readable_name = f"{lang} {gender} ({name})"
+                    voices.append({"id": voice_id, "name": readable_name})
+        
+        CACHED_KOKORO_VOICES = sorted(voices, key=lambda v: v['name'])
+        app.logger.info(f"Successfully fetched and cached {len(CACHED_KOKORO_VOICES)} Kokoro voices.")
+        return CACHED_KOKORO_VOICES
     except Exception as e:
-        app.logger.error(f"Could not fetch voices: {e}")
-        return [] # Return empty list on failure
+        app.logger.error(f"Could not fetch voices from Hugging Face Hub: {e}")
+        return voices
+
+def ensure_voice_available(voice_name):
+    """
+    Ensures a Kokoro .pt file is downloaded if it's not a default.
+    Always returns the voice_name string.
+    """
+    if voice_name in DEFAULT_KOKORO_VOICES:
+        app.logger.info(f"Using default built-in voice: {voice_name}")
+        return voice_name
+
+    voice_filename = f"{voice_name}.pt"
+    voice_repo_path = f"voices/{voice_filename}"
+    local_voice_path = Path(VOICES_FOLDER) / voice_filename
+
+    if local_voice_path.exists():
+        app.logger.info(f"Voice '{voice_name}' found locally.")
+        return voice_name
+
+    if not redis_client:
+        app.logger.warning("Redis client not available. Proceeding without lock. This may cause issues with parallel downloads.")
+    
+    lock_key = f"lock:voice-download:{voice_name}"
+    lock_acquired = False
+    
+    try:
+        wait_start_time = time.time()
+        while time.time() - wait_start_time < 120:
+            if redis_client:
+                lock_acquired = redis_client.set(lock_key, "1", nx=True, ex=60)
+            
+            if lock_acquired:
+                app.logger.info(f"Acquired lock for downloading voice '{voice_name}'.")
+                break
+            else:
+                app.logger.info(f"Waiting for lock on voice '{voice_name}'...")
+                time.sleep(2)
+        else:
+            raise RuntimeError(f"Could not acquire lock for voice '{voice_name}' after 2 minutes.")
+
+        if local_voice_path.exists():
+            app.logger.info(f"Voice '{voice_name}' was downloaded by another worker.")
+            return voice_name
+
+        app.logger.warning(f"Voice '{voice_name}' not found locally. Starting download from {KOKORO_VOICES_REPO}...")
+        
+        downloaded_path_str = hf_hub_download(
+            repo_id=KOKORO_VOICES_REPO,
+            filename=voice_repo_path,
+            local_dir=VOICES_FOLDER,
+            local_dir_use_symlinks=False,
+            repo_type="model"
+        )
+        
+        downloaded_path = Path(downloaded_path_str)
+        
+        if downloaded_path != local_voice_path:
+            shutil.move(downloaded_path, local_voice_path)
+            # Clean up the empty 'voices' subdirectory if it exists
+            empty_dir = downloaded_path.parent
+            if empty_dir.is_dir() and not any(empty_dir.iterdir()):
+                empty_dir.rmdir()
+
+        app.logger.info(f"Successfully downloaded {voice_filename}.")
+        return voice_name
+
+    except Exception as e:
+        app.logger.error(f"Failed to ensure voice {voice_name} is available: {e}")
+        raise
+    finally:
+        if lock_acquired and redis_client:
+            redis_client.delete(lock_key)
+            app.logger.info(f"Released lock for voice '{voice_name}'.")
 
 def human_readable_size(size, decimal_places=2):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -297,7 +397,8 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         status_msg = f'Processing: {book_metadata.get("title", "Unknown")} - Ch. {chapter_details["number"]} "{chapter_details["title"][:20]}..."'
         self.update_state(state='PROGRESS', meta={'status': status_msg})
         
-        tts = TTSService(voice_name=voice_name, speed_rate=speed_rate)
+        voice_data = ensure_voice_available(voice_name)
+        tts = TTSService(voice_name=voice_name, voice_data=voice_data, speed_rate=speed_rate)
         
         final_content = chapter_content 
         if chapter_details.get("number") == 1:
@@ -346,6 +447,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
     generated_folder = current_app.config['GENERATED_FOLDER']
     try:
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Checking voice model...'})
+        voice_data = ensure_voice_available(voice_name)
 
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Reading, cleaning, and normalizing text...'})
         
@@ -380,7 +482,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         safe_output_filename = secure_filename(output_filename)
         output_filepath = os.path.join(generated_folder, safe_output_filename)
         
-        tts = TTSService(voice_name=voice_name, speed_rate=speed_rate)
+        tts = TTSService(voice_name=voice_name, voice_data=voice_data, speed_rate=speed_rate)
         _, synthesized_text = tts.synthesize(final_content_for_synthesis, output_filepath)
         
         cover_url = enhanced_metadata.get('cover_url', '')
@@ -620,7 +722,7 @@ def upload_file():
             flash('No processable content was found in the uploaded file(s).', 'error')
             return redirect(request.url)
 
-    voices = get_available_voices()
+    voices = get_kokoro_voices()
     return render_template('index.html', voices=voices)
 
 @app.route('/files')
@@ -771,23 +873,23 @@ def speak_sample(voice_name):
     sample_text = "The Lord is my shepherd; I shall not want. He makes me to lie down in green pastures; He leads me beside the still waters. He restores my soul; He leads me in the paths of righteousness For His name’s sake."
     speed_rate = request.args.get('speed', '1.0')
 
-    try:
-        safe_speed = str(speed_rate).replace('.', 'p')
-        safe_voice_name = secure_filename(Path(voice_name).stem)
-        filename = f"sample_{safe_voice_name}_speed_{safe_speed}.mp3"
-        filepath = os.path.join(app.config["GENERATED_FOLDER"], filename)
-        
-        normalized_sample_text = normalize_text(sample_text)
+    safe_speed = str(speed_rate).replace('.', 'p')
+    safe_voice_name = secure_filename(Path(voice_name).stem)
+    filename = f"sample_{safe_voice_name}_speed_{safe_speed}.mp3"
+    filepath = os.path.join(app.config["GENERATED_FOLDER"], filename)
+    
+    normalized_sample_text = normalize_text(sample_text)
 
-        if not os.path.exists(filepath):
-            try:
-                tts = TTSService(voice_name=voice_name, speed_rate=speed_rate)
-                tts.synthesize(normalized_sample_text, filepath)
-            except Exception as e:
-                return f"Error generating sample: {e}", 500
-        return send_from_directory(app.config["GENERATED_FOLDER"], filename)
-    except Exception as e:
-        return f"Error preparing voice sample: {e}", 500
+    if not os.path.exists(filepath):
+        try:
+            voice_data = ensure_voice_available(voice_name)
+            tts = TTSService(voice_name=voice_name, voice_data=voice_data, speed_rate=speed_rate)
+            tts.synthesize(normalized_sample_text, filepath)
+        except Exception as e:
+            app.logger.error(f"Error generating sample: {e}", exc_info=True)
+            return f"Error generating sample: {e}", 500
+            
+    return send_from_directory(app.config["GENERATED_FOLDER"], filename)
 
 @app.route('/status/<task_id>')
 def task_status(task_id):
@@ -813,7 +915,7 @@ def health_check():
 
 @app.route('/debug', methods=['GET', 'POST'])
 def debug_page():
-    voices = get_available_voices()
+    voices = get_kokoro_voices()
     normalized_output = ""
     original_text = ""
     log_content = "Log file not found."
