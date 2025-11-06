@@ -9,6 +9,8 @@ RUN dnf install -y dnf-plugins-core curl && \
         poppler-utils \
         ffmpeg \
         espeak-ng \
+        tesseract \
+        tesseract-langpack-eng \
         python3-requests \
         python3-onnxruntime \
         python3-sentencepiece \

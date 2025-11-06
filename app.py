@@ -16,7 +16,7 @@ import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
 from celery import Celery, Task
-import fitz
+import fitz  # PyMuPDF
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, COMM, APIC
 import redis
@@ -31,11 +31,25 @@ from huggingface_hub import list_repo_files, hf_hub_download
 from difflib import SequenceMatcher
 import torch
 
+try:
+    import pytesseract
+    # from PIL import Image # Already imported
+    OCR_ENABLED = True
+    app.logger.info("OCR (Tesseract/pytesseract) is enabled.")
+except ImportError:
+    OCR_ENABLED = False
+    app.logger.warning("OCR (pytesseract) not found. Image-based PDF extraction will be disabled.")
+    pass
+
+LLM_API_ENDPOINT = "http://127.0.0.1:11434/api/generate" # Example for Ollama
+LLM_ENABLED = True # Set to False to skip this step
+
+
 from tts_service import TTSService, normalize_text
 import text_cleaner
 import chapterizer
 
-APP_VERSION = "0.0.6"
+APP_VERSION = "0.0.7"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
@@ -275,6 +289,70 @@ def parse_metadata_from_text(text_content):
         parsed_meta['title'] = best_title
     return parsed_meta
 
+def llm_ocr_postprocess(raw_text: str) -> str:
+    """
+    Uses a local LLM to correct common OCR errors in a block of text.
+    """
+    if not LLM_ENABLED:
+        app.logger.warning("LLM_ENABLED is False. Skipping OCR post-processing.")
+        return raw_text
+
+    # This prompt is tailored for your use case (theological texts, chapter-based)
+    # It instructs the LLM to fix errors while preserving the structure
+    # that your `chapterizer.py` and `text_cleaner.py` rely on.
+    system_prompt = (
+        "You are an expert OCR post-processing assistant. "
+        "Your task is to correct transcription errors from a raw OCR text. "
+        "The text may contain jumbled words (e.g., 'rn' instead of 'm'), "
+        "spacing errors, and incorrect punctuation. "
+        "The text is from a book, likely theological, with chapter headings "
+        "like 'DAY 1', 'Chapter 5', and biblical references. "
+        "RULES: "
+        "1. ONLY correct obvious OCR errors and misspellings. "
+        "2. PRESERVE all original line breaks and paragraph structure (e.g., '\n\n'). This is critical. "
+        "3. Do NOT add, remove, or change the *meaning* of the text. "
+        "4. Do NOT add any commentary, notes, or markdown. "
+        "5. Return ONLY the corrected text."
+    )
+    
+    full_prompt = f"{system_prompt}\n\n--- RAW OCR TEXT ---\n{raw_text}\n\n--- CORRECTED TEXT ---"
+    
+    try:
+        # This payload is for an Ollama-compatible API.
+        # 'model' should be one you have downloaded (e.g., "llama3:8b", "phi3:medium")
+        payload = {
+            "model": "phi3:medium", # <--- CHANGE THIS to your local model
+            "prompt": full_prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.0, # Be deterministic
+                "num_ctx": 4096 # Set context window
+            }
+        }
+        
+        app.logger.info(f"Sending {len(raw_text)} chars to LLM for OCR cleanup...")
+        response = requests.post(LLM_API_ENDPOINT, json=payload, timeout=300) # 5 min timeout
+        response.raise_for_status()
+        
+        response_data = response.json()
+        cleaned_text = response_data.get("response", raw_text)
+        
+        if cleaned_text == raw_text:
+            app.logger.warning("LLM cleanup returned the original text. Check LLM logs.")
+        else:
+            app.logger.info(f"LLM cleanup successful. Corrected {len(cleaned_text)} chars.")
+            
+        return cleaned_text.strip()
+
+    except requests.RequestException as e:
+        app.logger.error(f"Failed to connect to LLM API at {LLM_API_ENDPOINT}: {e}")
+        app.logger.error("Skipping LLM cleanup step and returning raw OCR text.")
+        return raw_text
+    except Exception as e:
+        app.logger.error(f"An error occurred during LLM cleanup: {e}")
+        return raw_text
+
+
 def extract_text_and_metadata(filepath):
     p_filepath = Path(filepath)
     extension = p_filepath.suffix.lower()
@@ -287,7 +365,55 @@ def extract_text_and_metadata(filepath):
                 if doc_meta:
                     metadata['title'] = doc_meta.get('title') or metadata['title']
                     metadata['author'] = doc_meta.get('author') or metadata['author']
-                text = "\n".join([page.get_text() for page in doc])
+                
+                text_parts = []
+                is_image_based = False
+                total_text_len = 0
+                
+                for page_num in range(doc.page_count):
+                    page = doc.load_page(page_num)
+                    page_text = page.get_text("text")
+                    total_text_len += len(page_text.strip())
+                    
+                    if not is_image_based and (page.get_images(full=True) or page.get_drawings()):
+                        if len(page_text.strip()) < 150: 
+                            app.logger.info(f"Page {page_num} has images/drawings and low text. Checking PDF type.")
+                            is_image_based = True
+                    
+                    text_parts.append(page_text)
+
+                if not is_image_based and doc.page_count > 3 and total_text_len < (doc.page_count * 100):
+                    app.logger.info(f"PDF {filepath} seems to be image-based (low text density).")
+                    is_image_based = True
+                
+                if is_image_based:
+                    app.logger.warning(f"PDF {filepath} appears to be image-based.")
+                    
+                    if OCR_ENABLED:
+                        app.logger.info(f"Attempting OCR on {filepath}...")
+                        ocr_text_parts = []
+                        for page_num in range(doc.page_count):
+                            page = doc.load_page(page_num)
+                            pix = page.get_pixmap(dpi=300) # Use 300 DPI for better OCR
+                            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                            
+                            page_ocr_text = pytesseract.image_to_string(img) 
+                            ocr_text_parts.append(page_ocr_text)
+                        
+                        raw_ocr_text = "\n\n".join(ocr_text_parts)
+                        app.logger.info(f"Successfully OCR'd {len(ocr_text_parts)} pages. Raw char count: {len(raw_ocr_text)}")
+                        
+                        # --- NEW STEP: LLM POST-PROCESSING ---
+                        text = llm_ocr_postprocess(raw_ocr_text)
+                        # -------------------------------------
+                        
+                    else:
+                        app.logger.error("OCR is required, but OCR_ENABLED is False. Install Tesseract and pytesseract.")
+                        text = "\n".join(text_parts) # Fallback to (likely empty) text
+                else:
+                    app.logger.info(f"PDF {filepath} appears to be text-based. Proceeding with standard extraction.")
+                    text = "\n".join(text_parts)
+
         elif extension == '.epub':
             book = epub.read_epub(filepath)
             titles = book.get_metadata('DC', 'title')
