@@ -28,9 +28,10 @@ DEFAULT_CONFIG = {
 }
 
 NUMBERED_CHAPTER_PATTERN = re.compile(
-    r'^\s*(chapter|part|book|section)\s+([0-9]+|[IVXLCDM]+)\s*[:.\-]?\s*(.*)\s*$',
+    r'^\s*(week|day|chapter|part|book|section)\s+([0-9]+|[IVXLCDM]+)\s*[:.\-]?\s*(.*)\s*$',
     re.IGNORECASE | re.MULTILINE
 )
+
 NAMED_CHAPTER_PATTERN = re.compile(
     r'^\s*(prologue|epilogue|introduction|appendix|acknowledgments|dedication|foreword|preface|title page)\s*[:.\-]?\s*(.*)\s*$',
     re.IGNORECASE | re.MULTILINE
