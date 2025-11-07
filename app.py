@@ -30,6 +30,9 @@ from logging.handlers import RotatingFileHandler
 from huggingface_hub import list_repo_files, hf_hub_download
 from difflib import SequenceMatcher
 import torch
+from dotenv import load_dotenv
+ 
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +46,8 @@ except ImportError:
     app.logger.warning("OCR (pytesseract) not found. Image-based PDF extraction will be disabled.")
     pass
 
-LLM_API_ENDPOINT = "http://127.0.0.1:11434/api/generate" # Example for Ollama
+# Read from environment variable (now loaded from .env)
+LLM_API_ENDPOINT = os.environ.get("LLM_API_ENDPOINT", "http://127.0.0.1:11434/api/generate")
 LLM_ENABLED = True # Set to False to skip this step
 
 
@@ -237,15 +241,16 @@ def allowed_file(filename):
 def tag_mp3_file(filepath, metadata, cover_image_path=None, voice_name=None):
     try:
         audio = MP3(filepath, ID3=ID3)
-        if audio.tags is None: audio.add_tags()
+        
+        # Delete all existing tags from the file and object
+        audio.delete() 
+        
+        # Add a new, empty ID3 tag frame
+        audio.add_tags()
         
         chapter_title = metadata.get('title', 'Unknown Title')
         author = metadata.get('author', 'Unknown Author')
         book_title = metadata.get('book_title', chapter_title)
-        
-        # Clear existing tags before adding new ones
-        audio.tags.delete(filepath, delete_v1=True, delete_v2=True)
-        audio.add_tags()
 
         safe_chapter_title = (chapter_title[:100] + '..') if len(chapter_title) > 100 else chapter_title
         safe_author = (author[:100] + '..') if len(author) > 100 else author
@@ -477,6 +482,7 @@ def fetch_enhanced_metadata(title, author):
             query += f"+inauthor:{author}"
         
         response = requests.get(f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=1")
+        
         response.raise_for_status()
         data = response.json()
         
