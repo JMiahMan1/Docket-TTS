@@ -4,3 +4,4 @@ soundfile
 argostranslate
 filetype
 torch
+pytesseract
