@@ -31,7 +31,7 @@ from huggingface_hub import list_repo_files, hf_hub_download
 from difflib import SequenceMatcher
 import torch
 from dotenv import load_dotenv
- 
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -240,13 +240,10 @@ def allowed_file(filename):
 
 def tag_mp3_file(filepath, metadata, cover_image_path=None, voice_name=None):
     try:
-        audio = MP3(filepath, ID3=ID3)
+        audio = MP3(filepath) # Load file
         
-        # Delete all existing tags from the file and object
-        audio.delete() 
-        
-        # Add a new, empty ID3 tag frame
-        audio.add_tags()
+        # Create a new, empty tag object, replacing any in-memory tags
+        audio.tags = ID3()
         
         chapter_title = metadata.get('title', 'Unknown Title')
         author = metadata.get('author', 'Unknown Author')
