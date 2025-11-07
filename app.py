@@ -654,6 +654,60 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         if temp_cover_path and os.path.exists(temp_cover_path):
             os.remove(temp_cover_path)
 
+@celery.task(bind=True)
+def regenerate_audio_task(self, edited_text, base_name, voice_name, speed_rate):
+    """
+    Regenerates an MP3 file from edited normalized text, overwriting the original.
+    """
+    generated_folder = Path(current_app.config['GENERATED_FOLDER'])
+    audio_filepath = generated_folder / f"{base_name}.mp3"
+    text_filepath = generated_folder / f"{base_name}.txt"
+    
+    try:
+        if not audio_filepath.exists() or not text_filepath.exists():
+            raise FileNotFoundError(f"Original files for '{base_name}' not found.")
+            
+        self.update_state(state='PROGRESS', meta={'current': 1, 'total': 4, 'status': 'Reading original metadata...'})
+        
+        # Read tags from the old file before overwriting
+        try:
+            audio_tags = MP3(str(audio_filepath), ID3=ID3)
+            title = str(audio_tags.get('TIT2', [base_name])[0])
+            author = str(audio_tags.get('TPE1', ['Unknown Author'])[0])
+            book_title = str(audio_tags.get('TALB', [title])[0])
+        except Exception as e:
+            app.logger.warning(f"Could not read tags from {audio_filepath}: {e}. Falling back to defaults.")
+            title = base_name
+            author = "Unknown Author"
+            book_title = base_name
+
+        self.update_state(state='PROGRESS', meta={'current': 2, 'total': 4, 'status': 'Checking voice model...'})
+        voice_data = ensure_voice_available(voice_name)
+        
+        self.update_state(state='PROGRESS', meta={'current': 3, 'total': 4, 'status': 'Synthesizing new audio...'})
+        tts = TTSService(voice_name=voice_name, voice_data=voice_data, speed_rate=speed_rate)
+        
+        # Synthesize using the *exact* edited text, bypassing normalization
+        _, synthesized_text = tts.synthesize(edited_text, str(audio_filepath))
+        
+        # Overwrite the normalized text file with the new content
+        text_filepath.write_text(edited_text, encoding="utf-8")
+        
+        self.update_state(state='PROGRESS', meta={'current': 4, 'total': 4, 'status': 'Tagging new MP3 file...'})
+        tag_mp3_file(
+            str(audio_filepath),
+            metadata={'title': title, 'author': author, 'book_title': book_title},
+            voice_name=voice_name
+        )
+        
+        app.logger.info(f"Task {self.request.id} (regenerate) completed. Output: {audio_filepath.name}")
+        return {'status': 'Success', 'filename': audio_filepath.name, 'textfile': text_filepath.name}
+        
+    except Exception as e:
+        app.logger.error(f"Audio regeneration failed in task {self.request.id}: {e}", exc_info=True)
+        self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
+        raise e
+
 def create_generic_cover_image(title, author, save_path):
     try:
         width, height = 800, 1200
@@ -1062,3 +1116,44 @@ def debug_page():
         app.logger.warning(f"Log file not found at {log_file} for debug page.")
 
     return render_template('debug.html', voices=voices, original_text=original_text, normalized_output=normalized_output, log_content=log_content)
+
+@app.route('/edit/<base_name>', methods=['GET', 'POST'])
+def edit_normalized_text(base_name):
+    """
+    Handles loading and saving edited normalized text.
+    """
+    generated_folder = Path(current_app.config['GENERATED_FOLDER'])
+    safe_base_name = secure_filename(base_name)
+    text_filepath = generated_folder / f"{safe_base_name}.txt"
+    audio_filepath = generated_folder / f"{safe_base_name}.mp3"
+    
+    if not text_filepath.exists() or not audio_filepath.exists():
+        flash(f"Could not find the text or audio file for '{safe_base_name}'.", 'error')
+        return redirect(url_for('list_files'))
+
+    if request.method == 'POST':
+        edited_text = request.form.get('edited_text')
+        voice_name = request.form.get("voice")
+        speed_rate = request.form.get("speed_rate", "1.0")
+        
+        if not edited_text or not edited_text.strip():
+            flash("Cannot regenerate with empty text.", 'error')
+            return redirect(request.url)
+            
+        task = regenerate_audio_task.delay(edited_text, safe_base_name, voice_name, speed_rate)
+        return render_template('result.html', task_id=task.id)
+
+    # GET request
+    try:
+        text_content = text_filepath.read_text(encoding='utf-8')
+    except Exception as e:
+        flash(f"Error reading text file: {e}", 'error')
+        return redirect(url_for('list_files'))
+        
+    voices = get_kokoro_voices()
+    return render_template(
+        'edit.html',
+        text_content=text_content,
+        base_name=safe_base_name,
+        voices=voices
+    )

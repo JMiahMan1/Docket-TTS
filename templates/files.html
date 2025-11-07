@@ -49,7 +49,13 @@
                                     <td><a href="{{ url_for('download_file', name=file.audio_name) }}">{{ file.audio_name }}</a></td>
                                     <td><span class="text-muted">{{ file.size }}</span></td>
                                     <td>
-                                        {% if file.txt_name %}<a href="{{ url_for('download_file', name=file.txt_name) }}" class="btn btn-outline-secondary btn-sm">Download Text</a>
+                                        {% if file.txt_name %}
+                                        <div class="d-flex gap-2">
+                                            <a href="{{ url_for('download_file', name=file.txt_name) }}" class="btn btn-outline-secondary btn-sm">Download</a>
+                                            {% if file.audio_name.endswith('.mp3') %}
+                                                <a href="{{ url_for('edit_normalized_text', base_name=file.base_name) }}" class="btn btn-outline-warning btn-sm">Edit</a>
+                                            {% endif %}
+                                        </div>
                                         {% else %}<span class="text-muted">N/A</span>{% endif %}
                                     </td>
                                     <td data-utc-date="{{ file.date }}">Loading...</td>
