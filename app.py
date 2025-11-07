@@ -31,11 +31,13 @@ from huggingface_hub import list_repo_files, hf_hub_download
 from difflib import SequenceMatcher
 import torch
 
+logger = logging.getLogger(__name__)
+
 try:
     import pytesseract
     # from PIL import Image # Already imported
     OCR_ENABLED = True
-    app.logger.info("OCR (Tesseract/pytesseract) is enabled.")
+    logger.info("OCR (Tesseract/pytesseract) is enabled.")
 except ImportError:
     OCR_ENABLED = False
     app.logger.warning("OCR (pytesseract) not found. Image-based PDF extraction will be disabled.")
