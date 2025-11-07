@@ -37,7 +37,7 @@
                                     <th style="width: 3%;"><input class="form-check-input" type="checkbox" id="selectAll"></th>
                                     <th>Audio File (.mp3 / .m4b)</th>
                                     <th>Size</th>
-                                    <th>Normalized Text (.txt)</th>
+                                    <th>Tools</th>
                                     <th>Creation Date</th>
                                     <th style="width: 5%;">Delete</th>
                                 </tr>
@@ -49,14 +49,15 @@
                                     <td><a href="{{ url_for('download_file', name=file.audio_name) }}">{{ file.audio_name }}</a></td>
                                     <td><span class="text-muted">{{ file.size }}</span></td>
                                     <td>
-                                        {% if file.txt_name %}
                                         <div class="d-flex gap-2">
-                                            <a href="{{ url_for('download_file', name=file.txt_name) }}" class="btn btn-outline-secondary btn-sm">Download</a>
+                                            {% if file.txt_name %}
+                                                <a href="{{ url_for('download_file', name=file.txt_name) }}" class="btn btn-outline-secondary btn-sm" title="Download Text">Txt</a>
+                                            {% endif %}
                                             {% if file.audio_name.endswith('.mp3') %}
-                                                <a href="{{ url_for('edit_normalized_text', base_name=file.base_name) }}" class="btn btn-outline-warning btn-sm">Edit</a>
+                                                <a href="{{ url_for('edit_normalized_text', base_name=file.base_name) }}" class="btn btn-outline-warning btn-sm" title="Edit Text/Voice">Edit</a>
+                                                <a href="{{ url_for('edit_metadata', base_name=file.base_name) }}" class="btn btn-outline-info btn-sm" title="Edit Metadata/Rename">Rename</a>
                                             {% endif %}
                                         </div>
-                                        {% else %}<span class="text-muted">N/A</span>{% endif %}
                                     </td>
                                     <td data-utc-date="{{ file.date }}">Loading...</td>
                                     <td><input class="form-check-input delete-checkbox" type="checkbox" name="files_to_delete" value="{{ file.base_name }}"></td>
