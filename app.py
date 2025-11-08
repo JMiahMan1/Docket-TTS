@@ -3,6 +3,8 @@ import subprocess
 import uuid
 import re
 import json
+import io
+import zipfile
 from pathlib import Path
 from datetime import datetime, timezone
 import time
@@ -1121,6 +1123,43 @@ def cancel_job(task_id):
     celery.control.revoke(task_id, terminate=True, signal='SIGKILL')
     flash(f'Cancellation request sent for job {task_id}.', 'success')
     return redirect(url_for('jobs_page'))
+
+@app.route('/download-bulk', methods=['POST'])
+def download_bulk():
+    """
+    Zips and streams selected files (audio + text) to the user.
+    """
+    files_to_download = request.form.getlist('files_to_merge')
+    
+    if not files_to_download:
+        flash("No files were selected for download.", "warning")
+        return redirect(url_for('list_files'))
+
+    memory_file = io.BytesIO()
+    generated_folder = Path(current_app.config['GENERATED_FOLDER'])
+    
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for filename in files_to_download:
+            safe_name = secure_filename(filename)
+            file_path = generated_folder / safe_name
+            
+            # Add the main audio file
+            if file_path.exists():
+                zf.write(file_path, arcname=safe_name)
+            
+            # Also add its associated text file, if it exists
+            txt_path = file_path.with_suffix('.txt')
+            if txt_path.exists():
+                zf.write(txt_path, arcname=txt_path.name)
+
+    memory_file.seek(0)
+    
+    return send_file(
+        memory_file,
+        download_name='docket_tts_files.zip',
+        as_attachment=True,
+        mimetype='application/zip'
+    )
 
 @app.route('/delete-bulk', methods=['POST'])
 def delete_bulk():

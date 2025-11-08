@@ -69,6 +69,7 @@
                 </div>
                 <div class="d-flex gap-2 mt-3">
                     <button type="button" class="btn btn-primary" id="createAudiobookBtn">Create Audiobook from Selected</button>
+		    <button type="button" class="btn btn-success" id="downloadBtn">Download Selected</button>
                     <button type="button" class="btn btn-danger" id="deleteBtn">Delete Selected Items</button>
                 </div>
                 {% else %}
@@ -215,6 +216,20 @@
                 mainForm.action = "{{ url_for('delete_bulk') }}";
                 mainForm.submit();
             }
+        });
+
+        document.getElementById('downloadBtn').addEventListener('click', function() {
+            const checkedFiles = document.querySelectorAll('input.file-checkbox:checked');
+            if (checkedFiles.length === 0) {
+                alert('Please select at least one file to download.');
+                return;
+            }
+            
+            // Disable delete checkboxes to avoid them being submitted
+            document.querySelectorAll('input.delete-checkbox').forEach(cb => cb.disabled = true);
+            
+            mainForm.action = "{{ url_for('download_bulk') }}";
+            mainForm.submit();
         });
 
         document.getElementById('selectAll').addEventListener('click', function(event) {
