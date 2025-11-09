@@ -3,14 +3,12 @@ import subprocess
 import uuid
 import re
 import json
-import io
-import zipfile
 from pathlib import Path
 from datetime import datetime, timezone
 import time
 from flask import (
     Flask, request, render_template, send_from_directory,
-    flash, redirect, url_for, jsonify, current_app
+    flash, redirect, url_for, jsonify, current_app, send_file
 )
 from werkzeug.utils import secure_filename
 import docx
@@ -21,6 +19,7 @@ from celery import Celery, Task
 import fitz  # PyMuPDF
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, COMM, APIC
+from mutagen.mp4 import MP4  # <-- Make sure this import is here
 import redis
 import shutil
 import base64
@@ -33,6 +32,8 @@ from huggingface_hub import list_repo_files, hf_hub_download
 from difflib import SequenceMatcher
 import torch
 from dotenv import load_dotenv
+import io
+import zipfile
 
 load_dotenv()
 
@@ -1078,6 +1079,74 @@ def create_audiobook():
     task = create_audiobook_task.delay(files_to_merge, audiobook_title, audiobook_author, cover_url)
     return render_template('result.html', task_id=task.id)
 
+@app.route('/download-bulk', methods=['POST'])
+def download_bulk():
+    """
+    Zips and streams selected files (audio + text) to the user.
+    """
+    files_to_download = request.form.getlist('files_to_merge')
+    
+    if not files_to_download:
+        flash("No files were selected for download.", "warning")
+        return redirect(url_for('list_files'))
+
+    generated_folder = Path(current_app.config['GENERATED_FOLDER'])
+    
+    # --- New Logic to Determine Zip Name ---
+    default_zip_name = "docket_tts_files.zip"
+    try:
+        # Get the first file to read its metadata
+        first_file_name = secure_filename(files_to_download[0])
+        first_file_path = generated_folder / first_file_name
+        
+        book_title = None
+        if first_file_path.exists():
+            if first_file_path.suffix.lower() == '.mp3':
+                audio_tags = MP3(first_file_path, ID3=ID3)
+                # Try to get the TALB (Album/Book Title) tag
+                book_title_tag = audio_tags.get('TALB')
+                if book_title_tag:
+                    book_title = str(book_title_tag[0])
+            elif first_file_path.suffix.lower() == '.m4b':
+                audio_tags = MP4(first_file_path)
+                # Try to get the '\xa9alb' (Album/Book Title) tag for MP4
+                book_title_tag = audio_tags.get('\xa9alb')
+                if book_title_tag:
+                    book_title = str(book_title_tag[0])
+            
+            if book_title:
+                safe_book_title = secure_filename(book_title)
+                default_zip_name = f"{safe_book_title}.zip"
+    except Exception as e:
+        app.logger.warning(f"Could not read metadata for zip name: {e}")
+        # It will use the default_zip_name on any error
+    # --- End New Logic ---
+
+    memory_file = io.BytesIO()
+    
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for filename in files_to_download:
+            safe_name = secure_filename(filename)
+            file_path = generated_folder / safe_name
+            
+            # Add the main audio file
+            if file_path.exists():
+                zf.write(file_path, arcname=safe_name)
+            
+            # Also add its associated text file, if it exists
+            txt_path = file_path.with_suffix('.txt')
+            if txt_path.exists():
+                zf.write(txt_path, arcname=txt_path.name)
+
+    memory_file.seek(0)
+    
+    return send_file(
+        memory_file,
+        download_name=default_zip_name, # Use the new dynamic name
+        as_attachment=True,
+        mimetype='application/zip'
+    )
+
 @app.route('/jobs')
 def jobs_page():
     running_jobs, queued_jobs = [], []
@@ -1123,43 +1192,6 @@ def cancel_job(task_id):
     celery.control.revoke(task_id, terminate=True, signal='SIGKILL')
     flash(f'Cancellation request sent for job {task_id}.', 'success')
     return redirect(url_for('jobs_page'))
-
-@app.route('/download-bulk', methods=['POST'])
-def download_bulk():
-    """
-    Zips and streams selected files (audio + text) to the user.
-    """
-    files_to_download = request.form.getlist('files_to_merge')
-    
-    if not files_to_download:
-        flash("No files were selected for download.", "warning")
-        return redirect(url_for('list_files'))
-
-    memory_file = io.BytesIO()
-    generated_folder = Path(current_app.config['GENERATED_FOLDER'])
-    
-    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for filename in files_to_download:
-            safe_name = secure_filename(filename)
-            file_path = generated_folder / safe_name
-            
-            # Add the main audio file
-            if file_path.exists():
-                zf.write(file_path, arcname=safe_name)
-            
-            # Also add its associated text file, if it exists
-            txt_path = file_path.with_suffix('.txt')
-            if txt_path.exists():
-                zf.write(txt_path, arcname=txt_path.name)
-
-    memory_file.seek(0)
-    
-    return send_file(
-        memory_file,
-        download_name='docket_tts_files.zip',
-        as_attachment=True,
-        mimetype='application/zip'
-    )
 
 @app.route('/delete-bulk', methods=['POST'])
 def delete_bulk():
