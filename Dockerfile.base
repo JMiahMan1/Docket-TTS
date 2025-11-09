@@ -26,6 +26,7 @@ RUN dnf install -y dnf-plugins-core curl && \
         python3-pillow \
         python3-huggingface-hub \
         python3-numpy \
+        python3-dotenv \
         wget \
         gcc \
         gcc-c++ \
