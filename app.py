@@ -19,7 +19,7 @@ from celery import Celery, Task
 import fitz  # PyMuPDF
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, COMM, APIC
-from mutagen.mp4 import MP4  # <-- Make sure this import is here
+from mutagen.mp4 import MP4
 import redis
 import shutil
 import base64
@@ -825,14 +825,14 @@ def create_generic_cover_image(title, author, save_path):
         title_lines = textwrap.wrap(title, width=20)
         y_text = height / 4
         for line in title_lines:
-            bbox = draw.textbbox((0, 0), line, font=font_title)
+            bbox = draw.textbbox((0, 0), line, font_title)
             line_width, line_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
             draw.text(((width - line_width) / 2, y_text), line, font=font_title, fill=(255, 255, 255))
             y_text += line_height + 5
         y_text += 50
         author_lines = textwrap.wrap(author, width=30)
         for line in author_lines:
-            bbox = draw.textbbox((0, 0), line, font=font_author)
+            bbox = draw.textbbox((0, 0), line, font_author)
             line_width, line_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
             draw.text(((width - line_width) / 2, y_text), line, font=font_author, fill=(255, 255, 255))
             y_text += line_height + 5
@@ -878,7 +878,9 @@ def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_auth
             cover_path = generic_cover_path
             
     update_state(state='PROGRESS', meta={'current': 3, 'total': 5, 'status': 'Analyzing chapters...'})
-    chapters_meta_content = f";FFMETADATA1\ntitle={final_audiobook_title}\nartist={final_audiobook_author}\n\n"
+    
+    chapters_meta_content = f";FFMETADATA1\ntitle={final_audiobook_title}\nartist={final_audiobook_author}\nalbum={final_audiobook_title}\n\n"
+    
     concat_list_content = ""
     current_duration_ms = 0
     for i, path in enumerate(safe_mp3_paths):
@@ -1109,10 +1111,15 @@ def download_bulk():
                     book_title = str(book_title_tag[0])
             elif first_file_path.suffix.lower() == '.m4b':
                 audio_tags = MP4(first_file_path)
-                # Try to get the '\xa9alb' (Album/Book Title) tag for MP4
+                # Try to get the '\xa9alb' (Album) tag first
                 book_title_tag = audio_tags.get('\xa9alb')
                 if book_title_tag:
                     book_title = str(book_title_tag[0])
+                else:
+                    # Fallback to '\xa9nam' (Title) tag
+                    book_title_tag = audio_tags.get('\xa9nam')
+                    if book_title_tag:
+                        book_title = str(book_title_tag[0])
             
             if book_title:
                 safe_book_title = secure_filename(book_title)
