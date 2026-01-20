@@ -1315,6 +1315,20 @@ def cancel_all_jobs():
                 cancelled_count += 1
                 app.logger.info(f"Cancelled queued task {task_id}")
         
+        # CRITICAL: Purge the entire Celery queue from Redis
+        # This clears unassigned jobs that haven't been picked up by workers yet
+        if redis_client:
+            try:
+                # Get count of jobs in queue before purging
+                queue_length = redis_client.llen('celery')
+                if queue_length > 0:
+                    # Delete the entire queue
+                    redis_client.delete('celery')
+                    cancelled_count += queue_length
+                    app.logger.info(f"Purged {queue_length} unassigned jobs from Redis queue")
+            except Exception as redis_error:
+                app.logger.error(f"Error purging Redis queue: {redis_error}")
+        
         if cancelled_count > 0:
             flash(f'Successfully cancelled {cancelled_count} job(s).', 'success')
         else:
