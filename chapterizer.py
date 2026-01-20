@@ -264,6 +264,9 @@ def _split_epub_html_by_anchors(html_content, anchors_with_titles):
                 text_found = _get_epub_text_safely(current_element, next_anchor_element)
                 if text_found: logger.debug(f"    Found text in <{current_element.name}>: {text_found[:30]}...")
                 content_parts.append(text_found)
+            
+            # Move to the next element in the DOM tree
+            current_element = current_element.next_sibling
 
         if not content_parts:
              # Heuristic: If we found no text by walking siblings, the anchor might be 
