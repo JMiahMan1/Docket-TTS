@@ -102,6 +102,33 @@ def celery_init_app(app: Flask) -> Celery:
 
     celery_app = Celery(app.name, task_cls=FlaskTask)
     celery_app.config_from_object("celery_config")
+    
+    # Ensure Celery logs also go to the file
+    from celery.signals import setup_logging
+    
+    @setup_logging.connect
+    def setup_celery_logging(**kwargs):
+        # Use simple configuration that mirrors app logging
+        os.makedirs(app.config['GENERATED_FOLDER'], exist_ok=True)
+        log_file = os.path.join(app.config['GENERATED_FOLDER'], 'app.log')
+        
+        # Create formatter
+        formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
+        
+        # File Handler
+        file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024, backupCount=5)
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.INFO)
+        
+        # Root Logger
+        root = logging.getLogger()
+        root.setLevel(logging.INFO)
+        root.addHandler(file_handler)
+        
+        # Helper to avoid duplicates on stdout if already handled
+        if not any(isinstance(h, logging.StreamHandler) for h in root.handlers):
+             root.addHandler(logging.StreamHandler())
+
     return celery_app
 
 celery = celery_init_app(app)
