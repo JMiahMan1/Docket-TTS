@@ -258,6 +258,25 @@
                                 placeholder="Author" required>
                             <label for="audiobookAuthor">Author</label>
                         </div>
+
+                        <div class="mb-3">
+                            <label class="form-label d-block text-muted small text-uppercase fw-bold">Output
+                                Format</label>
+                            <div class="btn-group w-100" role="group" aria-label="Output Format">
+                                <input type="radio" class="btn-check" name="temp_output_format" id="formatM4B"
+                                    value="m4b" checked>
+                                <label class="btn btn-outline-primary" for="formatM4B">
+                                    <i class="bi bi-collection-play-fill me-1"></i> Audiobook (.m4b)
+                                </label>
+
+                                <input type="radio" class="btn-check" name="temp_output_format" id="formatMP3"
+                                    value="mp3">
+                                <label class="btn btn-outline-primary" for="formatMP3">
+                                    <i class="bi bi-music-note-beamed me-1"></i> MP3 File (.mp3)
+                                </label>
+                            </div>
+                        </div>
+
                         <input type="hidden" id="audiobookCoverUrl" name="cover_url">
                     </div>
                 </div>
@@ -365,6 +384,14 @@
                 input.value = val;
                 mainForm.appendChild(input);
             });
+
+            // Add Format
+            const format = document.querySelector('input[name="temp_output_format"]:checked').value;
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'output_format';
+            input.value = format;
+            mainForm.appendChild(input);
 
             mainForm.submit();
         });

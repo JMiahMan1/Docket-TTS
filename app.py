@@ -892,7 +892,7 @@ def create_generic_cover_image(title, author, save_path):
         app.logger.error(f"Failed to create generic cover image: {e}")
         return None
 
-def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_author_from_form, cover_url, build_dir, task_self=None):
+def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_author_from_form, cover_url, build_dir, output_format='m4b', task_self=None):
     def update_state(state, meta):
         if task_self:
             task_self.update_state(state=state, meta=meta)
@@ -906,7 +906,7 @@ def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_auth
     final_audiobook_title = str(audio_tags.get('TALB', [audiobook_title_from_form])[0])
     final_audiobook_author = str(audio_tags.get('TPE1', [audiobook_author_from_form])[0])
 
-    app.logger.info(f"Using metadata for M4B: Title='{final_audiobook_title}', Author='{final_audiobook_author}'")
+    app.logger.info(f"Using metadata for Audiobook: Title='{final_audiobook_title}', Author='{final_audiobook_author}'")
 
     update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
     safe_mp3_paths = [generated_folder / secure_filename(fname) for fname in unique_file_list]
@@ -946,22 +946,50 @@ def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_auth
     chapters_meta_path = build_dir / "chapters.meta"
     concat_list_path.write_text(concat_list_content)
     chapters_meta_path.write_text(chapters_meta_content, encoding='utf-8')
+    
     update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Merging and encoding audio...'})
-    temp_audio_path = build_dir / "temp_audio.aac"
-    concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-threads', '0', '-c:a', 'aac', '-b:a', '128k', str(temp_audio_path)]
+    
+    if output_format == 'mp3':
+        temp_audio_path = build_dir / "temp_audio.mp3"
+        # Use libmp3lame for MP3 encoding
+        concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), 
+                          '-threads', '0', '-c:a', 'libmp3lame', '-b:a', '128k', str(temp_audio_path)]
+    else: # Default to m4b (AAC)
+        temp_audio_path = build_dir / "temp_audio.aac"
+        concat_command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), 
+                          '-threads', '0', '-c:a', 'aac', '-b:a', '128k', str(temp_audio_path)]
+                          
     subprocess.run(concat_command, check=True, capture_output=True)
+    
     update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Assembling audiobook...'})
     timestamp = build_dir.name.replace('audiobook_build_', '')
-    output_filename = f"{secure_filename(final_audiobook_title)}_{timestamp}.m4b"
-    output_filepath = generated_folder / output_filename
-    mux_command = ['ffmpeg']
-    if cover_path: mux_command.extend(['-i', str(cover_path)])
-    mux_command.extend(['-i', str(temp_audio_path), '-i', str(chapters_meta_path)])
-    map_offset = 1 if cover_path else 0
-    mux_command.extend(['-map', f'{map_offset}:a', '-map_metadata', f'{map_offset + 1}'])
-    if cover_path:
-        mux_command.extend(['-map', '0:v', '-disposition:v', 'attached_pic'])
-    mux_command.extend(['-c:a', 'copy', '-c:v', 'copy', str(output_filepath)])
+    
+    if output_format == 'mp3':
+        output_filename = f"{secure_filename(final_audiobook_title)}_{timestamp}.mp3"
+        output_filepath = generated_folder / output_filename
+        
+        # Mux for MP3: simple copy, add metadata and cover
+        mux_command = ['ffmpeg', '-i', str(temp_audio_path), '-i', str(chapters_meta_path)]
+        if cover_path:
+             mux_command.extend(['-i', str(cover_path), '-map', '0:a', '-map', '2:v', 
+                                 '-metadata:s:v', 'title="Album cover"', '-metadata:s:v', 'comment="Cover (front)"'])
+        else:
+             mux_command.extend(['-map', '0:a'])
+             
+        mux_command.extend(['-map_metadata', '1', '-c', 'copy', '-id3v2_version', '3', str(output_filepath)])
+
+    else: # M4B
+        output_filename = f"{secure_filename(final_audiobook_title)}_{timestamp}.m4b"
+        output_filepath = generated_folder / output_filename
+        mux_command = ['ffmpeg']
+        if cover_path: mux_command.extend(['-i', str(cover_path)])
+        mux_command.extend(['-i', str(temp_audio_path), '-i', str(chapters_meta_path)])
+        map_offset = 1 if cover_path else 0
+        mux_command.extend(['-map', f'{map_offset}:a', '-map_metadata', f'{map_offset + 1}'])
+        if cover_path:
+            mux_command.extend(['-map', '0:v', '-disposition:v', 'attached_pic'])
+        mux_command.extend(['-c:a', 'copy', '-c:v', 'copy', str(output_filepath)])
+        
     subprocess.run(mux_command, check=True, capture_output=True)
 
     text_filepath = output_filepath.with_suffix('.txt')
@@ -971,12 +999,12 @@ def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_auth
     return {'status': 'Success', 'filename': output_filename, 'textfile': text_filename}
 
 @celery.task(bind=True)
-def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, cover_url=None):
+def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, cover_url=None, output_format='m4b'):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     build_dir = Path(current_app.config['GENERATED_FOLDER']) / f"audiobook_build_{timestamp}"
     os.makedirs(build_dir, exist_ok=True)
     try:
-        return _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, build_dir, task_self=self)
+        return _create_audiobook_logic(file_list, audiobook_title, audiobook_author, cover_url, build_dir, output_format, task_self=self)
     except Exception as e:
         app.logger.error(f"Audiobook creation failed: {e}")
         if isinstance(e, subprocess.CalledProcessError):
@@ -1130,10 +1158,11 @@ def create_audiobook():
     audiobook_title = request.form.get('title', 'Untitled Audiobook')
     audiobook_author = request.form.get('author', 'Unknown Author')
     cover_url = request.form.get('cover_url', '')
+    output_format = request.form.get('output_format', 'm4b')
     if not files_to_merge:
         flash("Please select at least one MP3 file.", "warning")
         return redirect(url_for('list_files'))
-    task = create_audiobook_task.delay(files_to_merge, audiobook_title, audiobook_author, cover_url)
+    task = create_audiobook_task.delay(files_to_merge, audiobook_title, audiobook_author, cover_url, output_format)
     return render_template('result.html', task_id=task.id)
 
 @app.route('/download-bulk', methods=['POST'])
