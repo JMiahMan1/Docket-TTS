@@ -35,3 +35,9 @@ env/
 # OS-specific files
 .DS_Store
 Thumbs.db
+
+# Don't include ebooks
+*.epub
+*.pdf
+*.docx
+*.mobi
