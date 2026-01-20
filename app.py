@@ -1319,7 +1319,7 @@ def debug_page():
     try:
         with open(log_file, 'r') as f:
             lines = f.readlines()
-            log_content = "".join(lines[-100:])
+            log_content = "".join(lines[-500:])
     except FileNotFoundError:
         app.logger.warning(f"Log file not found at {log_file} for debug page.")
 
