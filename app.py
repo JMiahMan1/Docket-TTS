@@ -1291,6 +1291,40 @@ def cancel_job(task_id):
     flash(f'Cancellation request sent for job {task_id}.', 'success')
     return redirect(url_for('jobs_page'))
 
+@app.route('/cancel-all-jobs', methods=['POST'])
+def cancel_all_jobs():
+    cancelled_count = 0
+    try:
+        inspector = celery.control.inspect()
+        
+        # Get all active tasks
+        active_tasks = inspector.active() or {}
+        for worker, tasks in active_tasks.items():
+            for task in tasks:
+                task_id = task['id']
+                celery.control.revoke(task_id, terminate=True, signal='SIGKILL')
+                cancelled_count += 1
+                app.logger.info(f"Cancelled active task {task_id}")
+        
+        # Get all reserved/queued tasks
+        reserved_tasks = inspector.reserved() or {}
+        for worker, tasks in reserved_tasks.items():
+            for task in tasks:
+                task_id = task['id']
+                celery.control.revoke(task_id, terminate=True)
+                cancelled_count += 1
+                app.logger.info(f"Cancelled queued task {task_id}")
+        
+        if cancelled_count > 0:
+            flash(f'Successfully cancelled {cancelled_count} job(s).', 'success')
+        else:
+            flash('No jobs to cancel.', 'info')
+    except Exception as e:
+        app.logger.error(f"Error cancelling jobs: {e}")
+        flash('Error cancelling jobs. Please try again.', 'error')
+        
+    return redirect(url_for('jobs_page'))
+
 @app.route('/delete-bulk', methods=['POST'])
 def delete_bulk():
     app.logger.info(f"Received delete request. Form data: {request.form}")
