@@ -147,6 +147,18 @@
 
         <form id="mainForm" method="POST">
             {% if audio_files %}
+            <!-- Select All Checkbox -->
+            <div class="d-flex align-items-center mb-3 p-3 bg-white rounded-3 shadow-sm">
+                <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="selectAll"
+                        style="position: relative; z-index: 10;">
+                    <label class="form-check-label fw-medium" for="selectAll">
+                        Select All Files
+                    </label>
+                </div>
+                <span class="ms-3 text-muted small" id="selectionCount">0 selected</span>
+            </div>
+
             <div class="row g-4">
                 {% for file in audio_files %}
                 <div class="col-md-6 col-lg-4">
@@ -317,14 +329,39 @@
             const checkboxes = document.querySelectorAll('.file-checkbox');
             const toolbar = document.getElementById('bulkActionsToolbar');
             const counter = document.getElementById('selectedCount');
+            const selectAllCheckbox = document.getElementById('selectAll');
+            const selectionCount = document.getElementById('selectionCount');
 
             checkboxes.forEach(cb => {
                 cb.addEventListener('change', updateToolbar);
             });
 
+            // Select All functionality
+            if (selectAllCheckbox) {
+                selectAllCheckbox.addEventListener('change', function () {
+                    checkboxes.forEach(cb => {
+                        cb.checked = selectAllCheckbox.checked;
+                    });
+                    updateToolbar();
+                });
+            }
+
             function updateToolbar() {
                 const count = document.querySelectorAll('.file-checkbox:checked').length;
                 counter.innerText = count;
+
+                // Update selection count display
+                if (selectionCount) {
+                    selectionCount.innerText = count + ' selected';
+                }
+
+                // Update Select All checkbox state
+                if (selectAllCheckbox) {
+                    const totalCheckboxes = checkboxes.length;
+                    selectAllCheckbox.checked = count === totalCheckboxes && count > 0;
+                    selectAllCheckbox.indeterminate = count > 0 && count < totalCheckboxes;
+                }
+
                 if (count > 0) {
                     toolbar.classList.add('active');
                 } else {
