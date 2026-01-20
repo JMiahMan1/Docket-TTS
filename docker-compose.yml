@@ -19,6 +19,8 @@ services:
     depends_on:
       - redis
     restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   worker:
     build:
@@ -34,6 +36,12 @@ services:
     depends_on:
       - redis
     restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          cpus: '3.0'
 
 volumes:
   uploads_data:
