@@ -37,6 +37,12 @@ NAMED_CHAPTER_PATTERN = re.compile(
     re.IGNORECASE | re.MULTILINE
 )
 
+# Common in fiction: "1", "I", "One", "The Beginning"
+STANDALONE_HEADER_PATTERN = re.compile(
+    r'^\s*([0-9]+|[IVXLCDM]+|One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)\s*$',
+    re.IGNORECASE | re.MULTILINE
+)
+
 DISALLOWED_TITLES_PATTERN = re.compile(
     r'^(Table of Contents|Contents|Copyright|Index|Bibliography|Glossary|Also by|List of|Appendix)',
     re.IGNORECASE
@@ -472,8 +478,9 @@ def _find_raw_chapters(raw_text: str) -> List[Chapter]:
     # First, find all potential chapter starts
     numbered_matches = list(NUMBERED_CHAPTER_PATTERN.finditer(raw_text))
     named_matches = list(NAMED_CHAPTER_PATTERN.finditer(raw_text))
+    standalone_matches = list(STANDALONE_HEADER_PATTERN.finditer(raw_text))
     
-    all_matches = sorted(numbered_matches + named_matches, key=lambda m: m.start())
+    all_matches = sorted(numbered_matches + named_matches + standalone_matches, key=lambda m: m.start())
     
     if not all_matches:
         # No chapters found, treat the whole text as one chapter
@@ -486,8 +493,6 @@ def _find_raw_chapters(raw_text: str) -> List[Chapter]:
         content = raw_text[start_index:end_index].strip()
         
         # Extract title from the match object
-        # Numbered match groups: 1=(type), 2=(number), 3=(title)
-        # Named match groups: 1=(type), 2=(title)
         groups = match.groups()
         if len(groups) == 3: # Numbered chapter
             ch_type = groups[0].strip()
@@ -497,7 +502,14 @@ def _find_raw_chapters(raw_text: str) -> List[Chapter]:
             if ch_title:
                 original_title += f": {ch_title}"
             title = ch_title if ch_title else f"{ch_type} {ch_num}"
-        else: # Named chapter
+        elif len(groups) == 1: # Standalone "1", "I", "One"
+             ch_num = groups[0].strip()
+             original_title = f"Chapter {ch_num}"
+             title = f"Chapter {ch_num}"
+        else: # Named chapter (2 groups)
+            original_title = groups[0].strip().title()
+            ch_title = groups[1].strip()
+            title = ch_title if ch_title else original_title
             original_title = groups[0].strip().title()
             ch_title = groups[1].strip()
             title = ch_title if ch_title else original_title

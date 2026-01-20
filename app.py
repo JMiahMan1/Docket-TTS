@@ -530,14 +530,22 @@ def create_title_page_text(metadata):
     return " ".join(parts) + "\n\n" if parts else ""
 
 @celery.task(bind=True)
-def process_chapter_task(self, chapter_content, book_metadata, chapter_details, voice_name, speed_rate):
+def process_chapter_task(self, chapter_content, book_metadata, chapter_details, voice_name, speed_rate, secondary_voice_name=None):
     generated_folder = Path(current_app.config['GENERATED_FOLDER'])
     try:
         status_msg = f'Processing: {book_metadata.get("title", "Unknown")} - Ch. {chapter_details["number"]} "{chapter_details["title"][:20]}..."'
         self.update_state(state='PROGRESS', meta={'status': status_msg})
         
         voice_data = ensure_voice_available(voice_name)
-        tts = TTSService(voice_name=voice_name, voice_data=voice_data, speed_rate=speed_rate)
+        secondary_voice_data = ensure_voice_available(secondary_voice_name) if secondary_voice_name else None
+        
+        tts = TTSService(
+            voice_name=voice_name, 
+            voice_data=voice_data, 
+            speed_rate=speed_rate,
+            secondary_voice_name=secondary_voice_name,
+            secondary_voice_data=secondary_voice_data
+        )
         
         final_content = chapter_content 
         if chapter_details.get("number") == 1:
@@ -581,12 +589,13 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
         raise e
 
 @celery.task(bind=True)
-def convert_to_speech_task(self, input_filepath, original_filename, book_title, book_author, voice_name=None, speed_rate='1.0'):
+def convert_to_speech_task(self, input_filepath, original_filename, book_title, book_author, voice_name=None, speed_rate='1.0', secondary_voice_name=None):
     temp_cover_path = None
     generated_folder = current_app.config['GENERATED_FOLDER']
     try:
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Checking voice model...'})
         voice_data = ensure_voice_available(voice_name)
+        secondary_voice_data = ensure_voice_available(secondary_voice_name) if secondary_voice_name else None
 
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 5, 'status': 'Reading, cleaning, and normalizing text...'})
         
@@ -621,7 +630,13 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
         safe_output_filename = secure_filename(output_filename)
         output_filepath = os.path.join(generated_folder, safe_output_filename)
         
-        tts = TTSService(voice_name=voice_name, voice_data=voice_data, speed_rate=speed_rate)
+        tts = TTSService(
+            voice_name=voice_name, 
+            voice_data=voice_data, 
+            speed_rate=speed_rate, 
+            secondary_voice_name=secondary_voice_name, 
+            secondary_voice_data=secondary_voice_data
+        )
         _, synthesized_text = tts.synthesize(final_content_for_synthesis, output_filepath)
         
         cover_url = enhanced_metadata.get('cover_url', '')
@@ -666,7 +681,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
             os.remove(temp_cover_path)
 
 @celery.task(bind=True)
-def regenerate_audio_task(self, edited_text, base_name, voice_name, speed_rate):
+def regenerate_audio_task(self, edited_text, base_name, voice_name, speed_rate, secondary_voice_name=None):
     """
     Regenerates an MP3 file from edited normalized text, overwriting the original.
     """
@@ -704,8 +719,16 @@ def regenerate_audio_task(self, edited_text, base_name, voice_name, speed_rate):
         self.update_state(state='PROGRESS', meta={'current': 2, 'total': 4, 'status': 'Checking voice model...'})
         voice_data = ensure_voice_available(voice_name)
         
+        secondary_voice_data = ensure_voice_available(secondary_voice_name) if secondary_voice_name else None
+        
         self.update_state(state='PROGRESS', meta={'current': 3, 'total': 4, 'status': 'Synthesizing new audio...'})
-        tts = TTSService(voice_name=voice_name, voice_data=voice_data, speed_rate=speed_rate)
+        tts = TTSService(
+            voice_name=voice_name, 
+            voice_data=voice_data, 
+            speed_rate=speed_rate,
+            secondary_voice_name=secondary_voice_name,
+            secondary_voice_data=secondary_voice_data
+        )
         
         # Synthesize using the *exact* edited text, bypassing normalization
         _, synthesized_text = tts.synthesize(edited_text, str(audio_filepath))
@@ -939,6 +962,9 @@ def create_audiobook_task(self, file_list, audiobook_title, audiobook_author, co
 def upload_file():
     if request.method == 'POST':
         voice_name = request.form.get("voice")
+        secondary_voice_name = request.form.get("secondary_voice")
+        if secondary_voice_name == "": secondary_voice_name = None
+        
         speed_rate = request.form.get("speed_rate", "1.0")
         
         text_input = request.form.get('text_input')
@@ -956,7 +982,7 @@ def upload_file():
             
             book_author = 'Unknown'
             
-            task = convert_to_speech_task.delay(input_filepath, original_filename, book_title, book_author, voice_name, speed_rate)
+            task = convert_to_speech_task.delay(input_filepath, original_filename, book_title, book_author, voice_name, speed_rate, secondary_voice_name)
             
             return render_template('result.html', task_id=task.id)
 
@@ -994,12 +1020,12 @@ def upload_file():
                         'original_title': chapter.original_title,
                         'part_info': chapter.part_info
                     }
-                    task = process_chapter_task.delay(chapter.content, enhanced_metadata, chapter_details, voice_name, speed_rate)
+                    task = process_chapter_task.delay(chapter.content, enhanced_metadata, chapter_details, voice_name, speed_rate, secondary_voice_name)
                     tasks.append(task)
                 os.remove(input_filepath)
             else:
                 flash(f"Could not split '{original_filename}' into chapters. Processing as a single file.", "warning")
-                task = convert_to_speech_task.delay(input_filepath, original_filename, enhanced_metadata.get('title'), enhanced_metadata.get('author'), voice_name, speed_rate)
+                task = convert_to_speech_task.delay(input_filepath, original_filename, enhanced_metadata.get('title'), enhanced_metadata.get('author'), voice_name, speed_rate, secondary_voice_name)
                 tasks.append(task)
 
         if tasks:
@@ -1314,13 +1340,15 @@ def edit_normalized_text(base_name):
     if request.method == 'POST':
         edited_text = request.form.get('edited_text')
         voice_name = request.form.get("voice")
+        secondary_voice_name = request.form.get("secondary_voice")
+        if secondary_voice_name == "": secondary_voice_name = None
         speed_rate = request.form.get("speed_rate", "1.0")
         
         if not edited_text or not edited_text.strip():
             flash("Cannot regenerate with empty text.", 'error')
             return redirect(request.url)
             
-        task = regenerate_audio_task.delay(edited_text, safe_base_name, voice_name, speed_rate)
+        task = regenerate_audio_task.delay(edited_text, safe_base_name, voice_name, speed_rate, secondary_voice_name)
         return render_template('result.html', task_id=task.id)
 
     # GET request
@@ -1380,3 +1408,45 @@ def edit_metadata(base_name):
         base_name=safe_base_name,
         metadata=metadata
     )
+
+@app.route('/api/synthesize', methods=['POST'])
+def api_synthesize():
+    """
+    API endpoint to convert text to speech.
+    Expects JSON: {
+        "text": "...", 
+        "title": "Optional Title", 
+        "voice": "af_bella", 
+        "secondary_voice": "am_adam", 
+        "speed": 1.0
+    }
+    """
+    data = request.json
+    if not data or 'text' not in data:
+        return jsonify({'error': 'No text provided'}), 400
+    
+    text = data['text']
+    title = data.get('title', 'API Request')
+    voice_name = data.get('voice', 'af_bella')
+    secondary_voice_name = data.get('secondary_voice')
+    speed_rate = str(data.get('speed', 1.0))
+    
+    unique_filename = f"api_{uuid.uuid4().hex}.txt"
+    input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+    Path(input_filepath).write_text(text, encoding='utf-8')
+    
+    task = convert_to_speech_task.delay(
+        input_filepath, 
+        unique_filename, 
+        title, 
+        'API User', 
+        voice_name, 
+        speed_rate, 
+        secondary_voice_name
+    )
+    
+    return jsonify({
+        'message': 'Synthesis job queued.',
+        'task_id': task.id,
+        'status_url': url_for('task_status', task_id=task.id, _external=True)
+    }), 202

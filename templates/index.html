@@ -1,175 +1,289 @@
 <!doctype html>
 <html lang="en">
+
 <head>
     <meta charset="utf-8">
     <title>Docket-TTS</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link
-        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
-        rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
+<style>
+    :root {
+        --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        --glass-bg: rgba(255, 255, 255, 0.95);
+        --card-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    }
+
+    body {
+        background: #f3f4f6;
+        min-height: 100vh;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+
+    .main-container {
+        max-width: 900px;
+    }
+
+    .app-header {
+        background: var(--primary-gradient);
+        color: white;
+        padding: 3rem 0;
+        margin-bottom: -3rem;
+        padding-bottom: 5rem;
+    }
+
+    .glass-card {
+        background: var(--glass-bg);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: var(--card-shadow);
+        backdrop-filter: blur(10px);
+    }
+
+    .form-control,
+    .form-select {
+        border-radius: 0.5rem;
+        padding: 0.75rem 1rem;
+        border: 1px solid #e5e7eb;
+    }
+
+    .form-control:focus,
+    .form-select:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+    }
+
+    .btn-primary {
+        background: var(--primary-gradient);
+        border: none;
+        padding: 0.75rem 1.5rem;
+        font-weight: 500;
+        transition: transform 0.2s;
+    }
+
+    .btn-primary:active {
+        transform: scale(0.98);
+    }
+
+    .nav-tabs .nav-link {
+        color: #4b5563;
+        border: none;
+        border-bottom: 2px solid transparent;
+        padding: 1rem 1.5rem;
+    }
+
+    .nav-tabs .nav-link.active {
+        color: #764ba2;
+        border-bottom-color: #764ba2;
+        background: transparent;
+        font-weight: 600;
+    }
+</style>
+
 <body class="bg-light">
-    <div class="container py-5">
-        <div class="row justify-content-center">
-            <div class="col-lg-8 col-md-10">
+    <!-- Header -->
+    <div class="app-header text-center">
+        <div class="container">
+            <h1 class="display-4 fw-bold mb-2">Docket TTS</h1>
+            <p class="lead opacity-90">Transform your documents into lifelike audiobooks</p>
+        </div>
+    </div>
 
-                <div class="card shadow-lg border-0 rounded-3">
-                    <div class="card-body p-4">
-                        <h1 class="mb-4 text-center">📖 Docket TTS Converter</h1>
+    <div class="container main-container pb-5">
+        <!-- Main Card -->
+        <div class="card glass-card border-0 rounded-4">
+            <div class="card-body p-0">
 
-                        {% with messages = get_flashed_messages(with_categories=true) %}
-                          {% if messages %}
-                            {% for category, message in messages %}
-                              <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
-                                {{ message }}
-                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                              </div>
-                            {% endfor %}
-                          {% endif %}
-                        {% endwith %}
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                <div class="p-4 pb-0">
+                    {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show border-0 shadow-sm"
+                        role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                {% endwith %}
 
-                        <form method="post" enctype="multipart/form-data">
-                            <div id="file-upload-section">
-                                <div class="mb-3">
-                                    <label for="file" class="form-label">Choose file(s) to convert:</label>
-                                    <input class="form-control" type="file" id="file" name="file" multiple>
-                                </div>
+                <form method="post" enctype="multipart/form-data" class="p-4 p-lg-5">
+
+                    <!-- Input Method Tabs -->
+                    <ul class="nav nav-tabs mb-4" id="inputTab" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="files-tab" data-bs-toggle="tab"
+                                data-bs-target="#files-pane" type="button" role="tab">📁 Upload Files</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="text-tab" data-bs-toggle="tab" data-bs-target="#text-pane"
+                                type="button" role="tab">✍️ Paste Text</button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content mb-4" id="inputTabContent">
+                        <!-- File Upload -->
+                        <div class="tab-pane fade show active" id="files-pane" role="tabpanel">
+                            <div class="p-5 border-2 border-dashed rounded-3 text-center bg-light">
+                                <label for="file" class="form-label mb-3 text-muted d-block h5">Drag and drop files here
+                                    or click to browse</label>
+                                <input class="form-control w-auto mx-auto" type="file" id="file" name="file" multiple>
+                                <div class="form-text mt-3">Supports PDF, EPUB, DOCX, TXT</div>
                             </div>
+                        </div>
 
-                            <div id="text-input-section" style="display:none;">
-                                <div class="mb-3">
-                                    <label for="text_title" class="form-label">Title:</label>
-                                    <input class="form-control" type="text" id="text_title" name="text_title" placeholder="Enter a title for the audio file">
-                                </div>
-                                <div class="mb-3">
-                                    <label for="text_input" class="form-label">Paste your text here:</label>
-                                    <textarea class="form-control" id="text_input" name="text_input" rows="10" placeholder="Paste the text you want to convert to speech..."></textarea>
-                                </div>
+                        <!-- Text Input -->
+                        <div class="tab-pane fade" id="text-pane" role="tabpanel">
+                            <div class="mb-3">
+                                <label for="text_title" class="form-label">Project Title</label>
+                                <input class="form-control" type="text" id="text_title" name="text_title"
+                                    placeholder="e.g. My Story">
                             </div>
-                            
-                            <div class="text-center my-3">
-                                <a href="#" id="toggle-input-method">Or paste text instead</a>
+                            <div class="mb-3">
+                                <label for="text_input" class="form-label">Content</label>
+                                <textarea class="form-control" id="text_input" name="text_input" rows="8"
+                                    placeholder="Paste your text here..."></textarea>
                             </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-4 mb-4">
+                        <!-- Voice Settings -->
+                        <div class="col-md-6">
+                            <h5 class="mb-3">🗣️ Voice Settings</h5>
 
                             <div class="mb-3">
-                                <label for="voice" class="form-label">Select Voice:</label>
+                                <label for="voice"
+                                    class="form-label small text-uppercase fw-bold text-muted">Narrator</label>
                                 <div class="input-group">
                                     <select class="form-select" id="voice" name="voice">
                                         {% if voices %}
-                                            {% for v in voices %}
-                                                <option value="{{ v.id }}" {% if v.id == 'af_bella' %}selected{% endif %}>{{ v.name }}</option>
-                                            {% endfor %}
+                                        {% for v in voices %}
+                                        <option value="{{ v.id }}" {% if v.id=='af_bella' %}selected{% endif %}>{{
+                                            v.name }}</option>
+                                        {% endfor %}
                                         {% else %}
-                                            <option value="" disabled>Loading voices...</option>
+                                        <option value="" disabled>Loading voices...</option>
                                         {% endif %}
                                     </select>
-                                    <button class="btn btn-outline-secondary" type="button" id="speakSampleBtn">
-                                        🔊 Sample
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <label for="speed_rate" class="form-label">Speech Speed: <span id="speed-value" class="fw-bold">Normal (1.00x)</span></label>
-                                <input type="range" class="form-range" id="speed_rate" name="speed_rate" min="0.7" max="1.4" step="0.05" value="1.0">
-                                <div class="d-flex justify-content-between">
-                                    <small class="text-muted">Faster</small>
-                                    <small class="text-muted">Slower</small>
+                                    <button class="btn btn-light border" type="button" id="speakSampleBtn">🔊</button>
                                 </div>
                             </div>
 
-                            <div class="form-check form-switch mb-3">
-                                <input class="form-check-input" type="checkbox" role="switch" id="book_mode" name="book_mode" value="true">
-                                <label class="form-check-label" for="book_mode">
-                                    Book Mode (Split into Chapters)
-                                    <small class="d-block text-muted">Generates one MP3 per chapter. Best for EPUBs.</small>
+                            <div class="mb-3">
+                                <label for="secondary_voice"
+                                    class="form-label small text-uppercase fw-bold text-muted">Dialogue (Story
+                                    Mode)</label>
+                                <select class="form-select" id="secondary_voice" name="secondary_voice">
+                                    <option value="">None (Single Voice)</option>
+                                    {% if voices %}
+                                    {% for v in voices %}
+                                    <option value="{{ v.id }}">{{ v.name }}</option>
+                                    {% endfor %}
+                                    {% endif %}
+                                </select>
+                                <div class="form-text small">Text in "quotes" will use this voice.</div>
+                            </div>
+                        </div>
+
+                        <!-- Processing Settings -->
+                        <div class="col-md-6">
+                            <h5 class="mb-3">⚙️ Options</h5>
+
+                            <div class="mb-4">
+                                <label for="speed_rate" class="form-label small text-uppercase fw-bold text-muted">
+                                    Speed: <span id="speed-value" class="text-primary">Normal (1.00x)</span>
+                                </label>
+                                <input type="range" class="form-range" id="speed_rate" name="speed_rate" min="0.7"
+                                    max="1.4" step="0.05" value="1.0">
+                                <div class="d-flex justify-content-between text-muted small">
+                                    <span>Faster</span>
+                                    <span>Slower</span>
+                                </div>
+                            </div>
+
+                            <div class="form-check form-switch p-3 bg-light rounded-3">
+                                <input class="form-check-input" type="checkbox" role="switch" id="book_mode"
+                                    name="book_mode" value="true">
+                                <label class="form-check-label fw-medium" for="book_mode">
+                                    Book Mode
+                                    <span class="d-block small text-muted font-weight-normal">Split output by chapter
+                                        (Best for EPUBs)</span>
                                 </label>
                             </div>
-
-                            <button type="submit" class="btn btn-primary w-100">Convert to Speech</button>
-                        </form>
-
-                        <div class="mt-4" id="sampleContainer" style="display:none;">
-                            <h5>Voice Sample</h5>
-                            <audio id="sampleAudio" controls></audio>
                         </div>
                     </div>
-                    <div class="card-footer text-center d-flex justify-content-between align-items-center">
-                        <div>
-                            <a href="/files">View Generated Files</a> |
-                            <a href="/jobs">View Running Jobs</a> |
-                            <a href="/debug">Debug</a>
-                        </div>
-                        <small class="text-muted">v{{ app_version }}</small>
-                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100 py-3 rounded-3 shadow-sm fs-5">
+                        ✨ Convert to Speech
+                    </button>
+                </form>
+
+                <!-- Quick Links Footer -->
+                <div class="bg-light border-top p-3 px-5 d-flex justify-content-center gap-4 text-muted small">
+                    <a href="/files" class="text-decoration-none text-muted">📂 My Files</a>
+                    <a href="/jobs" class="text-decoration-none text-muted">🔄 Activity</a>
+                    <a href="/debug" class="text-decoration-none text-muted">🛠️ Debug</a>
+                    <span>v{{ app_version }}</span>
                 </div>
-
             </div>
+
+            <div class="mt-4 text-center" id="sampleContainer" style="display:none;">
+                <div class="d-inline-block bg-white p-2 rounded-pill shadow-sm border">
+                    <audio id="sampleAudio" controls class="mb-0" style="height: 30px;"></audio>
+                </div>
+            </div>
+
         </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-    document.getElementById("speakSampleBtn").addEventListener("click", function() {
-        const voiceSelect = document.getElementById("voice");
-        if (!voiceSelect.value) {
-            alert("Please select a voice first.");
-            return;
-        }
-        const voiceId = voiceSelect.value;
-        const speedRate = document.getElementById("speed_rate").value;
-        const audio = document.getElementById("sampleAudio");
-        const container = document.getElementById("sampleContainer");
-        audio.src = `/speak_sample/${encodeURIComponent(voiceId)}?speed=${speedRate}`;
-        container.style.display = "block";
-        audio.play();
-    });
-
-    document.getElementById('toggle-input-method').addEventListener('click', function(e) {
-        e.preventDefault();
-        
-        const fileSection = document.getElementById('file-upload-section');
-        const textSection = document.getElementById('text-input-section');
+        // Tab switching logic for form inputs
         const fileInput = document.getElementById('file');
         const textInput = document.getElementById('text_input');
-        const titleInput = document.getElementById('text_title');
 
-        if (fileSection.style.display !== 'none') {
-            fileSection.style.display = 'none';
-            textSection.style.display = 'block';
-            this.textContent = 'Or upload a file instead';
-            fileInput.removeAttribute('required');
-        } else {
-            fileSection.style.display = 'block';
-            textSection.style.display = 'none';
-            this.textContent = 'Or paste text instead';
+        document.getElementById('files-tab').addEventListener('shown.bs.tab', () => {
             fileInput.setAttribute('required', 'required');
+            textInput.removeAttribute('required');
+        });
+
+        document.getElementById('text-tab').addEventListener('shown.bs.tab', () => {
+            textInput.setAttribute('required', 'required');
+            fileInput.removeAttribute('required');
+        });
+
+        // Sample Audio Logic
+        document.getElementById("speakSampleBtn").addEventListener("click", function () {
+            const voiceSelect = document.getElementById("voice");
+            if (!voiceSelect.value) {
+                alert("Please select a voice first.");
+                return;
+            }
+            const voiceId = voiceSelect.value;
+            const speedRate = document.getElementById("speed_rate").value;
+            const audio = document.getElementById("sampleAudio");
+            const container = document.getElementById("sampleContainer");
+            audio.src = `/speak_sample/${encodeURIComponent(voiceId)}?speed=${speedRate}`;
+            container.style.display = "block";
+            audio.play();
+        });
+
+        // Speed Slider Logic
+        function updateSpeedValue(value) {
+            const speedDisplay = document.getElementById('speed-value');
+            const speed = (1 / parseFloat(value)).toFixed(2);
+            let label = `(${speed}x)`;
+            if (speed > 0.95 && speed < 1.05) label = `Normal ${label}`;
+            else if (speed > 1) label = `Faster ${label}`;
+            else label = `Slower ${label}`;
+            speedDisplay.textContent = label;
         }
-    });
 
-    function updateSpeedValue(value) {
-        const speedDisplay = document.getElementById('speed-value');
-        // The speed_rate value is a length_scale (inverse)
-        const speed = (1 / parseFloat(value)).toFixed(2); 
-        let label = `(${speed}x)`;
-        if (speed > 0.95 && speed < 1.05) {
-            label = `Normal ${label}`;
-        } else if (speed > 1) {
-            label = `Faster ${label}`;
-        } else {
-            label = `Slower ${label}`;
-        }
-        speedDisplay.textContent = label;
-    }
-
-    const speedSlider = document.getElementById('speed_rate');
-
-    speedSlider.addEventListener('input', function() {
-        updateSpeedValue(this.value);
-    });
-    
-    // Initial value update on page load
-    updateSpeedValue(speedSlider.value);
+        const speedSlider = document.getElementById('speed_rate');
+        speedSlider.addEventListener('input', function () { updateSpeedValue(this.value); });
+        updateSpeedValue(speedSlider.value);
     </script>
 </body>
+
 </html>

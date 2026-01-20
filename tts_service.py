@@ -425,18 +425,24 @@ def normalize_text(text: str) -> str:
 class TTSService:
     """
     Text-to-Speech service using Kokoro-TTS (ONNX) for synthesis
-    and FFmpeg for final MP3 encoding.
+    and FFmpeg for final MP3 encoding. Supports Dual-Voice (Narrator/Dialogue)
+    and Natural Pausing.
     """
-    def __init__(self, voice_name: str, voice_data: any, speed_rate: str = "1.0"):
+    def __init__(self, voice_name: str, voice_data: any, speed_rate: str = "1.0", 
+                 secondary_voice_name: str = None, secondary_voice_data: any = None):
         """
         Initializes the TTS service.
-        :param voice_name: The string name of the voice (e.g., "af_bella") for lang detection.
-        :param voice_data: The data to pass to Kokoro (either a string for defaults or a torch.Tensor for custom).
-        :param speed_rate: The speed rate (inverse of length scale).
+        :param voice_name: The string name of the primary voice.
+        :param voice_data: The data/embedding for the primary voice.
+        :param speed_rate: The speed rate.
+        :param secondary_voice_name: Optional name for the dialogue voice.
+        :param secondary_voice_data: Optional data/embedding for the dialogue voice.
         """
         self.speed_rate = speed_rate
         self.voice_name = voice_name
         self.voice_data = voice_data
+        self.secondary_voice_name = secondary_voice_name
+        self.secondary_voice_data = secondary_voice_data
         
         self.voices_folder = Path(os.environ.get("KOKORO_VOICES_PATH", "/app/voices"))
         self.model_path = self.voices_folder / os.environ.get("KOKORO_MODEL_FILE", "kokoro-v1.0.onnx")
@@ -454,23 +460,50 @@ class TTSService:
             voices_path=str(self.voices_file_path)
         )
         
-        lang_prefix = self.voice_name.split('_')[0]
-        if lang_prefix.startswith('a'):
-            self.lang = 'en-us'
-        elif lang_prefix.startswith('b'):
-            self.lang = 'en-gb'
-        elif lang_prefix == 'ja':
-            self.lang = 'ja'
-        elif lang_prefix.startswith('z'):
-            self.lang = 'cmn'
-        else:
-            self.lang = 'en'
+        self.lang = self._get_lang_code(voice_name)
+        self.secondary_lang = self._get_lang_code(secondary_voice_name) if secondary_voice_name else self.lang
+
+    def _get_lang_code(self, v_name):
+        if not v_name: return 'en'
+        lang_prefix = v_name.split('_')[0]
+        if lang_prefix.startswith('a'): return 'en-us'
+        if lang_prefix.startswith('b'): return 'en-gb'
+        if lang_prefix == 'ja': return 'ja'
+        if lang_prefix.startswith('z'): return 'cmn'
+        return 'en'
+
+    def _segment_dialogue(self, text):
+        """
+        Splits text into chunks of (text, is_dialogue).
+        Detects text between double quotes as dialogue.
+        """
+        # Regex to capture text inside double quotes, handling common punctuation inside
+        # Note: This is a basic heuristic.
+        pattern = r'(".*?")'
+        parts = re.split(pattern, text, flags=re.DOTALL)
+        
+        segments = []
+        for part in parts:
+            if not part.strip():
+                continue
+            # Check if this part is a quoted string
+            if part.startswith('"') and part.endswith('"'):
+                # It's dialogue. Strip quotes for synthesis? 
+                # Ideally, we keep them or remove them based on preference. 
+                # Let's clean the quotes for the TTS engine to avoid saying "quote".
+                clean_content = part[1:-1].strip()
+                if clean_content:
+                    segments.append((clean_content, True))
+            else:
+                segments.append((part, False))
+        return segments
 
     def synthesize(self, text: str, output_path: str):
         synthesized_text = text
 
         if not synthesized_text or not synthesized_text.strip():
             print(f"WARNING: No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
+            # ... (Silence generation fallback) ...
             silence_command = [
                 "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
                 "-t", "0.5", "-acodec", "libmp3lame", "-q:a", "9", output_path
@@ -485,65 +518,86 @@ class TTSService:
             user_speed = float(self.speed_rate)
         except ValueError:
             user_speed = 1.0 
-
-        if user_speed <= 0.0:
-            user_speed = 1.0 
-        
-        kokoro_speed = 1.0 / user_speed
-        kokoro_speed = max(0.5, min(kokoro_speed, 2.0)) 
+        kokoro_speed = max(0.5, min(1.0 / (user_speed if user_speed > 0 else 1.0), 2.0))
         
         try:
-            print(f"DEBUG: Text sent to Kokoro for {output_path}: '{synthesized_text[:500]}...'")
+            print(f"DEBUG: Text sent to Kokoro for {output_path}: '{synthesized_text[:100]}...'")
             
-            current_sample_rate = 24000
             all_samples = []
             
-            sentence_parts = re.split(r'([.!?]+|[".]{3,})', synthesized_text)
-            sentences = []
-            if len(sentence_parts) > 1:
-                for j in range(0, len(sentence_parts) - 1, 2):
-                    sentence = (sentence_parts[j] + sentence_parts[j+1]).strip()
-                    if sentence:
-                        sentences.append(sentence)
-                if len(sentence_parts) % 2 != 0:
-                    trailing = sentence_parts[-1].strip()
-                    if trailing:
-                        sentences.append(trailing)
-            elif len(sentence_parts) == 1:
-                sentences = [sentence_parts[0].strip()]
-            
-            if not sentences:
-                if synthesized_text.strip():
-                    sentences = [synthesized_text.strip()]
-                else:
-                    print(f"WARNING: No text to synthesize for {output_path}. Synthesizing silence.")
-                    return self.synthesize("", output_path)
+            # 1. Segment into specific voices if secondary voice exists
+            if self.secondary_voice_data:
+                segments = self._segment_dialogue(synthesized_text)
+            else:
+                segments = [(synthesized_text, False)]
+                
+            current_sample_rate = 24000
 
-            for sentence in sentences:
-                if not sentence or not sentence.strip():
+            for seg_text, is_dialogue in segments:
+                if not seg_text.strip():
                     continue
                 
-                print(f"DEBUG: Synthesizing sentence... '{sentence[:50]}...'")
-                try:
-                    samples, sample_rate = self.kokoro.create(
-                        text=sentence, 
-                        voice=self.voice_data,
-                        speed=kokoro_speed, 
-                        lang=self.lang
-                    )
-                    all_samples.append(samples)
-                    current_sample_rate = sample_rate
+                voice_to_use = self.secondary_voice_data if is_dialogue else self.voice_data
+                lang_to_use = self.secondary_lang if is_dialogue else self.lang
+                
+                # 2. Split into sentences/chunks for natural pausing
+                # Improved regex to handle common abbreviations avoids bad splits
+                # e.g. "Mr.", "Dr." etc. should already be normalized, but good to be safe.
+                # Splitting by punctuation for pausing: . ? ! : ; 
+                
+                # We split by punctuation that implies a pause.
+                chunk_parts = re.split(r'([.?!:;]+|[".]{3,})', seg_text)
+                
+                chunks = []
+                # Re-assemble split list into [text, punct, text, punct...]
+                if len(chunk_parts) > 1:
+                    for j in range(0, len(chunk_parts) - 1, 2):
+                        c_text = chunk_parts[j].strip()
+                        c_punct = chunk_parts[j+1].strip()
+                        if c_text or c_punct:
+                            chunks.append((c_text, c_punct))
+                    if len(chunk_parts) % 2 != 0:
+                        trailing = chunk_parts[-1].strip()
+                        if trailing:
+                            chunks.append((trailing, ""))
+                else:
+                    chunks = [(chunk_parts[0].strip(), "")]
+
+                for chunk_text, punctuation in chunks:
+                    if not chunk_text and not punctuation:
+                        continue
+                        
+                    # Determine pause length based on punctuation
+                    pause_duration = 0.0
+                    if '.' in punctuation or '?' in punctuation or '!' in punctuation:
+                        pause_duration = 0.5
+                    elif ';' in punctuation or ':' in punctuation:
+                        pause_duration = 0.3
+                    elif ',' in punctuation or '—' in punctuation: # Comma handling limits
+                        pause_duration = 0.2
                     
-                    if sentence.rstrip().endswith(('.', '!', '?')):
-                        pause_samples = np.zeros(int(0.6 * current_sample_rate))
+                    full_chunk = chunk_text + punctuation
+                    
+                    # Synthesize
+                    if full_chunk.strip():
+                        # print(f"DEBUG: Synthesizing chunk... '{full_chunk[:30]}...' (Voice: {'Sec' if is_dialogue else 'Pri'})")
+                        samples, sample_rate = self.kokoro.create(
+                            text=full_chunk, 
+                            voice=voice_to_use,
+                            speed=kokoro_speed, 
+                            lang=lang_to_use
+                        )
+                        all_samples.append(samples)
+                        current_sample_rate = sample_rate # Assoc. with last generated
+                    
+                    # Add pause
+                    if pause_duration > 0:
+                        pause_samples = np.zeros(int(pause_duration * current_sample_rate))
                         all_samples.append(pause_samples)
-                except Exception as e:
-                    print(f"ERROR: Kokoro failed on chunk: '{sentence}'. Error: {e}. Skipping chunk.")
-                    all_samples.append(np.zeros(int(0.1 * current_sample_rate)))
 
             if not all_samples:
-                print(f"WARNING: No audio samples were generated for {output_path}. Synthesizing silence.")
-                return self.synthesize("", output_path)
+                # Fallback
+                 return self.synthesize("", output_path)
 
             final_samples = np.concatenate(all_samples)
 
@@ -560,8 +614,6 @@ class TTSService:
                 output_path
             ]
             
-            print(f"DEBUG: Running FFmpeg conversion to MP3 for {output_path}")
-
             ffmpeg_process = subprocess.Popen(
                 ffmpeg_command, 
                 stdin=subprocess.PIPE, 
@@ -573,10 +625,6 @@ class TTSService:
             if ffmpeg_process.returncode != 0:
                 raise RuntimeError(f"FFmpeg encoding process failed: {ffmpeg_err.decode()}")
 
-        except FileNotFoundError as e:
-            if e.filename == 'ffmpeg':
-                raise RuntimeError(f"Required command not found: {e.filename}. Please ensure FFmpeg is installed in your Docker image.") from e
-            raise RuntimeError(f"A file or command was not found: {e}.") from e
         except Exception as e:
             raise RuntimeError(f"Kokoro or FFmpeg process failed: {e}") from e
 
