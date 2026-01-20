@@ -357,11 +357,17 @@ def _chapterize_epub(filepath) -> List[Chapter]:
                 
                 ltitle = title.lower()
                 
+                # DEBUG LOGGING
+                logger.info(f"    NavPoint: '{title}' (href: {href})")
+
                 if '(' in title or ')' in title:
+                    logger.info(f"      Filtered: Parentheses found in '{title}'")
                     continue
                 if any(keyword in ltitle for keyword in EXCLUSION_KEYWORDS):
+                    logger.info(f"      Filtered: Exclusion keyword in '{ltitle}'")
                     continue
                     
+                logger.info(f"      Keep: '{title}'")
                 filtered_chapter_items.append((href, title))
                 
     else:
