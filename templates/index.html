@@ -214,6 +214,19 @@
                                 </select>
                             </div>
 
+                            <div class="mb-3">
+                                <label for="toc_strategy" class="form-label small text-uppercase fw-bold text-muted">
+                                    TOC Handling
+                                </label>
+                                <select class="form-select" id="toc_strategy" name="toc_strategy">
+                                    <option value="auto" selected>✨ Auto (Remove if confident)</option>
+                                    <option value="remove">🗑️ Remove TOC</option>
+                                    <option value="ignore">➖ Ignore (Keep TOC)</option>
+                                </select>
+                                <small class="form-text text-muted">Removes Table of Contents to prevent false chapter
+                                    matches</small>
+                            </div>
+
                             <div class="form-check form-switch p-3 bg-light rounded-3">
                                 <input class="form-check-input" type="checkbox" role="switch" id="book_mode"
                                     name="book_mode" value="true">

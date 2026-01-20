@@ -77,6 +77,85 @@ DISALLOWED_TITLES_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+# --- TOC Detection Functions ---
+
+def _detect_toc_section(text: str) -> tuple:
+    """
+    Detects the Table of Contents section in text.
+    Returns (start_index, end_index, confidence) or (None, None, 0.0) if not found.
+    
+    TOC detection criteria:
+    - TOC header ("Contents", "Table of Contents", etc.)
+    - Multiple consecutive lines with chapter titles + page numbers
+    - Patterns with leader dots/dashes
+    """
+    lines = text.split('\n')
+    toc_start = None
+    toc_end = None
+    confidence = 0.0
+    
+    # TOC header patterns
+    toc_header_pattern = re.compile(
+        r'^\s*(Table\s+of\s+)?Contents?\s*$',
+        re.IGNORECASE
+    )
+    
+    # TOC entry patterns (with page numbers)
+    toc_entry_patterns = [
+        # "Chapter 1 ........ 5" or "Chapter 1...5"
+        re.compile(r'(Chapter|Part|Section)\s+[\dIVXivx]+.*?[\.…\-\s]{3,}\d+\s*$', re.IGNORECASE),
+        # "Introduction ........ 1"
+        re.compile(r'^[A-Z][^\.]{5,60}[\.…\-\s]{3,}\d+\s*$'),
+        # Simple: "Chapter 1 - 5" or "Chapter 1, page 5"
+        re.compile(r'(Chapter|Part).*?[\-,]?\s*(?:page\s*)?\d+\s*$', re.IGNORECASE)
+    ]
+    
+    # Find TOC header
+    for i, line in enumerate(lines):
+        if toc_header_pattern.match(line.strip()):
+            toc_start = i
+            confidence += 0.5
+            logger.info(f"TOC header found at line {i}: {line.strip()[:50]}")
+            break
+    
+    if toc_start is not None:
+        # Look for consecutive TOC entries after header
+        entry_count = 0
+        last_entry_line = toc_start
+        
+        for i in range(toc_start + 1, min(toc_start + 100, len(lines))):
+            line = lines[i].strip()
+            
+            # Skip empty lines
+            if not line:
+                if entry_count > 0 and i - last_entry_line > 3:
+                    # More than 3 empty lines after entries, likely end of TOC
+                    break
+                continue
+            
+            # Check if line matches TOC entry pattern
+            is_entry = any(pattern.search(line) for pattern in toc_entry_patterns)
+            
+            if is_entry:
+                entry_count += 1
+                last_entry_line = i
+            elif entry_count > 0 and i - last_entry_line > 5:
+                # Non-entry after several lines of no entries
+                break
+        
+        if entry_count >= 3:  # At least 3 TOC entries found
+            toc_end = last_entry_line
+            confidence += min(entry_count * 0.1, 0.5)  # Up to 0.5 confidence from entries
+            logger.info(f"TOC section detected: lines {toc_start}-{toc_end} with {entry_count} entries (confidence: {confidence:.2f})")
+    
+    if confidence >= 0.6:  # Require reasonable confidence
+        # Convert line numbers to character indices
+        start_char = sum(len(lines[i]) + 1 for i in range(toc_start))  # +1 for newline
+        end_char = sum(len(lines[i]) + 1 for i in range(toc_end + 1))
+        return (start_char, end_char, confidence)
+    
+    return (None, None, 0.0)
+
 # --- START: New EPUB Helper Functions ---
 
 def _get_epub_text_safely(element, stop_element):
@@ -640,11 +719,17 @@ def _find_raw_chapters(raw_text: str, profile_key: str = "auto") -> List[Chapter
     return chapters
 
 
-def chapterize(filepath: str, text_content: Optional[str] = None, config: Optional[Dict[str, Any]] = None, profile: str = "auto", debug: bool = False) -> List[Chapter]:
+def chapterize(filepath: str, text_content: Optional[str] = None, config: Optional[Dict[str, Any]] = None, profile: str = "auto", toc_strategy: str = "auto", debug: bool = False) -> List[Chapter]:
     """
     Processes a file (pdf, docx, epub, txt) and splits it into chapters.
     If text_content is provided (e.g. from OCR), it is used for PDF/DOCX/TXT
     instead of re-reading the file. EPUBs always use internal structure parsing.
+    
+    Args:
+        toc_strategy: How to handle Table of Contents sections
+            - 'auto': Detect and remove TOC if found with high confidence
+            - 'remove': Always try to detect and remove TOC
+            - 'ignore': Don't attempt TOC detection
     """
     if config is None:
         config = DEFAULT_CONFIG
@@ -682,6 +767,22 @@ def chapterize(filepath: str, text_content: Optional[str] = None, config: Option
         # 2. Others: raw_text is populated, initial_chapters is empty.
         # ---
         if raw_text and not initial_chapters:
+            # --- TOC Detection and Removal ---
+            toc_removed = False
+            if toc_strategy in ['auto', 'remove']:
+                toc_start, toc_end, confidence = _detect_toc_section(raw_text)
+                
+                if toc_start is not None and toc_end is not None:
+                    # Decide whether to remove based on strategy and confidence
+                    should_remove = (toc_strategy == 'remove') or (toc_strategy == 'auto' and confidence >= 0.7)
+                    
+                    if should_remove:
+                        logger.info(f"Removing TOC section (chars {toc_start}-{toc_end}, confidence {confidence:.2f})")
+                        raw_text = raw_text[:toc_start] + raw_text[toc_end:]
+                        toc_removed = True
+                    else:
+                        logger.info(f"TOC detected but not removing (confidence {confidence:.2f} below threshold)")
+            
             # Process raw text from PDF, DOCX, TXT
             initial_chapters = _find_raw_chapters(raw_text, profile_key=profile)
         elif not raw_text and not initial_chapters:

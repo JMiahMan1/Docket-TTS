@@ -1064,12 +1064,14 @@ def upload_file():
             enhanced_metadata = fetch_enhanced_metadata(metadata.get('title'), metadata.get('author'))
 
             chapter_profile = request.form.get('chapter_profile', 'auto')
-            app.logger.info(f"Processing '{original_filename}'. Profile: {chapter_profile}")
+            toc_strategy = request.form.get('toc_strategy', 'auto')
+            app.logger.info(f"Processing '{original_filename}'. Profile: {chapter_profile}, TOC Strategy: {toc_strategy}")
             chapters = chapterizer.chapterize(
                 filepath=input_filepath, 
                 text_content=text_content, 
                 config=None,
                 profile=chapter_profile,
+                toc_strategy=toc_strategy,
                 debug=debug_mode
             )
             
