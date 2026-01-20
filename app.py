@@ -1317,17 +1317,23 @@ def cancel_all_jobs():
                 cancelled_count += 1
                 app.logger.info(f"Cancelled queued task {task_id}")
         
-        # CRITICAL: Purge the entire Celery queue from Redis
-        # This clears unassigned jobs that haven't been picked up by workers yet
+        # CRITICAL: Purge the entire Celery queue and unacknowledged tasks from Redis
+        # This clears unassigned jobs and tasks stuck in "visibility timeout" state
         if redis_client:
             try:
-                # Get count of jobs in queue before purging
+                # Get count of jobs in main queue
                 queue_length = redis_client.llen('celery')
+                
+                # Delete main queue and hidden recovery queues
+                # Celery uses 'unacked' and 'unacked_index' for tasks being processed but not yet finished
+                # or those stuck in visibility timeout during worker restart.
+                redis_client.delete('celery', 'unacked', 'unacked_index')
+                
                 if queue_length > 0:
-                    # Delete the entire queue
-                    redis_client.delete('celery')
                     cancelled_count += queue_length
                     app.logger.info(f"Purged {queue_length} unassigned jobs from Redis queue")
+                
+                app.logger.info("Cleared Celery queues and unacknowledged states in Redis")
             except Exception as redis_error:
                 app.logger.error(f"Error purging Redis queue: {redis_error}")
         
