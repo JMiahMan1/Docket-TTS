@@ -146,8 +146,10 @@
                 <h5 class="mb-0 fw-bold text-primary">⚡ Running Jobs</h5>
                 {% if running_jobs %}
                 <form method="POST" action="/cancel-all-jobs" style="margin: 0;">
+                    {% set total_jobs = (running_jobs | length) + (waiting_jobs | length) + (unassigned_job_count |
+                    default(0)) %}
                     <button type="submit" class="btn btn-sm btn-outline-danger"
-                        onclick="return confirm('Are you sure you want to cancel all {{ running_jobs | length }} running jobs?');">
+                        onclick="return confirm('Are you sure you want to cancel ALL jobs? This will cancel {{ total_jobs }} total job(s) ({{ running_jobs | length }} running, {{ (waiting_jobs | length) + (unassigned_job_count | default(0)) }} queued).');">
                         🛑 Cancel All
                     </button>
                 </form>
