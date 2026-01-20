@@ -104,6 +104,13 @@
                 opacity: 1;
             }
         }
+
+        /* CRITICAL FIX: Ensure checkboxes are above the stretched-link pseudo-element */
+        .file-checkbox,
+        .form-check {
+            position: relative;
+            z-index: 10;
+        }
     </style>
 </head>
 
