@@ -663,6 +663,22 @@ def chapterize(filepath: str, text_content: Optional[str] = None, config: Option
         logger.error(f"Failed to process {filepath}: {e}", exc_info=True)
         return []
 
+    # --- Handle "No Split" (None) Profile explicitly for all formats ---
+    if profile == 'none' and initial_chapters:
+        logger.info(f"Profile is 'none'. Merging {len(initial_chapters)} chapters into one.")
+        full_content = "\n\n".join([c.content for c in initial_chapters])
+        full_word_count = sum(c.word_count for c in initial_chapters)
+        # Use metadata from the first chapter/book
+        first_chap = initial_chapters[0]
+        initial_chapters = [Chapter(
+            number=1,
+            title="Full Book",
+            original_title="Full Book",
+            content=full_content,
+            word_count=full_word_count,
+            part_info=(1, 1)
+        )]
+
     final_parts = _apply_final_processing(initial_chapters, config)
     
     if debug:
