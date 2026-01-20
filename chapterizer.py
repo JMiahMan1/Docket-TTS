@@ -37,9 +37,10 @@ NAMED_CHAPTER_PATTERN = re.compile(
     re.IGNORECASE | re.MULTILINE
 )
 
-# Common in fiction: "1", "I", "One", "The Beginning"
+# Common in fiction: "I", "One", "The Beginning"
+# NOTE: Removed [0-9]+ to avoid matching page numbers in PDFs being detected as chapters.
 STANDALONE_HEADER_PATTERN = re.compile(
-    r'^\s*([0-9]+|[IVXLCDM]+|One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)\s*$',
+    r'^\s*([IVXLCDM]+|One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)\s*$',
     re.IGNORECASE | re.MULTILINE
 )
 
