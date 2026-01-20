@@ -172,18 +172,50 @@ def _split_epub_html_by_anchors(html_content, anchors_with_titles):
                next_anchor_element in current_element.find_all():
                 # This element is a parent of the next anchor.
                 # Get text from it, but stop when we hit the anchor.
+                logger.debug(f"    Next anchor found inside current element <{current_element.name}>. Extracting partial text.")
                 content_parts.append(_get_epub_text_safely(current_element, next_anchor_element))
                 break # Stop processing siblings
             
             if isinstance(current_element, NavigableString):
+                if current_element.strip(): logger.debug(f"    Found text node: {current_element.strip()[:30]}...")
                 content_parts.append(current_element.strip())
             # Only get text if it's not a script/style tag
             elif current_element.name not in ['script', 'style']:
                 # Recursively get text from this element and its children
-                content_parts.append(_get_epub_text_safely(current_element, next_anchor_element))
+                text_found = _get_epub_text_safely(current_element, next_anchor_element)
+                if text_found: logger.debug(f"    Found text in <{current_element.name}>: {text_found[:30]}...")
+                content_parts.append(text_found)
+
+        if not content_parts:
+             # Heuristic: If we found no text by walking siblings, the anchor might be 
+             # nested deep inside a header (e.g. <h3><a id="foo"></a>Title</h3>).
+             # In this case, we might want to start walking from the *parent's* next sibling.
+             logger.debug(f"    No text in siblings of {start_element.name}. Checking parent siblings.")
+             if start_element.parent:
+                 current_element = start_element.parent.next_sibling
+                 while current_element:
+                    # Stop condition 1: We hit the next chapter's anchor element
+                    if next_anchor_element and current_element == next_anchor_element:
+                        break
+                    
+                    # Stop condition 2: The current element *contains* the next anchor
+                    if next_anchor_element and \
+                    hasattr(current_element, 'find_all') and \
+                    next_anchor_element in current_element.find_all():
+                        logger.debug(f"    Next anchor found inside current element <{current_element.name}> (Parent Walk). Extracting partial text.")
+                        content_parts.append(_get_epub_text_safely(current_element, next_anchor_element))
+                        break 
+                    
+                    if isinstance(current_element, NavigableString):
+                        content_parts.append(current_element.strip())
+                    elif current_element.name not in ['script', 'style']:
+                         text_found = _get_epub_text_safely(current_element, next_anchor_element)
+                         if text_found: content_parts.append(text_found)
+
+                    current_element = current_element.next_sibling
 
             # Move to the next element in the DOM tree (sibling)
-            current_element = current_element.next_sibling
+            # current_element = current_element.next_sibling # REMOVED: Managed in loops now
         
         final_text = " ".join(filter(None, content_parts)) # Join non-empty parts
         chapter_texts.append(final_text)
