@@ -358,9 +358,9 @@ def llm_ocr_postprocess(raw_text: str) -> str:
     
     try:
         # This payload is for an Ollama-compatible API.
-        # 'model' should be one you have downloaded (e.g., "llama3:8b", "phi3:medium")
+        # 'model' should be one you have downloaded (e.g., "llama3:8b", "qwen3:latest")
         payload = {
-            "model": "phi3:medium", # <--- CHANGE THIS to your local model
+            "model": "qwen3:latest", # Updated Ollama default model
             "prompt": full_prompt,
             "stream": False,
             "options": {
