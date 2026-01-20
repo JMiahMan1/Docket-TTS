@@ -50,7 +50,7 @@ except ImportError:
     pass
 
 # Read from environment variable (now loaded from .env)
-LLM_API_ENDPOINT = os.environ.get("LLM_API_ENDPOINT", "http://127.0.0.1:11434/api/generate")
+LLM_API_ENDPOINT = os.environ.get("LLM_API_ENDPOINT", "http://127.0.0.1:11435/api/generate")
 LLM_ENABLED = True # Set to False to skip this step
 
 
