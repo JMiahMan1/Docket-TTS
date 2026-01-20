@@ -27,22 +27,50 @@ DEFAULT_CONFIG = {
     "min_chapter_word_count": 100,
 }
 
-NUMBERED_CHAPTER_PATTERN = re.compile(
-    r'^\s*(week|day|chapter|part|book|section)\s+([0-9]+|[IVXLCDM]+)\s*[:.\-]?\s*(.*)\s*$',
-    re.IGNORECASE | re.MULTILINE
-)
+class ChapterizationProfile(NamedTuple):
+    name: str
+    description: str
+    patterns: List[re.Pattern]
 
-NAMED_CHAPTER_PATTERN = re.compile(
-    r'^\s*(prologue|epilogue|introduction|appendix|acknowledgments|dedication|foreword|preface|title page)\s*[:.\-]?\s*(.*)\s*$',
-    re.IGNORECASE | re.MULTILINE
-)
-
-# Common in fiction: "I", "One", "The Beginning"
-# NOTE: Removed [0-9]+ to avoid matching page numbers in PDFs being detected as chapters.
-STANDALONE_HEADER_PATTERN = re.compile(
-    r'^\s*([IVXLCDM]+|One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)\s*$',
-    re.IGNORECASE | re.MULTILINE
-)
+PROFILES = {
+    "auto": ChapterizationProfile(
+        "Auto-Detect", 
+        "Automatically detect the best matching profile.", 
+        []
+    ),
+    "standard": ChapterizationProfile(
+        "Standard Fiction (Ch. 1, One, I...)",
+        "Standard chapter headers like 'Chapter 1', 'Part II', 'One', 'Three'.",
+        [
+            # Numbered: Chapter 1, Part II, Section 3
+            re.compile(r'^\s*(week|day|chapter|part|book|section)\s+([0-9]+|[IVXLCDM]+)\s*[:.\-]?\s*(.*)\s*$', re.IGNORECASE | re.MULTILINE),
+            # Named: Prologue, Epilogue
+            re.compile(r'^\s*(prologue|epilogue|introduction|appendix|acknowledgments|dedication|foreword|preface|title page)\s*[:.\-]?\s*(.*)\s*$', re.IGNORECASE | re.MULTILINE),
+            # Standalone: "One", "Two", "I", "II" (Strict, no digits)
+            re.compile(r'^\s*([IVXLCDM]+|One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)\s*$', re.IGNORECASE | re.MULTILINE)
+        ]
+    ),
+    "journal": ChapterizationProfile(
+        "Journal / Devotional (Dates, Days)",
+        "Splits by dates (Jan 1), 'Day 123', or 'Entry #'. Best for diaries & devotionals.",
+        [
+            # Dates (Full): "January 1, 1890", "12th October", "1890-01-01"
+            re.compile(r'^\s*(?:(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})\s*$', re.IGNORECASE | re.MULTILINE),
+            re.compile(r'^\s*(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})\s*$', re.IGNORECASE | re.MULTILINE),
+            # Simple Date (Day Month): "12 October"
+            re.compile(r'^\s*(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*)\s*$', re.IGNORECASE | re.MULTILINE),
+            # Simple Date (Month Day): "October 12", "Jan 1"
+            re.compile(r'^\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?)\s*$', re.IGNORECASE | re.MULTILINE),
+             # Entry/Day #: "Entry 1", "Day 50", "Devotional 3"
+            re.compile(r'^\s*(Entry|Day|Journal|Devotional)\s+(\d+)\s*$', re.IGNORECASE | re.MULTILINE)
+        ]
+    ),
+    "none": ChapterizationProfile(
+         "No Chapter Splitting",
+         "Treats the entire file as a single chapter.",
+         []
+    )
+}
 
 DISALLOWED_TITLES_PATTERN = re.compile(
     r'^(Table of Contents|Contents|Copyright|Index|Bibliography|Glossary|Also by|List of|Appendix)',
@@ -469,20 +497,77 @@ def _apply_final_processing(chapters: List[Chapter], config: Dict[str, Any]) -> 
 
     return final_parts
 
-def _find_raw_chapters(raw_text: str) -> List[Chapter]:
+def _find_raw_chapters(raw_text: str, profile_key: str = "auto") -> List[Chapter]:
     """
-    Uses regex to find chapters in a raw text blob.
-    This is the generic fallback for PDF, DOCX, TXT.
+    Uses regex to find chapters in a raw text blob based on the selected profile.
     """
+    
+    # --- Auto-Detection Heuristic ---
+    if profile_key == "auto":
+        logger.info("Auto-detecting chapter profile...")
+        best_score = 0
+        best_profile = "standard" # Default
+        
+        # Check first 5000 chars for matches
+        sample_text = raw_text[:5000] 
+        
+        for key, profile in PROFILES.items():
+            if key in ["auto", "none"]: continue
+            
+            score = 0
+            for pattern in profile.patterns:
+                 score += len(pattern.findall(sample_text))
+            
+            # Boost Journal score slightly as false positives are less likely with strict date regex
+            if key == 'journal': score *= 1.2
+                 
+            logger.info(f"  Profile '{key}' score: {score:.1f}")
+            
+            if score > best_score:
+                best_score = score
+                best_profile = key
+        
+        logger.info(f"Auto-selected profile: {best_profile}")
+        profile_key = best_profile
+
+    # --- "None" Profile ---
+    if profile_key == "none":
+        return [Chapter(1, "Full Text", "Full Text", raw_text, len(raw_text.split()))]
+
+    # --- Profile-Based Extraction ---
+    selected_profile = PROFILES.get(profile_key, PROFILES["standard"])
+    patterns = selected_profile.patterns
+    
     chapters = []
     
-    # First, find all potential chapter starts
-    numbered_matches = list(NUMBERED_CHAPTER_PATTERN.finditer(raw_text))
-    named_matches = list(NAMED_CHAPTER_PATTERN.finditer(raw_text))
-    standalone_matches = list(STANDALONE_HEADER_PATTERN.finditer(raw_text))
+    # 1. Find all matches from all patterns in the profile
+    all_matches = []
+    for pattern in patterns:
+        all_matches.extend(list(pattern.finditer(raw_text)))
+        
+    # 2. Sort naturally by position
+    all_matches = sorted(all_matches, key=lambda m: m.start())
     
-    all_matches = sorted(numbered_matches + named_matches + standalone_matches, key=lambda m: m.start())
+    # 3. Filter overlapping matches (keep the longer/earlier one)
+    filtered_matches = []
+    if all_matches:
+        current_match = all_matches[0]
+        for next_match in all_matches[1:]:
+            # If next match starts after current ends, it's valid
+            if next_match.start() >= current_match.end():
+                filtered_matches.append(current_match)
+                current_match = next_match
+            else:
+                # Overlap! Keep the one that starts earlier or is longer
+                # If they start at same spot, keep longer
+                if next_match.start() == current_match.start():
+                     if (next_match.end() - next_match.start()) > (current_match.end() - current_match.start()):
+                         current_match = next_match
+                # Else: current match started earlier, so keep it (ignore nested/next match)
+        filtered_matches.append(current_match)
     
+    all_matches = filtered_matches
+
     if not all_matches:
         # No chapters found, treat the whole text as one chapter
         return [Chapter(1, "Chapter 1", "Chapter 1", raw_text, len(raw_text.split()))]
@@ -493,32 +578,21 @@ def _find_raw_chapters(raw_text: str) -> List[Chapter]:
         
         content = raw_text[start_index:end_index].strip()
         
-        # Extract title from the match object
-        groups = match.groups()
-        if len(groups) == 3: # Numbered chapter
-            ch_type = groups[0].strip()
-            ch_num = groups[1].strip()
-            ch_title = groups[2].strip()
-            original_title = f"{ch_type} {ch_num}"
-            if ch_title:
-                original_title += f": {ch_title}"
-            title = ch_title if ch_title else f"{ch_type} {ch_num}"
-        elif len(groups) == 1: # Standalone "1", "I", "One"
-             ch_num = groups[0].strip()
-             original_title = f"Chapter {ch_num}"
-             title = f"Chapter {ch_num}"
-        else: # Named chapter (2 groups)
-            original_title = groups[0].strip().title()
-            ch_title = groups[1].strip()
-            title = ch_title if ch_title else original_title
-            original_title = groups[0].strip().title()
-            ch_title = groups[1].strip()
-            title = ch_title if ch_title else original_title
+        # --- Title Extraction (Simplified) ---
+        # We just take the whole matched string as the title for now, 
+        # cleaned up a bit.
+        original_title = match.group(0).strip()
+        title = original_title
+        
+        # Remove extra whitespace/newlines from title
+        title = " ".join(title.split())
 
         # Clean up the content (remove the title line)
+        # We verify that the first line of content is indeed our header
         content_lines = content.splitlines()
-        if content_lines and content_lines[0].strip() == match.group(0).strip():
-            content = "\n".join(content_lines[1:]).strip()
+        # Be loose: if first line contains the title, drop it
+        if content_lines and match.group(0).strip() in content_lines[0]:
+             content = "\n".join(content_lines[1:]).strip()
             
         word_count = len(content.split())
         
@@ -534,7 +608,7 @@ def _find_raw_chapters(raw_text: str) -> List[Chapter]:
     return chapters
 
 
-def chapterize(filepath: str, text_content: Optional[str] = None, config: Optional[Dict[str, Any]] = None, debug: bool = False) -> List[Chapter]:
+def chapterize(filepath: str, text_content: Optional[str] = None, config: Optional[Dict[str, Any]] = None, profile: str = "auto", debug: bool = False) -> List[Chapter]:
     """
     Processes a file (pdf, docx, epub, txt) and splits it into chapters.
     If text_content is provided (e.g. from OCR), it is used for PDF/DOCX/TXT
@@ -577,7 +651,7 @@ def chapterize(filepath: str, text_content: Optional[str] = None, config: Option
         # ---
         if raw_text and not initial_chapters:
             # Process raw text from PDF, DOCX, TXT
-            initial_chapters = _find_raw_chapters(raw_text)
+            initial_chapters = _find_raw_chapters(raw_text, profile_key=profile)
         elif not raw_text and not initial_chapters:
             # This triggers if EPUB processing failed *or* other file types were empty
             logger.warning(f"No text or chapters could be extracted from {p_filepath.name}.")

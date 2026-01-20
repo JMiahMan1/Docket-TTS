@@ -1063,8 +1063,15 @@ def upload_file():
             
             enhanced_metadata = fetch_enhanced_metadata(metadata.get('title'), metadata.get('author'))
 
-            app.logger.info(f"Processing '{original_filename}'.")
-            chapters = chapterizer.chapterize(filepath=input_filepath, text_content=text_content, debug=debug_mode)
+            chapter_profile = request.form.get('chapter_profile', 'auto')
+            app.logger.info(f"Processing '{original_filename}'. Profile: {chapter_profile}")
+            chapters = chapterizer.chapterize(
+                filepath=input_filepath, 
+                text_content=text_content, 
+                config=None,
+                profile=chapter_profile,
+                debug=debug_mode
+            )
             
             if chapters:
                 app.logger.info(f"Chapterizer found {len(chapters)} chapters. Queuing tasks.")
