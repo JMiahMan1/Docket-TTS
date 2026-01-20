@@ -533,9 +533,11 @@ def _find_raw_chapters(raw_text: str) -> List[Chapter]:
     return chapters
 
 
-def chapterize_file(filepath: str, config: Optional[Dict[str, Any]] = None, debug: bool = False) -> List[Chapter]:
+def chapterize(filepath: str, text_content: Optional[str] = None, config: Optional[Dict[str, Any]] = None, debug: bool = False) -> List[Chapter]:
     """
     Processes a file (pdf, docx, epub, txt) and splits it into chapters.
+    If text_content is provided (e.g. from OCR), it is used for PDF/DOCX/TXT
+    instead of re-reading the file. EPUBs always use internal structure parsing.
     """
     if config is None:
         config = DEFAULT_CONFIG
@@ -543,7 +545,7 @@ def chapterize_file(filepath: str, config: Optional[Dict[str, Any]] = None, debu
     p_filepath = Path(filepath)
     ext = p_filepath.suffix.lower()
     
-    raw_text: Optional[str] = None
+    raw_text: Optional[str] = text_content
     initial_chapters: List[Chapter] = []
 
     try:
@@ -554,16 +556,18 @@ def chapterize_file(filepath: str, config: Optional[Dict[str, Any]] = None, debu
             # This function returns List[Chapter], bypassing _find_raw_chapters
             initial_chapters = _chapterize_epub(filepath)
             
-        elif ext == '.docx':
-            doc = docx.Document(filepath)
-            raw_text = "\n\n".join([p.text for p in doc.paragraphs])
-            
-        elif ext == '.pdf':
-            with fitz.open(filepath) as doc:
-                raw_text = "\n".join([page.get_text() for page in doc])
+        elif not raw_text:
+            # Only extract if text_content wasn't provided
+            if ext == '.docx':
+                doc = docx.Document(filepath)
+                raw_text = "\n\n".join([p.text for p in doc.paragraphs])
                 
-        elif ext == '.txt':
-             raw_text = p_filepath.read_text(encoding='utf-8')
+            elif ext == '.pdf':
+                with fitz.open(filepath) as doc:
+                    raw_text = "\n".join([page.get_text() for page in doc])
+                    
+            elif ext == '.txt':
+                 raw_text = p_filepath.read_text(encoding='utf-8')
         
         # ---
         # This logic block handles the two different paths:
