@@ -424,6 +424,13 @@
             mainForm.action = "{{ url_for('download_bulk') }}";
             mainForm.submit();
         });
+
+        // CRITICAL FIX: Prevent checkbox clicks from triggering the card's stretched-link
+        document.querySelectorAll('.file-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('click', function (e) {
+                e.stopPropagation(); // Prevent click from bubbling to the card
+            });
+        });
     </script>
 </body>
 
