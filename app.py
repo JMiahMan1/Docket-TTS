@@ -1030,6 +1030,8 @@ def upload_file():
 
         if tasks:
             flash(f'Successfully queued {len(tasks)} job(s) for processing.', 'success')
+            # Give Celery/Redis a moment to register the task so it appears on the jobs page
+            time.sleep(2)
             return redirect(url_for('jobs_page'))
         else:
             flash('No processable content was found in the uploaded file(s).', 'error')
