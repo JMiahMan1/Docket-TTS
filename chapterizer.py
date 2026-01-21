@@ -43,11 +43,11 @@ PROFILES = {
         "Standard chapter headers like 'Chapter 1', 'Part II', 'One', 'Three'.",
         [
             # Numbered: Chapter 1, Part II, Section 3
-            re.compile(r'^\s*(week|day|chapter|part|book|section)\s+([0-9]+|[IVXLCDM]+)\s*[:.\-]?\s*(.*)\s*$', re.IGNORECASE | re.MULTILINE),
+            re.compile(r'^[ \t]*(week|day|chapter|part|book|section)[ \t]+([0-9]+|[IVXLCDM]+)[ \t]*[:.\-]?[ \t]*([^\n]*)[ \t]*$', re.IGNORECASE | re.MULTILINE),
             # Named: Prologue, Epilogue
-            re.compile(r'^\s*(prologue|epilogue|introduction|appendix|acknowledgments|dedication|foreword|preface|title page)\s*[:.\-]?\s*(.*)\s*$', re.IGNORECASE | re.MULTILINE),
+            re.compile(r'^[ \t]*(prologue|epilogue|introduction|appendix|acknowledgments|dedication|foreword|preface|title page)[ \t]*[:.\-]?[ \t]*([^\n]*)[ \t]*$', re.IGNORECASE | re.MULTILINE),
             # Standalone: "One", "Two", "I", "II" (Strict, no digits)
-            re.compile(r'^\s*([IVXLCDM]+|One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)\s*$', re.IGNORECASE | re.MULTILINE)
+            re.compile(r'^[ \t]*([IVXLCDM]+|One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)[ \t]*$', re.IGNORECASE | re.MULTILINE)
         ]
     ),
     "journal": ChapterizationProfile(
@@ -55,16 +55,17 @@ PROFILES = {
         "Splits by dates (Jan 1), 'Day 123', or 'Entry #'. Best for diaries & devotionals.",
         [
             # Dates (Full): "January 1, 1890", "12th October", "1890-01-01"
-            re.compile(r'^\s*(?:(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})\s*$', re.IGNORECASE | re.MULTILINE),
-            re.compile(r'^\s*(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})\s*$', re.IGNORECASE | re.MULTILINE),
+            re.compile(r'^[ \t]*(?:(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?[ \t]*)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[ \t]+\d{1,2}(?:st|nd|rd|th)?,?[ \t]+\d{4})[ \t]*$', re.IGNORECASE | re.MULTILINE),
+            re.compile(r'^[ \t]*(\d{1,2}[ \t]+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[ \t]+\d{4})[ \t]*$', re.IGNORECASE | re.MULTILINE),
             # Simple Date (Day Month): "12 October"
-            re.compile(r'^\s*(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*)\s*$', re.IGNORECASE | re.MULTILINE),
+            re.compile(r'^[ \t]*(\d{1,2}[ \t]+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*)[ \t]*$', re.IGNORECASE | re.MULTILINE),
             # Simple Date (Month Day): "October 12", "Jan 1"
-            re.compile(r'^\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?)\s*$', re.IGNORECASE | re.MULTILINE),
+            re.compile(r'^[ \t]*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[ \t]+\d{1,2}(?:st|nd|rd|th)?)[ \t]*$', re.IGNORECASE | re.MULTILINE),
              # Entry/Day #: "Entry 1", "Day 50", "Devotional 3"
-            re.compile(r'^\s*(Entry|Day|Journal|Devotional)\s+(\d+)\s*$', re.IGNORECASE | re.MULTILINE)
+            re.compile(r'^[ \t]*(Entry|Day|Journal|Devotional)[ \t]+(\d+)[ \t]*$', re.IGNORECASE | re.MULTILINE)
         ]
     ),
+
     "none": ChapterizationProfile(
          "No Chapter Splitting",
          "Treats the entire file as a single chapter.",
