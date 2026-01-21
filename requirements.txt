@@ -5,3 +5,6 @@ argostranslate
 filetype
 torch
 pytesseract
+reportlab
+EbookLib
+python-docx
