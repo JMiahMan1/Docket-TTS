@@ -3,6 +3,11 @@
 
 normalization_rules:
   # === STAGE 1: PRE-PROCESSING AND STRUCTURAL CLEANUP ===
+  - name: "Join hyphenated words at line breaks"
+    type: "regex"
+    pattern: '([A-Za-z])-\s*\n\s*([A-Za-z])'
+    replacement: '\1\2'
+    flags: ["MULTILINE"]
   - name: "Remove superscripts"
     type: "function"
     function_name: "remove_superscripts"
