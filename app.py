@@ -1128,6 +1128,32 @@ def list_files():
         processed_files.append(data)
         
     return render_template('files.html', audio_files=processed_files)
+    
+@app.route('/api/files')
+def api_files():
+    file_map = {}
+    all_files = sorted(Path(app.config['GENERATED_FOLDER']).iterdir(), key=os.path.getmtime, reverse=True)
+
+    for entry in all_files:
+        if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
+            continue
+        key = entry.stem
+        file_data = file_map.setdefault(key, {})
+        if entry.suffix in ['.mp3', '.m4b']:
+            file_data['audio_name'] = entry.name
+            file_data['filename'] = entry.name # For compatibility with test script
+            file_data['size_formatted'] = human_readable_size(entry.stat().st_size)
+            file_data['date'] = datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc).isoformat()
+        elif entry.suffix == '.txt':
+            file_data['txt_name'] = entry.name
+            
+    processed_files = []
+    for key, data in file_map.items():
+        if 'audio_name' not in data: continue
+        data['base_name'] = key
+        processed_files.append(data)
+    return jsonify(processed_files)
+
 
 def _similar(a, b):
     return SequenceMatcher(None, a, b).ratio() > 0.6
@@ -1282,6 +1308,38 @@ def jobs_page():
         app.logger.error(f"Could not inspect Celery/Redis: {e}")
         flash("Could not connect to the Celery worker or Redis.", "error")
     return render_template('jobs.html', running_jobs=running_jobs, waiting_jobs=queued_jobs, unassigned_job_count=unassigned_job_count)
+
+@app.route('/api/jobs')
+def api_jobs():
+    running_jobs, queued_jobs = [], []
+    try:
+        inspector = celery.control.inspect()
+        active_tasks = inspector.active() or {}
+        for worker, tasks in active_tasks.items():
+            for task in tasks:
+                original_filename = "N/A"
+                if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 3:
+                    if 'process_chapter_task' in task.get('name', ''):
+                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                    else:
+                         original_filename = Path(task_args[1]).name
+                running_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'running'})
+        reserved_tasks = inspector.reserved() or {}
+        for worker, tasks in reserved_tasks.items():
+            for task in tasks:
+                original_filename = "N/A"
+                if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 3:
+                    if 'process_chapter_task' in task.get('name', ''):
+                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                    else:
+                         original_filename = Path(task_args[1]).name
+                queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'pending'})
+    except Exception as e:
+        app.logger.error(f"Could not inspect Celery: {e}")
+        return jsonify({'error': str(e)}), 500
+        
+    return jsonify(running_jobs + queued_jobs)
+
 
 
 @app.route('/cancel-job/<task_id>', methods=['POST'])

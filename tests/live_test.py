@@ -10,7 +10,7 @@ BASE_URL = "http://localhost:8000"
 
 def test_paste_text(title, content, profile="standard", book_mode=True):
     print(f"\n--- Testing Paste Text: {title} ---")
-    url = f"{BASE_URL}/upload"
+    url = f"{BASE_URL}/"
     data = {
         'text_title': title,
         'text_input': content,
@@ -33,7 +33,8 @@ def test_paste_text(title, content, profile="standard", book_mode=True):
 
 def test_upload_file(filepath, profile="auto", book_mode=True):
     print(f"\n--- Testing File Upload: {os.path.basename(filepath)} ---")
-    url = f"{BASE_URL}/upload"
+    url = f"{BASE_URL}/"
+
     
     if not os.path.exists(filepath):
         print(f"File not found: {filepath}")
