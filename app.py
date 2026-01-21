@@ -574,14 +574,17 @@ def process_chapter_task(self, chapter_content, book_metadata, chapter_details, 
             secondary_voice_data=secondary_voice_data
         )
         
-        final_content = chapter_content 
+        normalized_chapter_content = normalize_text(chapter_content)
+        final_content = normalized_chapter_content 
+        
         if chapter_details.get("number") == 1:
             unnormalized_title_page = create_title_page_text(book_metadata)
             normalized_title_page = normalize_text(unnormalized_title_page)
-            final_content = normalized_title_page + chapter_content
+            final_content = normalized_title_page + normalized_chapter_content
         
         s_book_title = clean_filename_part(book_metadata.get("title", "book"))
         s_chapter_title = clean_filename_part(chapter_details['title'])
+
         
         part_info = chapter_details.get('part_info', (1, 1))
         part_str = ""

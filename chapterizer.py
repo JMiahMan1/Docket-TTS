@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup, NavigableString  # <-- Added NavigableString
 import fitz
 
 from text_cleaner import clean_text
-from tts_service import normalize_text
+
 
 logger = logging.getLogger(__name__)
 
@@ -571,13 +571,14 @@ def _apply_final_processing(chapters: List[Chapter], config: Dict[str, Any]) -> 
         # Clean text
         cleaned_content = clean_text(chapter.content)
         
-        # Normalize text for TTS
-        normalized_content = normalize_text(cleaned_content)
+        # NOTE: normalize_text is deferred to the TTS stage to avoid hangs in the web thread
+        # We'll use cleaned_content for word count estimations
         
-        word_count = len(normalized_content.split())
+        word_count = len(cleaned_content.split())
         
         # Filter out chapters that are too short
         if word_count < min_words:
+
             # Check if it's a disallowed title
             if DISALLOWED_TITLES_PATTERN.search(chapter.original_title):
                 logger.info(f"Skipping short/disallowed chapter: '{chapter.original_title}' ({word_count} words)")
@@ -595,9 +596,10 @@ def _apply_final_processing(chapters: List[Chapter], config: Dict[str, Any]) -> 
         if word_count > max_words:
             logger.info(f"Chapter '{chapter.original_title}' ({word_count} words) is too large. Splitting...")
             split_parts = _split_large_chapter_into_parts(
-                chapter._replace(content=normalized_content, word_count=word_count),
+                chapter._replace(content=cleaned_content, word_count=word_count),
                 max_words
             )
+
             processed_chapters.extend(split_parts)
         else:
             processed_chapters.append(
