@@ -111,7 +111,7 @@ if __name__ == "__main__":
     BASE_URL = args.url
 
     # Sample text for pasting
-    sample_text = \"\"\"Test Project: Splitting Verification
+    sample_text = """Test Project: Splitting Verification
 Chapter 1
 This is the first chapter content. It is short but should be detected.
 
@@ -120,7 +120,8 @@ This is the second chapter. Splitting should happen here.
 
 Chapter 3: The Final Chapter
 The end of our short test.
-\"\"\"
+"""
+
 
     if args.mode in ['paste', 'full']:
         if test_paste_text("Live Test Paste", sample_text):
