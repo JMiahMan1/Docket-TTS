@@ -1548,6 +1548,58 @@ def debug_normalize():
         "normalized": normalized_step
     })
 
+@app.route('/api/generate-podcast', methods=['POST'])
+def generate_podcast():
+    data = request.json
+    text = data.get('text', '')
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+    
+    voice_primary = data.get('voice', 'af_bella')
+    voice_secondary = data.get('voice_secondary') # Optional
+    speed_rate = str(data.get('speed', '1.0'))
+    title = data.get('title', 'podcast_segment')
+    
+    # Generate unique filename
+    filename = f"podcast_{secure_filename(title)}_{uuid.uuid4().hex[:8]}.mp3"
+    generated_folder = Path(app.config['GENERATED_FOLDER'])
+    output_filepath = generated_folder / filename
+    
+    try:
+        # Prepare voices
+        voice_data = ensure_voice_available(voice_primary)
+        secondary_voice_data = None
+        if voice_secondary:
+            secondary_voice_data = ensure_voice_available(voice_secondary)
+            
+        # Initialize TTS Service
+        tts = TTSService(
+            voice_name=voice_primary,
+            voice_data=voice_data,
+            speed_rate=speed_rate,
+            secondary_voice_name=voice_secondary,
+            secondary_voice_data=secondary_voice_data
+        )
+        
+        # Normalize and Synthesize
+        cleaned_text = clean_text(text)
+        normalized_text = normalize_text(cleaned_text)
+        
+        tts.synthesize(normalized_text, str(output_filepath))
+        
+        # Return download URL
+        return jsonify({
+            "status": "success",
+            "message": "Podcast generated successfully",
+            "filename": filename,
+            "download_url": f"/files/generated/{filename}",
+            "normalized_text": normalized_text
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error generating podcast: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/edit/<base_name>', methods=['GET', 'POST'])
 def edit_normalized_text(base_name):
     """
