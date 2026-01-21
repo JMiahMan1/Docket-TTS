@@ -161,5 +161,6 @@ if __name__ == "__main__":
            create_pdf(key, data)
         except ImportError:
            print("Reportlab not found, skipping PDF")
-        # create_mobi_stub(key, data) # Skip stub to avoid confusing the real app
+        create_mobi_stub(key, data) 
+
 
