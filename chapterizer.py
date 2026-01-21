@@ -779,18 +779,21 @@ def chapterize(filepath: str, text_content: Optional[str] = None, config: Option
             # --- TOC Detection and Removal ---
             toc_removed = False
             if toc_strategy in ['auto', 'remove']:
-                toc_start, toc_end, confidence = _detect_toc_section(raw_text)
+                toc_start_idx, toc_end_idx, confidence = _detect_toc_section(raw_text)
                 
-                if toc_start is not None and toc_end is not None:
+                if toc_start_idx is not None and toc_end_idx is not None:
                     # Decide whether to remove based on strategy and confidence
                     should_remove = (toc_strategy == 'remove') or (toc_strategy == 'auto' and confidence >= 0.7)
                     
                     if should_remove:
-                        logger.info(f"Removing TOC section (chars {toc_start}-{toc_end}, confidence {confidence:.2f})")
-                        raw_text = raw_text[:toc_start] + raw_text[toc_end:]
+                        logger.info(f"Removing TOC section (lines {toc_start_idx}-{toc_end_idx}, confidence {confidence:.2f})")
+                        lines = raw_text.split('\n')
+                        # Remove lines from toc_start_idx to toc_end_idx inclusive
+                        raw_text = '\n'.join(lines[:toc_start_idx] + lines[toc_end_idx+1:])
                         toc_removed = True
                     else:
                         logger.info(f"TOC detected but not removing (confidence {confidence:.2f} below threshold)")
+
             
             # Process raw text from PDF, DOCX, TXT
             initial_chapters = _find_raw_chapters(raw_text, profile_key=profile)
