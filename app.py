@@ -1534,8 +1534,8 @@ def debug_normalize():
         return jsonify({"error": "No text provided"}), 400
     
     # Text cleaning (structural)
-    config = DEFAULT_CONFIG
-    cleaned_step = clean_text(text, config)
+    config = None
+    cleaned_step = clean_text(text)
     
     # TTS Normalization
     normalized_step = tts_service.normalize_text(cleaned_step)
