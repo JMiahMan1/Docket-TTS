@@ -70,6 +70,15 @@ SCENARIOS = {
             ("Is. 43", "This tests 'Is.' with a dot. This variation is common in older texts. The system should normalize or least detect this as a valid break point.")
         ]
     },
+    "multi_voice_dialogue": {
+        "title": "Pride and Prejudice (Multi-Voice Test)",
+        "author": "Jane Austen",
+        "file_base": "dialogue_test",
+        "content": [
+            ("Chapter 1", "\"My dear Mr. Bennet,\" said his lady to him one day, \"have you heard that Netherfield Park is let at last?\"\n\nMr. Bennet replied that he had not.\n\n\"But it is,\" returned she; \"for Mrs. Long has just been here, and she told me all about it.\"\n\nMr. Bennet made no answer.\n\n\"Do you not want to know who has taken it?\" cried his wife impatiently.\n\n\"You want to tell me, and I have no objection to hearing it.\"\n\nThis was invitation enough.\n\n\"Why, my dear, you must know, Mrs. Long says that Netherfield is taken by a young man of large fortune from the north of England; that he came down on Monday in a chaise and four to see the place, and was so much delighted with it, that he agreed with Mr. Morris immediately; that he is to take possession before Michaelmas, and some of his servants are to be in the house by the end of next week.\""),
+            ("Chapter 2", "Mr. Bennet was among the earliest of those who waited on Mr. Bingley. He had always intended to visit him, though to the last always assuring his wife that he should not go; and till the evening after the visit was paid she had no knowledge of it. It was then disclosed in the following manner. Observing his second daughter employed in trimming a hat, he suddenly addressed her with:\n\n\"I hope Mr. Bingley will like it, Lizzy.\"\n\n\"We are not in a way to know what Mr. Bingley likes,\" said her mother resentfully, \"since we are not to visit.\"\n\n\"But you forget, mamma,\" said Elizabeth, \"that we shall meet him at the assemblies, and that Mrs. Long promised to introduce him.\"")
+        ]
+    },
     "complex_academic": {
         "title": "The Art of War (Full Excerpts)",
         "author": "Sun Tzu",

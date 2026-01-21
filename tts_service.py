@@ -580,7 +580,7 @@ class TTSService:
                     
                     # Synthesize
                     if full_chunk.strip():
-                        # print(f"DEBUG: Synthesizing chunk... '{full_chunk[:30]}...' (Voice: {'Sec' if is_dialogue else 'Pri'})")
+                        print(f"DEBUG: Synthesizing chunk... '{full_chunk[:30]}...' (Voice: {'Secondary' if is_dialogue else 'Primary'})")
                         samples, sample_rate = self.kokoro.create(
                             text=full_chunk, 
                             voice=voice_to_use,
