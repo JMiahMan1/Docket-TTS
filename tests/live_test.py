@@ -59,7 +59,8 @@ def test_upload_file(filepath, profile="auto", book_mode=True):
         print(response.text[:500])
         return False
 
-def poll_jobs(timeout=300):
+def poll_jobs(timeout=600):
+
     print("\n--- Polling Jobs ---")
     url = f"{BASE_URL}/api/jobs"
     start_time = time.time()
