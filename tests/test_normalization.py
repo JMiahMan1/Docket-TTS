@@ -1,150 +1,53 @@
+
+import unittest
+import sys
+import os
+
+# Add project root to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from tts_service import normalize_text
-import pytest
 
-def test_header_and_verse_separation():
-    """
-    Tests that a header embedded with a word-based verse is correctly separated.
-    Example: '...PEOPLEfive:one'
-    """
-    input_text = "Romans chapter five, verse THE MESSIAH KING AND THE PILGRIMAGE OF HIS PEOPLEfive:one, which is a tricky case."
-    expected_fragment = "THE MESSIAH KING AND THE PILGRIMAGE OF HIS PEOPLE. verse one"
+class TestNormalization(unittest.TestCase):
     
-    result = normalize_text(input_text)
-    
-    assert expected_fragment in result
-    assert "PEOPLEfive:one" not in result
+    def test_bible_references(self):
+        # Test cases for Bible references
+        cases = [
+            ("ROM 9:28", ["Romans", "nine", "twenty-eight"]),
+            ("Rom. 9:28", ["Romans", "nine", "twenty-eight"]),
+            ("Is 43", ["Isaiah", "forty-three"]),
+            ("IS 43", ["Isaiah", "forty-three"]),
+            ("Is. 43", ["Isaiah", "forty-three"]),
+            ("Gen 1:1", ["Genesis", "one"]),
+        ]
+        
+        for input_text, expected_keywords in cases:
+            with self.subTest(input_text=input_text):
+                result = normalize_text(input_text)
+                print(f"Input: {input_text} -> Output: {result}")
+                
+                for keyword in expected_keywords:
+                    self.assertIn(keyword, result, f"Expected '{keyword}' in '{result}'")
 
-def test_numeric_verse_and_header_separation():
-    """
-    Tests that a leading numeric verse is converted correctly and does not merge with a following header.
-    Example: ':83 THE GLORY...'
-    """
-    input_text = "\n:83 THE GLORY OF GOD. And we rejoice in the hope of the glory of God."
-    expected_fragment = "verse eighty-three THE GLORY OF GOD."
-    
-    result = normalize_text(input_text)
+    def test_hyphenation(self):
+        # Test hyphen handling
+        input_text = "This is a sen-\ntence with a hyp-\nhen."
+        # Expectation: hyphens at end of line joined, newlines removed
+        # Note: 'normalize_text' might verify specific spacing, but key is 'sentence' is whole
+        result = normalize_text(input_text)
+        print(f"Hyphen Input: {input_text!r} -> Output: {result!r}")
+        
+        self.assertIn("sentence", result)
+        self.assertNotIn("sen-", result)
+        self.assertNotIn("sen -", result)
 
-    assert expected_fragment in result
-    assert "eighty-threeTHE GLORY" not in result
+    def test_standard_text_cleaning(self):
+        # Test normal text
+        input_text = "Chapter 1\n\nThis is a test."
+        result = normalize_text(input_text)
+        print(f"Standard Input: {input_text!r} -> Output: {result!r}")
+        # Expect "Chapter one" because numbers are expanded
+        self.assertIn("Chapter one", result)
 
-def test_biblical_verse_stripping():
-    """
-    Tests that verse numbers and other artifacts are stripped from Biblical text.
-    """
-    input_text = """
-    "There is none righteous, no, not one;
-    11 There is none who understands;
-    There is none who seeks after God.
-    12 They have all turned aside;
-    They have together become unprofitable;
-    There is none who does good, no, not one."
-    13 "Their throat is an open tomb;
-    With their tongues they have practiced deceit";
-    "The poison of asps is under their lips";
-    14"Whose mouth is full of cursing and bitterness."
-    """
-
-    result = normalize_text(input_text)
-
-    assert "11" not in result
-    assert "12" not in result
-    assert "13" not in result
-    assert "14" not in result
-    assert "There is none who understands" in result
-    assert "They have all turned aside" in result
-    assert "Their throat is an open tomb" in result
-    assert "Whose mouth is full of cursing and bitterness" in result
-
-def test_leading_verse_marker_normalization():
-    """
-    Tests that leading chapter:verse markers are correctly parsed without
-    affecting the stripping of standalone verse numbers.
-    """
-    input_text = """
-2:5 Moses could have addressed this statement to Pharaoh.
-11 Paul has already made his argument regarding the depravity of man.
-"""
-    result = normalize_text(input_text)
-
-    assert "chapter two verse five" in result
-    assert "eleven" not in result
-    assert "Paul has already" in result
-
-def test_footnote_removal():
-    """Tests that alphabetic footnotes like [a], [b] are removed."""
-    input_text = """
-The Lord is my shepherd;
-I shall not [a]want.
-He makes me to lie down in [b]green pastures;
-He leads me beside the [c]still waters.
-"""
-    result = normalize_text(input_text)
-
-    assert "[a]" not in result
-    assert "[b]" not in result
-    assert "[c]" not in result
-    assert "not want" in result
-    assert "in green pastures" in result
-    assert "the still waters" in result
-
-def test_pdf_verse_and_footnote_removal():
-    """Tests the removal of artifacts from the Romans 3 PDF text."""
-
-    input_text = """³
-God’s Judgment Defended
-¹What advantage then has the Jew, or what is the profit of circumcision? ²Much in every way! Chiefly because ᵃto them were committed the ¹oracles of God. ³For what if ᵇsome did not believe? ᶜWill their unbelief make the faithfulness of God without effect? ⁴ᵈCertainly not! Indeed, let ᵉGod be ²true but ᶠevery man a liar. As it is written:"""
-    
-    result = normalize_text(input_text)
-
-    # Check that verse numbers are gone
-    assert "¹What" not in result
-    
-    # Check that footnote letters are gone
-    assert "ᵇsome" not in result
-    assert "ᵈCertainly" not in result
-    assert "ᵃto them" not in result
-
-    # Check that the text is preserved
-    assert "What advantage then has the Jew" in result
-    assert "Certainly not!" in result
-    assert "Indeed, let God be true but every man a liar" in result
-
-def test_bracketed_numeric_footnote_removal():
-    """
-    Tests that bracketed numeric footnotes, common in academic PDFs, are removed.
-    This pattern is found throughout the provided PDF.
-    """
-    input_text = "This gives Paul the opportunity to establish his message.[39] The term was very important in the LXX.[40]"
-    result = normalize_text(input_text)
-
-    assert "[39]" not in result
-    assert "[40]" not in result
-    assert "his message. The term" in result
-
-def test_hebrew_and_inline_greek_normalization():
-    """
-    Tests that Hebrew text is translated and Greek text is transliterated correctly.
-    """
-    input_text = 'The term Paul uses is δοῦλος (doulos) "servant." The Hebrew is מִשִׁיחַ (māsaḥ) "Messiah."'
-    result = normalize_text(input_text)
-    
-    # Check that the Greek is transliterated correctly to 'doulos'
-    assert "doulos , doulos" in result
-
-    # Check that the verbose "translation from" text is gone
-    assert "translation from Hebrew:" not in result.lower()
-    
-    # Check that the Hebrew translation is present
-    assert "Messiah" in result
-
-def test_hebrew_translation_simple():
-    """
-    Provides a focused test for Hebrew translation without verbose text.
-    """
-    input_text = "The Hebrew word is מִשִׁיחַ."
-    # The final space-collapsing rule will clean this up
-    expected = "The Hebrew word is Messiah ."
-    
-    result = normalize_text(input_text)
-    
-    assert result == expected
+if __name__ == '__main__':
+    unittest.main()

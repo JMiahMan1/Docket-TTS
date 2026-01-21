@@ -1526,6 +1526,26 @@ def debug_page():
 
     return render_template('debug.html', voices=voices, original_text=original_text, normalized_output=normalized_output, log_content=log_content)
 
+@app.route('/api/debug/normalize', methods=['POST'])
+def debug_normalize():
+    data = request.json
+    text = data.get('text', '')
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+    
+    # Text cleaning (structural)
+    config = DEFAULT_CONFIG
+    cleaned_step = clean_text(text, config)
+    
+    # TTS Normalization
+    normalized_step = tts_service.normalize_text(cleaned_step)
+    
+    return jsonify({
+        "original": text,
+        "cleaned": cleaned_step,
+        "normalized": normalized_step
+    })
+
 @app.route('/edit/<base_name>', methods=['GET', 'POST'])
 def edit_normalized_text(base_name):
     """

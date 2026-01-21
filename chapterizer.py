@@ -42,8 +42,8 @@ PROFILES = {
         "Standard Fiction (Ch. 1, One, I...)",
         "Standard chapter headers like 'Chapter 1', 'Part II', 'One', 'Three'.",
         [
-            # Numbered: Chapter 1, Part II, Section 3, Psalm 23, Question 1
-            re.compile(r'^[ \t]*(week|day|chapter|part|book|section|psalm|question|homily|sermon)[ \t]+([0-9]+|[IVXLCDM]+)[ \t]*[:.\-]?[ \t]*([^\n]*)[ \t]*$', re.IGNORECASE | re.MULTILINE),
+            # Numbered: Chapter 1, Part II, Section 3, Psalm 23, Question 1, Rom 9:28
+            re.compile(r'^[ \t]*(week|day|chapter|part|book|section|psalm|question|homily|sermon|rom|is|gen|ex|lev|num|deut|josh|judg|ruth|sam|kgs|chr|ezra|neh|esth|job|ps|prov|eccl|song|isa|jer|lam|ezek|dan|hos|joel|am|obad|jon|mic|nah|hab|zeph|hag|zech|mal|matt|mrk|luk|jhn|acts|cor|gal|eph|phil|col|thess|tim|tit|phlm|heb|jas|pet|jud|rev)[.]?[ \t]+([0-9]+|[IVXLCDM]+)[ \t]*[:.\-]?[ \t]*([^\n]*)[ \t]*$', re.IGNORECASE | re.MULTILINE),
             # Named: Prologue, Epilogue
             re.compile(r'^[ \t]*(prologue|epilogue|introduction|appendix|acknowledgments|dedication|foreword|preface|title page)[ \t]*[:.\-]?[ \t]*([^\n]*)[ \t]*$', re.IGNORECASE | re.MULTILINE),
             # Standalone: "One", "Two", "I", "II" (Strict, no digits)

@@ -58,6 +58,18 @@ SCENARIOS = {
             ("Section 5.5: Decimal Headers", "Some layouts use decimals. 'Section 5.5' should be caught by the regex allowing digits. This checks if the regex accepts dots or just integers. If our regex is '([0-9]+|[IVX...])', it might miss 5.5. This is a good edge case test. If it fails, we know we need to update the regex to allow `[0-9]+(?:\\.[0-9]+)?`.")
         ]
     },
+    "bible_references": {
+        "title": "Bible Reference Variations",
+        "author": "Test Suite",
+        "file_base": "bible_test",
+        "content": [
+            ("ROM 9:28", "This tests the uppercase book abbreviation 'ROM' followed by chapter:verse. Content must be long enough. Romans 9:28 says, 'For he will finish the work, and cut it short in righteousness: because a short work will the Lord make upon the earth.' This text is used to verify that the chapterizer can handle standard Bible reference citations commonly found in theological works. Ideally, this should become its own chapter."),
+            ("Rom. 9:28", "This tests the abbreviation with a dot 'Rom.' followed by chapter:verse. It distinguishes from 'Rom' without dot. The regex must handle the optional period. Content is filler text to ensure we meet the length requirements. We need to verify that the period does not break the parsing logic."),
+            ("Is 43", "This tests the abbreviation 'Is' (Isaiah) without a dot. 'Is' is also a common English verb, so capitalization and context (start of line + number) are key. Isaiah 43 begins with 'But now thus saith the Lord that created thee, O Jacob...'. Testing if 'Is' followed by number is caught."),
+            ("IS 43", "This tests uppercase 'IS' followed by number. This handles cases where the entire header is capitalized. Consistency in detection across case variations is important."),
+            ("Is. 43", "This tests 'Is.' with a dot. This variation is common in older texts. The system should normalize or least detect this as a valid break point.")
+        ]
+    },
     "complex_academic": {
         "title": "The Art of War (Full Excerpts)",
         "author": "Sun Tzu",
