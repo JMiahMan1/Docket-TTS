@@ -1526,6 +1526,8 @@ def debug_page():
 
     return render_template('debug.html', voices=voices, original_text=original_text, normalized_output=normalized_output, log_content=log_content)
 
+from text_cleaner import clean_text
+
 @app.route('/api/debug/normalize', methods=['POST'])
 def debug_normalize():
     data = request.json
@@ -1538,7 +1540,7 @@ def debug_normalize():
     cleaned_step = clean_text(text)
     
     # TTS Normalization
-    normalized_step = tts_service.normalize_text(cleaned_step)
+    normalized_step = normalize_text(cleaned_step)
     
     return jsonify({
         "original": text,
