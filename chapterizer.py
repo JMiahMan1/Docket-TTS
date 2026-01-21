@@ -761,7 +761,18 @@ def chapterize(filepath: str, text_content: Optional[str] = None, config: Option
             # This function returns List[Chapter], bypassing _find_raw_chapters
             initial_chapters = _chapterize_epub(filepath)
             
+            # Fallback: if no chapters were found (e.g. broken/missing NCX), 
+            # extract raw text and let _find_raw_chapters handle it.
+            if not initial_chapters and not raw_text:
+                logger.info(f"NCX chapterization failed for {p_filepath.name}. Falling back to raw text extraction.")
+                book = epub.read_epub(filepath, {"ignore_ncx": True})
+                chapters_raw = []
+                for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+                    chapters_raw.append(_extract_html_text(item.get_content()))
+                raw_text = "\n\n".join(chapters_raw)
+
         elif not raw_text:
+
             # Only extract if text_content wasn't provided
             if ext == '.docx':
                 doc = docx.Document(filepath)

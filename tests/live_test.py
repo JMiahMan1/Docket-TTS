@@ -59,7 +59,8 @@ def test_upload_file(filepath, profile="auto", book_mode=True):
         print(response.text[:500])
         return False
 
-def poll_jobs(timeout=600):
+def poll_jobs(timeout=900):
+
 
     print("\n--- Polling Jobs ---")
     url = f"{BASE_URL}/api/jobs"
@@ -130,10 +131,11 @@ Chapter 3
 
 
     if args.mode in ['paste', 'full']:
-        if test_paste_text("Live Test Paste", sample_text):
+        if test_paste_text("Live Chapterization Test", sample_text):
             time.sleep(2) # Give it a moment to split
             jobs = poll_jobs()
-            verify_results("Live_Test_Paste")
+            verify_results("Live_Chapterization_Test")
+
 
     if args.mode in ['upload', 'full']:
         if args.file:
