@@ -604,8 +604,9 @@ def _apply_final_processing(chapters: List[Chapter], config: Dict[str, Any]) -> 
             processed_chapters.extend(split_parts)
         else:
             processed_chapters.append(
-                chapter._replace(content=normalized_content, word_count=word_count)
+                chapter._replace(content=cleaned_content, word_count=word_count)
             )
+
             
     # Re-number and finalize
     final_parts = []
