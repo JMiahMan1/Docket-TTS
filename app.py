@@ -1019,13 +1019,19 @@ def upload_file():
         voice_name = request.form.get("voice")
         secondary_voice_name = request.form.get("secondary_voice")
         if secondary_voice_name == "": secondary_voice_name = None
-        
         speed_rate = request.form.get("speed_rate", "1.0")
+        debug_mode = 'debug_mode' in request.form
+        chapter_profile = request.form.get('chapter_profile', 'auto')
+        toc_strategy = request.form.get('toc_strategy', 'auto')
+        book_mode = 'book_mode' in request.form
+
+        # 1. Collect all items to process
+        items_to_process = []
         
+        # Check for pasted text
         text_input = request.form.get('text_input')
         if text_input and text_input.strip():
             book_title = request.form.get('text_title')
-            
             if not book_title or not book_title.strip():
                 flash('Title is required for pasted text.', 'error')
                 return redirect(request.url)
@@ -1035,74 +1041,89 @@ def upload_file():
             input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
             Path(input_filepath).write_text(text_input, encoding='utf-8')
             
-            book_author = 'Unknown'
-            
-            task = convert_to_speech_task.delay(input_filepath, original_filename, book_title, book_author, voice_name, speed_rate, secondary_voice_name)
-            
-            return render_template('result.html', task_id=task.id)
+            items_to_process.append({
+                'filepath': input_filepath,
+                'original_filename': original_filename,
+                'text_content': text_input,
+                'metadata': {'title': book_title, 'author': 'Unknown'}
+            })
 
-        tasks = []
-        debug_mode = 'debug_mode' in request.form
-        
-        files = request.files.getlist('file')
-        if not files or all(f.filename == '' for f in files):
-            flash('No files selected.', 'error')
+        # Check for uploaded files
+        uploaded_files = request.files.getlist('file')
+        for file in uploaded_files:
+            if file and file.filename != '' and allowed_file(file.filename):
+                original_filename = secure_filename(file.filename)
+                unique_internal_filename = f"{uuid.uuid4().hex}{Path(original_filename).suffix}"
+                input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
+                file.save(input_filepath)
+                
+                text_content, metadata = extract_text_and_metadata(input_filepath)
+                items_to_process.append({
+                    'filepath': input_filepath,
+                    'original_filename': original_filename,
+                    'text_content': text_content,
+                    'metadata': metadata
+                })
+
+        if not items_to_process:
+            flash('No text pasted or files selected.', 'error')
             return redirect(request.url)
-        
-        for file in files:
-            if not file or not allowed_file(file.filename):
-                flash(f"Invalid file type: {file.filename}. Allowed types are: {', '.join(ALLOWED_EXTENSIONS)}.", 'error')
-                continue
 
-            original_filename = secure_filename(file.filename)
-            unique_internal_filename = f"{uuid.uuid4().hex}{Path(original_filename).suffix}"
-            input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
-            file.save(input_filepath)
-
-            text_content, metadata = extract_text_and_metadata(input_filepath)
+        # 2. Process all collected items
+        tasks = []
+        for item in items_to_process:
+            input_filepath = item['filepath']
+            original_filename = item['original_filename']
+            text_content = item['text_content']
+            metadata = item['metadata']
             
             enhanced_metadata = fetch_enhanced_metadata(metadata.get('title'), metadata.get('author'))
 
-            chapter_profile = request.form.get('chapter_profile', 'auto')
-            toc_strategy = request.form.get('toc_strategy', 'auto')
-            app.logger.info(f"Processing '{original_filename}'. Profile: {chapter_profile}, TOC Strategy: {toc_strategy}")
-            chapters = chapterizer.chapterize(
-                filepath=input_filepath, 
-                text_content=text_content, 
-                config=None,
-                profile=chapter_profile,
-                toc_strategy=toc_strategy,
-                debug=debug_mode
-            )
-            
-            if chapters:
-                app.logger.info(f"Chapterizer found {len(chapters)} chapters. Queuing tasks.")
-                for chapter in chapters:
-                    chapter_details = {
-                        'number': chapter.number,
-                        'title': chapter.title,
-                        'original_title': chapter.original_title,
-                        'part_info': chapter.part_info
-                    }
-                    task = process_chapter_task.delay(chapter.content, enhanced_metadata, chapter_details, voice_name, speed_rate, secondary_voice_name)
+            if book_mode:
+                app.logger.info(f"Processing '{original_filename}' with Book Mode. Profile: {chapter_profile}, TOC Strategy: {toc_strategy}")
+                chapters = chapterizer.chapterize(
+                    filepath=input_filepath, 
+                    text_content=text_content, 
+                    config=None,
+                    profile=chapter_profile,
+                    toc_strategy=toc_strategy,
+                    debug=debug_mode
+                )
+                
+                if chapters:
+                    app.logger.info(f"Chapterizer found {len(chapters)} chapters for '{original_filename}'. Queuing tasks.")
+                    for chapter in chapters:
+                        chapter_details = {
+                            'number': chapter.number,
+                            'title': chapter.title,
+                            'original_title': chapter.original_title,
+                            'part_info': chapter.part_info
+                        }
+                        task = process_chapter_task.delay(chapter.content, enhanced_metadata, chapter_details, voice_name, speed_rate, secondary_voice_name)
+                        tasks.append(task)
+                    # Delete the original "full" file if we split it
+                    if os.path.exists(input_filepath):
+                        os.remove(input_filepath)
+                else:
+                    flash(f"Could not split '{original_filename}' into chapters. Processing as a single file.", "warning")
+                    task = convert_to_speech_task.delay(input_filepath, original_filename, enhanced_metadata.get('title'), enhanced_metadata.get('author'), voice_name, speed_rate, secondary_voice_name)
                     tasks.append(task)
-                os.remove(input_filepath)
             else:
-                flash(f"Could not split '{original_filename}' into chapters. Processing as a single file.", "warning")
+                # Standard Mode (No splitting)
                 task = convert_to_speech_task.delay(input_filepath, original_filename, enhanced_metadata.get('title'), enhanced_metadata.get('author'), voice_name, speed_rate, secondary_voice_name)
                 tasks.append(task)
 
         if tasks:
             flash(f'Successfully queued {len(tasks)} job(s) for processing.', 'success')
-            # Give Celery/Redis a moment to register the task so it appears on the jobs page
             time.sleep(2)
             return redirect(url_for('jobs_page'))
         else:
-            flash('No processable content was found in the uploaded file(s).', 'error')
+            flash('Failed to queue any jobs.', 'error')
             return redirect(request.url)
 
     voices = get_kokoro_voices()
     return render_template('index.html', voices=voices)
+
 
 @app.route('/files')
 def list_files():
