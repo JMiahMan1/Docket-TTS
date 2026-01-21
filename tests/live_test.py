@@ -112,16 +112,20 @@ if __name__ == "__main__":
     BASE_URL = args.url
 
     # Sample text for pasting
-    sample_text = """Test Project: Splitting Verification
+    chapter_content = "This is a much longer content block for the chapter to ensure it passes the minimum word count filter of one hundred words. " * 10
+    
+    sample_text = f"""Test Project: Splitting Verification
+
 Chapter 1
-This is the first chapter content. It is short but should be detected.
+{chapter_content}
 
-Chapter 2
-This is the second chapter. Splitting should happen here.
+Chapter 2: The Second Part
+{chapter_content}
 
-Chapter 3: The Final Chapter
-The end of our short test.
+Chapter 3
+{chapter_content}
 """
+
 
 
     if args.mode in ['paste', 'full']:
