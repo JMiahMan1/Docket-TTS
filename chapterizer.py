@@ -762,10 +762,20 @@ def _chapterize_by_toc(text: str, toc: List[List], config: Dict[str, Any]) -> Li
         logger.info(f"High-count TOC detected ({len(valid_toc_entries)} entries). Attempting to filter for major headings.")
         
         # Regex for "Major" headings: "Chapter X", "Part X", "1. Title"
-        # Matches: "Part I:", "1. How to Read"
-        major_pattern = re.compile(r'^(Chapter|Part|Book|Section)\s+\w+|^\d+\.\s+', re.IGNORECASE)
+        # Also include standard front-matter like Introduction, Preface, Foreword to avoid skipping them
+        major_pattern = re.compile(r'^(Chapter|Part|Book|Section)\s+\w+|^\d+\.\s+|^(Introduction|Preface|Foreword|Prologue)', re.IGNORECASE)
         
         major_entries = [e for e in valid_toc_entries if major_pattern.match(e[1].strip())]
+        
+        # SAFETY CHECK: Ensure we don't skip the start of the book.
+        # If the first major entry starts way after the first actual entry, we lose text.
+        # So, if we filtered out the first entry, add it back (it will act as a catch-all for front matter).
+        if major_entries and valid_toc_entries:
+            first_original = valid_toc_entries[0]
+            first_major = major_entries[0]
+            if first_major[2] > first_original[2]:
+                logger.info(f"Adding back first TOC entry '{first_original[1]}' to capture front matter (prevent text loss).")
+                major_entries.insert(0, first_original)
         
         # Only apply filter if it creates a reasonable subset (e.g. > 5 chapters)
         # and actually reduces the count.
