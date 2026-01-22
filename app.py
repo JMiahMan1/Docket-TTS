@@ -928,7 +928,7 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
         # 1. Perform Text Extraction/OCR if not provided
         if not text_content:
             app.logger.info(f"No text content provided for {original_filename}. Performing extraction (OCR takes time)...")
-            self.update_state(state='PROGRESS', meta={'status': f"Extracting text from {original_filename}..."})
+            self.update_state(state='PROGRESS', meta={'status': f"OCR: {original_filename} (Please Wait...)"})
             text_content, extracted_metadata = extract_text_and_metadata(input_filepath)
             
             # Merge extracted metadata if not already present
@@ -1396,7 +1396,14 @@ def jobs_page():
                 task_name = task.get('name', '')
                 task_args = task.get('args')
                 
-                if task_args and isinstance(task_args, (list, tuple)):
+                # Check for custom status in task meta/info
+                custom_status = None
+                if task.get('info') and isinstance(task['info'], dict):
+                     custom_status = task['info'].get('status')
+                     
+                if custom_status:
+                     original_filename = custom_status
+                elif task_args and isinstance(task_args, (list, tuple)):
                     if 'process_chapter_task' in task_name:
                          if len(task_args) > 3:
                             original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
