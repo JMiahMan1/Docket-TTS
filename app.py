@@ -1393,6 +1393,9 @@ def jobs_page():
         for worker, tasks in active_tasks.items():
             for task in tasks:
                 original_filename = "N/A"
+                task_name = task.get('name', '')
+                task_args = task.get('args')
+
                 # Check for custom status in task meta/info (if available in future Celery versions)
                 custom_status = None
                 if task.get('info') and isinstance(task['info'], dict):
@@ -1413,6 +1416,12 @@ def jobs_page():
                     # Parse KWARGS (Fallback if args empty)
                     task_kwargs = task.get('kwargs')
                     if original_filename == "N/A" and task_kwargs:
+                         if 'analyze_book_task' in task_name and 'item' in task_kwargs:
+                             fname = task_kwargs['item'].get('original_filename', 'Book')
+                             original_filename = f"Analyzing: {fname}"
+                         elif 'process_chapter_task' in task_name and 'book_metadata' in task_kwargs and 'chapter' in task_kwargs:
+                             b_title = task_kwargs['book_metadata'].get('title', 'Book')
+                             c_num = task_kwargs['chapter'].get('number', '?')
                          if 'analyze_book_task' in task_name and 'item' in task_kwargs:
                              fname = task_kwargs['item'].get('original_filename', 'Book')
                              original_filename = f"Analyzing: {fname}"
