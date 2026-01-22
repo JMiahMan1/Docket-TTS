@@ -1393,30 +1393,34 @@ def jobs_page():
         for worker, tasks in active_tasks.items():
             for task in tasks:
                 original_filename = "N/A"
-                task_name = task.get('name', '')
-                task_args = task.get('args')
-                
-                # Check for custom status in task meta/info
+                # Check for custom status in task meta/info (if available in future Celery versions)
                 custom_status = None
                 if task.get('info') and isinstance(task['info'], dict):
                      custom_status = task['info'].get('status')
                      
                 if custom_status:
                      original_filename = custom_status
-                elif task_args and isinstance(task_args, (list, tuple)):
-                    if 'process_chapter_task' in task_name:
-                         if len(task_args) > 3:
-                            original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
-                    elif 'analyze_book_task' in task_name:
-                        # args[0] is 'self', args[1] is 'item' dict
-                        # BUT when bound method is called via Celery, 'self' is ignored in args usually? 
-                        # Let's check typical Celery args. Usually args=[item, profile, ...]
-                        # item is at index 0.
-                        if len(task_args) > 0 and isinstance(task_args[0], dict):
-                             original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book Used')}"
-                    elif len(task_args) > 1:
-                         original_filename = Path(task_args[1]).name
-                
+                else:
+                    # Parse ARGS
+                    if task_args and isinstance(task_args, (list, tuple)):
+                        if 'process_chapter_task' in task_name and len(task_args) > 3:
+                                original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                        elif 'analyze_book_task' in task_name and len(task_args) > 0 and isinstance(task_args[0], dict):
+                                original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book Used')}"
+                        elif len(task_args) > 1:
+                             original_filename = Path(task_args[1]).name
+                    
+                    # Parse KWARGS (Fallback if args empty)
+                    task_kwargs = task.get('kwargs')
+                    if original_filename == "N/A" and task_kwargs:
+                         if 'analyze_book_task' in task_name and 'item' in task_kwargs:
+                             fname = task_kwargs['item'].get('original_filename', 'Book')
+                             original_filename = f"Analyzing: {fname}"
+                         elif 'process_chapter_task' in task_name and 'book_metadata' in task_kwargs and 'chapter' in task_kwargs:
+                             b_title = task_kwargs['book_metadata'].get('title', 'Book')
+                             c_num = task_kwargs['chapter'].get('number', '?')
+                             original_filename = f"{b_title} - Ch. {c_num}"
+
                 running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker})
         reserved_tasks = inspector.reserved() or {}
         for worker, tasks in reserved_tasks.items():
