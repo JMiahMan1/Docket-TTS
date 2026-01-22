@@ -444,6 +444,9 @@ def extract_text_and_metadata(filepath):
                         app.logger.info(f"Attempting OCR on {filepath}...")
                         ocr_text_parts = []
                         for page_num in range(doc.page_count):
+                            # Inject Page Marker for TOC support
+                            ocr_text_parts.append(f"[[PAGE_{page_num + 1}]]")
+                            
                             page = doc.load_page(page_num)
                             pix = page.get_pixmap(dpi=300) # Use 300 DPI for better OCR
                             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -451,7 +454,7 @@ def extract_text_and_metadata(filepath):
                             page_ocr_text = pytesseract.image_to_string(img) 
                             ocr_text_parts.append(page_ocr_text)
                         
-                        raw_ocr_text = "\n\n".join(ocr_text_parts)
+                        raw_ocr_text = "\n".join(ocr_text_parts) # Changed from \n\n to \n to keep markers tight
                         app.logger.info(f"Successfully OCR'd {len(ocr_text_parts)} pages. Raw char count: {len(raw_ocr_text)}")
                         
                         # --- NEW STEP: LLM POST-PROCESSING ---
