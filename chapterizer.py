@@ -755,6 +755,27 @@ def _chapterize_by_toc(text: str, toc: List[List], config: Dict[str, Any]) -> Li
     # For now, let's take level 1 and 2 but flatten them
     valid_toc_entries = [e for e in toc if e[2] > 0] # Valid page numbers
     
+    # --- Heuristic Filtering for "Noisy" TOCs ---
+    # If we have too many entries (e.g. > 25), try to find "Major" headings
+    # tailored for "Discovering Christian Holiness" style (1. Title, Part I, etc.)
+    if len(valid_toc_entries) > 25:
+        logger.info(f"High-count TOC detected ({len(valid_toc_entries)} entries). Attempting to filter for major headings.")
+        
+        # Regex for "Major" headings: "Chapter X", "Part X", "1. Title"
+        # Matches: "Part I:", "1. How to Read"
+        major_pattern = re.compile(r'^(Chapter|Part|Book|Section)\s+\w+|^\d+\.\s+', re.IGNORECASE)
+        
+        major_entries = [e for e in valid_toc_entries if major_pattern.match(e[1].strip())]
+        
+        # Only apply filter if it creates a reasonable subset (e.g. > 5 chapters)
+        # and actually reduces the count.
+        if 5 <= len(major_entries) < len(valid_toc_entries):
+             logger.info(f"Filtered TOC down to {len(major_entries)} major entries (Part/Chapter/Numbered).")
+             valid_toc_entries = major_entries
+        else:
+             logger.info("Filtering did not yield a reasonable subset. Using full TOC.")
+    # --------------------------------------------
+    
     for i, entry in enumerate(valid_toc_entries):
         level, title, page_num = entry
         
