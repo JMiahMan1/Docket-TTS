@@ -463,6 +463,11 @@ class TTSService:
         self.lang = self._get_lang_code(voice_name)
         self.secondary_lang = self._get_lang_code(secondary_voice_name) if secondary_voice_name else self.lang
 
+        # Gender Detection
+        self.primary_gender = self._detect_voice_gender(voice_name)
+        self.secondary_gender = self._detect_voice_gender(secondary_voice_name) if secondary_voice_name else None
+        print(f"DEBUG: Voice Genders - Primary: {self.primary_gender}, Secondary: {self.secondary_gender}")
+
     def _get_lang_code(self, v_name):
         if not v_name: return 'en'
         lang_prefix = v_name.split('_')[0]
@@ -471,6 +476,19 @@ class TTSService:
         if lang_prefix == 'ja': return 'ja'
         if lang_prefix.startswith('z'): return 'cmn'
         return 'en'
+
+    def _detect_voice_gender(self, v_name: str) -> str:
+        """
+        Detects gender from voice code (e.g. 'af' -> female, 'am' -> male).
+        Returns 'f', 'm', or 'u' (unknown).
+        """
+        if not v_name: return 'u'
+        prefix = v_name.split('_')[0]
+        # af, bf, zf, jf -> Female
+        if 'f' in prefix: return 'f'
+        # am, bm, zm, jm -> Male
+        if 'm' in prefix: return 'm'
+        return 'u'
 
     def _segment_dialogue(self, text):
         """
@@ -497,6 +515,35 @@ class TTSService:
             else:
                 segments.append((part, False))
         return segments
+
+    def _infer_speaker_gender(self, context_text: str) -> str:
+        """
+        Analyzes the preceding text to guess the gender of the speaker.
+        Returns 'f' (Female), 'm' (Male), or None (Unknown).
+        """
+        if not context_text: return None
+        
+        # Look at the last ~150 characters
+        recent_text = context_text[-150:].lower()
+        
+        # Regex patterns for attribution
+        # "She said", "said she", "Her mother asked"
+        female_pattern = r'\b(she|her|hers|mom|mother|woman|girl|lady|aunt|sister|wife)\b.{0,40}(said|asked|replied|shouted|whispered|cried|muttered|thought|explained|continued)'
+        male_pattern =   r'\b(he|him|his|dad|father|man|boy|guy|uncle|brother|husband)\b.{0,40}(said|asked|replied|shouted|whispered|cried|muttered|thought|explained|continued)'
+        
+        # Check patterns (reversed to find closest to the quote)
+        # Note: This is a robust simplification.
+        
+        f_match = re.search(female_pattern, recent_text)
+        m_match = re.search(male_pattern, recent_text)
+        
+        # If both found, checking which is closer is hard with just 'search'.
+        # Let's assume the presence is a strong enough signal for now.
+        if f_match and not m_match: return 'f'
+        if m_match and not f_match: return 'm'
+        
+        # Tie-breaker or closer inspection could go here
+        return None
 
     def synthesize(self, text: str, output_path: str):
         synthesized_text = text
@@ -532,13 +579,52 @@ class TTSService:
                 segments = [(synthesized_text, False)]
                 
             current_sample_rate = 24000
+            previous_narration_context = ""
 
-            for seg_text, is_dialogue in segments:
+            for i, (seg_text, is_dialogue) in enumerate(segments):
                 if not seg_text.strip():
                     continue
                 
-                voice_to_use = self.secondary_voice_data if is_dialogue else self.voice_data
-                lang_to_use = self.secondary_lang if is_dialogue else self.lang
+                voice_to_use = self.voice_data
+                lang_to_use = self.lang
+                
+                if self.secondary_voice_data and is_dialogue:
+                    # DEFAULT: Use secondary voice for dialogue
+                    target_voice_data = self.secondary_voice_data
+                    target_lang = self.secondary_lang
+                    
+                    # SMART SWITCHING: Check genders
+                    inferred_gender = self._infer_speaker_gender(previous_narration_context)
+                    
+                    if inferred_gender:
+                        # If inferred Female
+                        if inferred_gender == 'f':
+                            # Prefer Primary if it's female
+                            if self.primary_gender == 'f':
+                                target_voice_data = self.voice_data
+                                target_lang = self.lang
+                            # Else use Secondary if it's female
+                            elif self.secondary_gender == 'f':
+                                target_voice_data = self.secondary_voice_data
+                                target_lang = self.secondary_lang
+                                
+                        # If inferred Male
+                        elif inferred_gender == 'm':
+                            # Prefer Primary if it's male
+                            if self.primary_gender == 'm':
+                                target_voice_data = self.voice_data
+                                target_lang = self.lang
+                            # Else use Secondary if it's male
+                            elif self.secondary_gender == 'm':
+                                target_voice_data = self.secondary_voice_data
+                                target_lang = self.secondary_lang
+                                
+                    voice_to_use = target_voice_data
+                    lang_to_use = target_lang
+                
+                else:
+                    # Is Narration
+                    previous_narration_context = seg_text # Update context
                 
                 # 2. Split into sentences/chunks for natural pausing
                 # Improved regex to handle common abbreviations avoids bad splits
@@ -580,7 +666,7 @@ class TTSService:
                     
                     # Synthesize
                     if full_chunk.strip():
-                        print(f"DEBUG: Synthesizing chunk... '{full_chunk[:30]}...' (Voice: {'Secondary' if is_dialogue else 'Primary'})")
+                        print(f"DEBUG: Synthesizing chunk... '{full_chunk[:30]}...' (Voice: {'Multiple' if self.secondary_voice_data else 'Primary'})")
                         samples, sample_rate = self.kokoro.create(
                             text=full_chunk, 
                             voice=voice_to_use,

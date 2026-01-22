@@ -405,11 +405,23 @@ def extract_text_and_metadata(filepath):
                     metadata['title'] = doc_meta.get('title') or metadata['title']
                     metadata['author'] = doc_meta.get('author') or metadata['author']
                 
+                # Extract TOC
+                try:
+                    toc = doc.get_toc()
+                    if toc:
+                        app.logger.info(f"Found TOC in {filepath} with {len(toc)} entries.")
+                        metadata['pdf_toc'] = toc
+                except Exception as e:
+                    app.logger.warning(f"Failed to extract TOC from {filepath}: {e}")
+
                 text_parts = []
                 is_image_based = False
                 total_text_len = 0
                 
                 for page_num in range(doc.page_count):
+                    # Inject Page Marker (1-based for user friendliness, internal 0-based index)
+                    text_parts.append(f"[[PAGE_{page_num + 1}]]")
+                    
                     page = doc.load_page(page_num)
                     page_text = page.get_text("text")
                     total_text_len += len(page_text.strip())
@@ -895,6 +907,85 @@ def create_generic_cover_image(title, author, save_path):
         app.logger.error(f"Failed to create generic cover image: {e}")
         return None
 
+@celery.task(bind=True)
+def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voice_name, secondary_voice_name, speed_rate, debug_mode):
+    """
+    Background task to analyze a book, extract chapters, and queue TTS tasks.
+    """
+    input_filepath = item['filepath']
+    original_filename = item['original_filename']
+    text_content = item['text_content']
+    metadata = item['metadata']
+    
+    app.logger.info(f"Starting analysis for {original_filename} (Profile: {chapter_profile})")
+    self.update_state(state='PROGRESS', meta={'status': f"Analyzing {original_filename}..."})
+    
+    try:
+        # 1. Perform Text Extraction/OCR if not provided
+        if not text_content:
+            app.logger.info(f"No text content provided for {original_filename}. Performing extraction (OCR takes time)...")
+            self.update_state(state='PROGRESS', meta={'status': f"Extracting text from {original_filename}..."})
+            text_content, extracted_metadata = extract_text_and_metadata(input_filepath)
+            
+            # Merge extracted metadata if not already present
+            if not metadata.get('title') and extracted_metadata.get('title'):
+                metadata['title'] = extracted_metadata['title']
+            if (not metadata.get('author') or metadata.get('author') == 'Unknown') and extracted_metadata.get('author'):
+                metadata['author'] = extracted_metadata['author']
+                
+            app.logger.info(f"Extraction complete for {original_filename}. Text length: {len(text_content)}")
+
+        # Re-fetch metadata if needed or just use what we have
+        enhanced_metadata = fetch_enhanced_metadata(metadata.get('title'), metadata.get('author'))
+        # Merge enhanced metadata if available
+        if enhanced_metadata:
+             metadata.update(enhanced_metadata)
+
+        if book_mode:
+            chapters = chapterizer.chapterize(
+                filepath=input_filepath, 
+                text_content=text_content, 
+                config=None,
+                profile=chapter_profile,
+                toc_strategy=toc_strategy,
+                debug=debug_mode,
+                metadata=metadata
+            )                debug=debug_mode
+            )
+            
+            if chapters:
+                app.logger.info(f"Chapterizer found {len(chapters)} chapters for '{original_filename}'. Queuing tasks.")
+                for chapter in chapters:
+                    chapter_details = {
+                        'number': chapter.number,
+                        'title': chapter.title,
+                        'original_title': chapter.original_title,
+                        'part_info': chapter.part_info
+                    }
+                    
+                    process_chapter_task.delay(
+                        chapter_content=chapter.content,
+                        book_metadata=metadata,
+                        chapter_details=chapter_details,
+                        voice_name=voice_name,
+                        speed_rate=speed_rate,
+                        secondary_voice_name=secondary_voice_name
+                    )
+            else:
+                 app.logger.warning(f"No chapters found for {original_filename}")
+        else:
+             # Single task mode (not book mode) logic could go here if needed, 
+             # but currently this path handles book_mode=True specifically from the upload controller.
+             # If book_mode is False, we might just queue a single task.
+             pass
+
+    except Exception as e:
+        app.logger.error(f"Error in analyze_book_task for {original_filename}: {e}", exc_info=True)
+        # We might want to set a failed state specifically
+        raise e
+
+
+
 def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_author_from_form, cover_url, build_dir, output_format='m4b', task_self=None):
     def update_state(state, meta):
         if task_self:
@@ -1060,7 +1151,11 @@ def upload_file():
                 input_filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_internal_filename)
                 file.save(input_filepath)
                 
-                text_content, metadata = extract_text_and_metadata(input_filepath)
+                # DEFER PROCESSING: Do not run extract_text_and_metadata synchronously here.
+                # It will be handled in analyze_book_task if text_content is empty.
+                text_content = "" 
+                metadata = {'title': Path(original_filename).stem.replace('_', ' ').title(), 'author': 'Unknown'}
+                
                 items_to_process.append({
                     'filepath': input_filepath,
                     'original_filename': original_filename,
@@ -1081,48 +1176,36 @@ def upload_file():
             metadata = item['metadata']
             
             enhanced_metadata = fetch_enhanced_metadata(metadata.get('title'), metadata.get('author'))
+            if enhanced_metadata: metadata.update(enhanced_metadata)
 
             if book_mode:
-                app.logger.info(f"Processing '{original_filename}' with Book Mode. Profile: {chapter_profile}, TOC Strategy: {toc_strategy}")
-                chapters = chapterizer.chapterize(
-                    filepath=input_filepath, 
-                    text_content=text_content, 
-                    config=None,
-                    profile=chapter_profile,
+                app.logger.info(f"Queueing async analysis for '{original_filename}' with Book Mode.")
+                task = analyze_book_task.delay(
+                    item=item,
+                    chapter_profile=chapter_profile,
                     toc_strategy=toc_strategy,
-                    debug=debug_mode
+                    book_mode=book_mode,
+                    voice_name=voice_name,
+                    secondary_voice_name=secondary_voice_name,
+                    speed_rate=speed_rate,
+                    debug_mode=debug_mode
                 )
-                
-                if chapters:
-                    app.logger.info(f"Chapterizer found {len(chapters)} chapters for '{original_filename}'. Queuing tasks.")
-                    for chapter in chapters:
-                        chapter_details = {
-                            'number': chapter.number,
-                            'title': chapter.title,
-                            'original_title': chapter.original_title,
-                            'part_info': chapter.part_info
-                        }
-                        task = process_chapter_task.delay(chapter.content, enhanced_metadata, chapter_details, voice_name, speed_rate, secondary_voice_name)
-                        tasks.append(task)
-                    # Delete the original "full" file if we split it
-                    if os.path.exists(input_filepath):
-                        os.remove(input_filepath)
-                else:
-                    flash(f"Could not split '{original_filename}' into chapters. Processing as a single file.", "warning")
-                    task = convert_to_speech_task.delay(input_filepath, original_filename, enhanced_metadata.get('title'), enhanced_metadata.get('author'), voice_name, speed_rate, secondary_voice_name)
-                    tasks.append(task)
+                tasks.append(task.id)
             else:
                 # Standard Mode (No splitting)
+                app.logger.info(f"Processing '{original_filename}' in Single File Mode.")
                 task = convert_to_speech_task.delay(input_filepath, original_filename, enhanced_metadata.get('title'), enhanced_metadata.get('author'), voice_name, speed_rate, secondary_voice_name)
-                tasks.append(task)
+                tasks.append(task.id)
 
-        if tasks:
-            flash(f'Successfully queued {len(tasks)} job(s) for processing.', 'success')
-            time.sleep(2)
-            return redirect(url_for('jobs_page'))
+        if book_mode:
+             flash(f"Analysis started for {len(tasks)} file(s). Chapters will appear in Jobs shortly.", "success")
+        elif tasks:
+            flash(f"Successfully queued {len(tasks)} task(s).", "success")
         else:
-            flash('Failed to queue any jobs.', 'error')
-            return redirect(request.url)
+            flash("No tasks were queued. Check logs for details.", "warning")
+
+        # Give a slight delay/redirect to jobs
+        return redirect(url_for('jobs_page'))
 
     voices = get_kokoro_voices()
     return render_template('index.html', voices=voices)
@@ -1307,21 +1390,41 @@ def jobs_page():
         for worker, tasks in active_tasks.items():
             for task in tasks:
                 original_filename = "N/A"
-                if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 3:
-                    if 'process_chapter_task' in task.get('name', ''):
-                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
-                    else:
+                task_name = task.get('name', '')
+                task_args = task.get('args')
+                
+                if task_args and isinstance(task_args, (list, tuple)):
+                    if 'process_chapter_task' in task_name:
+                         if len(task_args) > 3:
+                            original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                    elif 'analyze_book_task' in task_name:
+                        # args[0] is 'self', args[1] is 'item' dict
+                        # BUT when bound method is called via Celery, 'self' is ignored in args usually? 
+                        # Let's check typical Celery args. Usually args=[item, profile, ...]
+                        # item is at index 0.
+                        if len(task_args) > 0 and isinstance(task_args[0], dict):
+                             original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book Used')}"
+                    elif len(task_args) > 1:
                          original_filename = Path(task_args[1]).name
+                
                 running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker})
         reserved_tasks = inspector.reserved() or {}
         for worker, tasks in reserved_tasks.items():
             for task in tasks:
                 original_filename = "N/A"
-                if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 3:
-                    if 'process_chapter_task' in task.get('name', ''):
-                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
-                    else:
+                task_name = task.get('name', '')
+                task_args = task.get('args')
+
+                if task_args and isinstance(task_args, (list, tuple)):
+                    if 'process_chapter_task' in task_name:
+                         if len(task_args) > 3:
+                            original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                    elif 'analyze_book_task' in task_name:
+                        if len(task_args) > 0 and isinstance(task_args[0], dict):
+                             original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book Used')}"
+                    elif len(task_args) > 1:
                          original_filename = Path(task_args[1]).name
+
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
         if redis_client:
             try:
@@ -1342,21 +1445,37 @@ def api_jobs():
         for worker, tasks in active_tasks.items():
             for task in tasks:
                 original_filename = "N/A"
-                if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 3:
-                    if 'process_chapter_task' in task.get('name', ''):
-                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
-                    else:
+                task_name = task.get('name', '')
+                task_args = task.get('args')
+                
+                if task_args and isinstance(task_args, (list, tuple)):
+                    if 'process_chapter_task' in task_name:
+                         if len(task_args) > 3:
+                            original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                    elif 'analyze_book_task' in task_name:
+                        if len(task_args) > 0 and isinstance(task_args[0], dict):
+                             original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book Used')}"
+                    elif len(task_args) > 1:
                          original_filename = Path(task_args[1]).name
+
                 running_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'running'})
         reserved_tasks = inspector.reserved() or {}
         for worker, tasks in reserved_tasks.items():
             for task in tasks:
                 original_filename = "N/A"
-                if (task_args := task.get('args')) and isinstance(task_args, (list, tuple)) and len(task_args) > 3:
-                    if 'process_chapter_task' in task.get('name', ''):
-                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
-                    else:
+                task_name = task.get('name', '')
+                task_args = task.get('args')
+
+                if task_args and isinstance(task_args, (list, tuple)):
+                    if 'process_chapter_task' in task_name:
+                         if len(task_args) > 3:
+                            original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                    elif 'analyze_book_task' in task_name:
+                        if len(task_args) > 0 and isinstance(task_args[0], dict):
+                             original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book Used')}"
+                    elif len(task_args) > 1:
                          original_filename = Path(task_args[1]).name
+
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'pending'})
     except Exception as e:
         app.logger.error(f"Could not inspect Celery: {e}")

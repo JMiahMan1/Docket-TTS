@@ -46,6 +46,26 @@ SCENARIOS = {
             ("Sermon 5: On the Mount", "And seeing the multitudes, he went up into a mountain: and when he was set, his disciples came unto him. And he opened his mouth, and taught them, saying, Blessed are the poor in spirit: for theirs is the kingdom of heaven. Blessed are they that mourn: for they shall be comforted. Blessed are the meek: for they shall inherit the earth. Blessed are they which do hunger and thirst after righteousness: for they shall be filled. Blessed are the merciful: for they shall obtain mercy. Blessed are the pure in heart: for they shall see God. Blessed are the peacemakers: for they shall be called the children of God. Blessed are they which are persecuted for righteousness' sake: for theirs is the kingdom of heaven. Blessed are ye, when men shall revile you, and persecute you, and shall say all manner of evil against you falsely, for my sake. Rejoice, and be exceeding glad: for great is your reward in heaven: for so persecuted they the prophets which were before you. This opening section of the Sermon on the Mount, known as the Beatitudes, describes the character and blessedness of the citizens of God's kingdom.")
         ]
     },
+    "dataset_greek": {
+        "title": "Gospel of John - Koine Greek Study",
+        "author": "Apostle John",
+        "file_base": "greek_test",
+        "content": [
+            ("THE WORD BECAME FLESH", """
+In the beginning was the Word, and the Word was with God, and the Word was God.
+Ἐν ἀρχῇ ἦν ὁ Λόγος, καὶ ὁ Λόγος ἦν πρὸς τὸν Θεόν, καὶ Θεὸς ἦν ὁ Λόγος.
+
+He was in the beginning with God.
+οὗτος ἦν ἐν ἀρχῇ πρὸς τὸν Θεόν.
+
+All things were made through him, and without him was not any thing made that was made.
+πάντα δι’ αὐτοῦ ἐγένετο, καὶ χωρὶς αὐτοῦ ἐγένετο οὐδὲ ἕν ὃ γέγονεν.
+
+In him was life, and the life was the light of men.
+ἐν αὐτῷ ζωὴ ἦν, καὶ ἡ ζωὴ ἦν τὸ φῶς τῶν ἀνθρώπων.
+""")
+        ]
+    },
     "complex_corner_cases": {
         "title": "Comprehensive Edge Cases",
         "author": "QA Department",
@@ -86,6 +106,24 @@ SCENARIOS = {
         "content": [
             ("I. Laying Plans", "Sun Tzu said: The art of war is of vital importance to the State. It is a matter of life and death, a road either to safety or to ruin. Hence it is a subject of inquiry which can on no account be neglected. The art of war, then, is governed by five constant factors, to be taken into account in one's deliberations, when seeking to determine the conditions obtaining in the field. These are: (1) The Moral Law; (2) Heaven; (3) Earth; (4) The Commander; (5) Method and Discipline. The Moral Law causes the people to be in complete accord with their ruler, so that they will follow him regardless of their lives, undismayed by any danger. Heaven signifies night and day, cold and heat, times and seasons. Earth comprises distances, great and small; danger and security; open ground and narrow passes; the chances of life and death. The Commander stands for the virtues of wisdom, sincerely, benevolence, courage and strictness. By method and discipline are to be understood the marshaling of the army in its proper subdivisions, the graduations of rank among the officers, the maintenance of roads by which supplies may reach the army, and the control of military expenditure. These five heads should be familiar to every general: he who knows them will be victorious; he who knows them not will fail."),
             ("II. Waging War", "Sun Tzu said: In the operations of war, where there are in the field a thousand swift chariots, as many heavy chariots, and a hundred thousand mail-clad soldiers, with provisions enough to carry them a thousand li, the expenditure at home and at the front, including entertainment of guests, small items such as glue and paint, and sums spent on chariots and armor, will reach the total of a thousand ounces of silver per day. Such is the cost of raising an army of 100,000 men. When you engage in actual fighting, if victory is long in coming, then men's weapons will grow dull and their ardor will be damped. If you lay siege to a town, you will exhaust your strength. Again, if the campaign is protracted, the resources of the State will not be equal to the strain. Now, when your weapons are dulled, your ardor damped, your strength exhausted and your treasure spent, other chieftains will spring up to take advantage of your extremity. Then no man, however wise, will be able to avert the consequences that must ensue. Thus, though we have heard of stupid haste in war, cleverness has never been seen associated with long delays.")
+        ]
+    },
+    "dataset_exodus": {
+        "title": "Exodus: The Divine Rescue - Volume 1",
+        "author": "Tom Holland (Style)",
+        "file_base": "exodus_test",
+        "content": [
+            ("Chapter 1: The House of Bondage", "THE GENERATION OF ISRAEL\nExodus 1:1—Now these are the names of the children of Israel, which came into Egypt... The Hebrew title of this book is Shemot (שְׁמוֹת), meaning 'Names'. This connects it immediately to the promise given to the Patriarchs. God knows His people by name.\n\nA NEW KING ARISES\nExodus 1:8—Now there arose up a new king over Egypt, which knew not Joseph. The nuances of the Hebrew verb 'to know' (yada, יָדַע) imply more than intellectual knowledge; it suggests a covenantal relationship or acknowledgment. This Pharaoh refused to acknowledge the history of salvation.\n\nTHE BURDEN OF SLAVERY\nExodus 1:11—Therefore they did set over them taskmasters to afflict them with their burdens. The purpose was to crush their spirit. But as verse 12 notes: 'The more they afflicted them, the more they grew.' This is the paradox of the Gospel."),
+            ("Chapter 2: The Deliverer is Born", "A LEVITE MARRIAGE\nExodus 2:1—And there went a man of the house of Levi... The text focuses on the lineage. From this priestly line comes the Deliverer.\n\nTHE ARK OF BULRUSHES\nExodus 2:3—And when she could not longer hide him, she took for him an ark of bulrushes. The word used here for 'ark' is tebah (תֵּבַה), the exact same word used for Noah's Ark in Genesis 6:14. Moses is being placed into a vessel of salvation to pass through the waters of judgment. He is a type of Christ.\n\nPHARAOH'S DAUGHTER\nExodus 2:5—And the daughter of Pharaoh came down... The irony of providence! The very house issuing the death decree provides the savior's safety."),
+            ("Chapter 3: The Holy Fire", "THE BACKSIDE OF THE DESERT\nExodus 3:1—Now Moses kept the flock... He led them to Horeb, the mountain of God.\n\nTHE BURNING BUSH\nExodus 3:2—And the angel of the Lord appeared unto him in a flame of fire... The bush (sneh, סְנֶה) burned but was not consumed. This represents Israel in the furnace of Egypt, and the Church in the world. Afflicted, but not destroyed.\n\nTHE DIVINE NAME\nExodus 3:14—And God said unto Moses, I AM THAT I AM. (Ehyeh asher Ehyeh, אֶהְיֶה אֲשֶׁר אֶהְיֶה). This is the Tetragrammaton, the holy name of God. It signifies His self-existence, His unchangeableness, and His eternal presence with His people.")
+        ]
+    },
+    "podcast_exodus": {
+        "title": "Podcast: Discussing Exodus",
+        "author": "Bible Talk",
+        "file_base": "podcast_exodus",
+        "content": [
+            ("Episode 1", "\"Welcome back to Bible Talk,\" said John, the host. \"Today we are discussing the book of Exodus. It's truly a fascinating narrative of liberation.\"\n\n\"Absolutely,\" replied Sarah. \"The story of Moses and the burning bush in Chapter 3 is particularly striking. The imagery of fire that does not consume is so powerful.\"\n\n\"I agree,\" said John. \"It symbolizes God's holiness. And let's not forget the context—Israel was in deep oppression. Chapter 1 describes how a new king arose who didn't know Joseph.\"\n\n\"That's a turning point in history,\" Sarah noted. \"It shows how quickly political favor can shift. But God had a plan, starting with the birth of Moses in Chapter 2. It’s amazing how he was preserved in an ark of bulrushes.\"\n\n\"Yes, right under Pharaoh's nose!\" laughed John. \"God's providence is the main theme here.\"")
         ]
     }
 }
@@ -134,48 +172,163 @@ def create_docx(key, data):
     print(f"Created DOCX: {docx_path}")
     return docx_path
 
+
+# Font handling for Unicode support (Hebrew, etc.)
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+import reportlab.lib.fonts
+
+FONT_NAME_HEBREW = "DroidSansHebrew"
+FONT_PATH_HEBREW = os.path.join(os.path.dirname(__file__), "fonts", "DroidSansHebrew-Regular.ttf")
+
+FONT_NAME_GREEK = "DejaVuSans"
+FONT_PATH_GREEK = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf")
+
+def ensure_font():
+    # Monkey patch ps2tt map (forward mapping: XML -> Family)
+    # Platypus lowercases 'face' value, so 'droidsanshebrew' -> 'DroidSansHebrew'
+    reportlab.lib.fonts._ps2tt_map['droidsanshebrew'] = (FONT_NAME_HEBREW, 0, 0)
+    
+    # Monkey patch tt2ps map (reverse mapping: Family -> FontName)
+    # Allows tt2ps to find the font name (CamelCase) from the family tuple
+    reportlab.lib.fonts._tt2ps_map[(FONT_NAME_HEBREW, 0, 0)] = FONT_NAME_HEBREW
+    
+    # Register Hebrew
+    # Attempt even if os.path.exists is flaky
+    try:
+        # Register CamelCase (Primary)
+        pdfmetrics.registerFont(TTFont(FONT_NAME_HEBREW, FONT_PATH_HEBREW))
+        # Register Lowercase (Backup)
+        pdfmetrics.registerFont(TTFont(FONT_NAME_HEBREW.lower(), FONT_PATH_HEBREW))
+        print(f"Successfully registered Hebrew font: {FONT_NAME_HEBREW}")
+    except Exception as e:
+        print(f"Failed to register Hebrew font ({FONT_PATH_HEBREW}): {e}")
+
+    # Register Greek
+    try:
+        pdfmetrics.registerFont(TTFont(FONT_NAME_GREEK, FONT_PATH_GREEK))
+        print(f"Successfully registered Greek font: {FONT_NAME_GREEK}")
+    except Exception as e:
+        print(f"Failed to register Greek font ({FONT_PATH_GREEK}): {e}")
+
+    try:
+        print(f"DEBUG: Registered Fonts: {pdfmetrics.getRegisteredFontNames()}")
+    except:
+        pass
+
+# Import Platypus for advanced text handling (mixed fonts)
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import re
+
+def process_text_for_fonts(text):
+    """
+    Wraps Hebrew characters in font tags.
+    """
+    if not text:
+        return ""
+    
+    # 1. Wrap Hebrew
+    text = re.sub(r'([\u0590-\u05FF]+)', rf'<font face="{FONT_NAME_HEBREW}">\1</font>', text)
+    
+    return text
+
 def create_pdf(key, data):
     pdf_path = os.path.join(OUTPUT_DIR, f"{data['file_base']}.pdf")
-    c = canvas.Canvas(pdf_path, pagesize=letter)
-    width, height = letter
+    
+    # Ensure font is registered
+    ensure_font()
+    
+    doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+    styles = getSampleStyleSheet()
+    
+    # Styles
+    heading_style = ParagraphStyle(
+        'HeadingCustom',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=16,
+        spaceAfter=12
+    )
+    
+    body_style = ParagraphStyle(
+        'BodyCustom',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=12,
+        leading=14,
+        spaceAfter=10
+    )
 
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(72, height - 72, data['title'])
-    c.setFont("Helvetica", 12)
-    c.drawString(72, height - 90, f"By {data['author']}")
-
-    y_pos = height - 130
+    # Greek Style (uses DejaVuSans for EVERYTHING in the paragraph)
+    greek_style = ParagraphStyle(
+        'GreekCustom',
+        parent=styles['Normal'],
+        fontName=FONT_NAME_GREEK, # Unconditional usage since we ensure registration
+        fontSize=12,
+        leading=14,
+        spaceAfter=10
+    )
+    
+    story = []
+    
+    # Determine style based on content type
+    # For Greek test, use Greek style. Hardcoded logic for demo simplicity.
+    is_greek_doc = (key == "dataset_greek")
+    current_body_style = greek_style if is_greek_doc else body_style
+    
+    # Add Title
+    story.append(Paragraph(process_text_for_fonts(data['title']), heading_style))
+    story.append(Paragraph(process_text_for_fonts(f"By {data['author']}"), body_style))
+    story.append(Spacer(1, 24))
     
     for chap_title, chap_text in data['content']:
-        if y_pos < 100:
-            c.showPage()
-            y_pos = height - 72
+        story.append(Paragraph(process_text_for_fonts(chap_title), heading_style))
+        story.append(Spacer(1, 12))
+        
+        paragraphs = chap_text.split('\n\n')
+        for para in paragraphs:
+            if not para.strip():
+                continue
+            # Apply regex for Hebrew (if any), use Whole-Para font for Greek
+            story.append(Paragraph(process_text_for_fonts(para), current_body_style))
+            story.append(Spacer(1, 8))
             
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(72, y_pos, chap_title)
-        y_pos -= 20
-        
-        c.setFont("Helvetica", 12)
-        # Simple text wrap logic for demo
-        words = chap_text.split()
-        line = ""
-        for word in words:
-            if c.stringWidth(line + " " + word) < 450:
-                line += " " + word
-            else:
-                c.drawString(72, y_pos, line.strip())
-                y_pos -= 14
-                line = word
-                if y_pos < 50:
-                    c.showPage()
-                    y_pos = height - 72
-        
-        if line:
-            c.drawString(72, y_pos, line.strip())
-            y_pos -= 30
+        from reportlab.platypus import PageBreak
+        story.append(PageBreak())
 
-    c.save()
-    print(f"Created PDF: {pdf_path}")
+    # DEBUG ASSERTION
+    reg_fonts = pdfmetrics.getRegisteredFontNames()
+    print(f"DEBUG: Fonts available before build: {reg_fonts}")
+    
+    # Verify Hebrew
+    if FONT_NAME_HEBREW not in reg_fonts:
+        print(f"CRITICAL ERROR: {FONT_NAME_HEBREW} not in registry!")
+        try:
+             pdfmetrics.registerFont(TTFont(FONT_NAME_HEBREW, FONT_PATH_HEBREW))
+             print("Emergency Hebrew registration attempted.")
+        except Exception as e:
+             print(f"Emergency Hebrew registration failed: {e}")
+             
+    # Verify Greek
+    if FONT_NAME_GREEK not in reg_fonts:
+        print(f"CRITICAL ERROR: {FONT_NAME_GREEK} not in registry!")
+        try:
+             pdfmetrics.registerFont(TTFont(FONT_NAME_GREEK, FONT_PATH_GREEK))
+             print("Emergency Greek registration attempted.")
+        except Exception as e:
+             print(f"Emergency Greek registration failed: {e}")
+
+    try:
+        doc.build(story)
+        print(f"Created PDF: {pdf_path}")
+    except Exception as e:
+        print(f"FAILED to build PDF {pdf_path}: {e}")
+        # Print extra context
+        import traceback
+        traceback.print_exc()
+        raise e
+    
     return pdf_path
 
 def create_mobi_stub(key, data):

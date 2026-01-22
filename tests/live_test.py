@@ -59,7 +59,7 @@ def test_upload_file(filepath, profile="auto", book_mode=True):
         print(response.text[:500])
         return False
 
-def poll_jobs(timeout=900):
+def poll_jobs(timeout=2700):
 
 
     print("\n--- Polling Jobs ---")
@@ -104,10 +104,35 @@ def verify_results(title_subset):
         return matching_files
     return []
 
+
+def test_podcast_api(title='test_podcast', text='Dialogue test'):
+    print(f"\n--- Testing Podcast API: {title} ---")
+    url = f"{BASE_URL}/api/generate-podcast"
+    data = {
+        'title': title,
+        'text': text,
+        'voice': 'af_bella',
+        'voice_secondary': 'af_sarah'
+    }
+    
+    try:
+        response = requests.post(url, json=data)
+        if response.status_code == 200:
+            json_resp = response.json()
+            print("Successfully generated podcast.")
+            print(f"Download URL: {json_resp.get('download_url')}")
+            return True
+        else:
+            print(f"Failed to generate podcast: {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"Exception during podcast test: {e}")
+        return False
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Docket-TTS Live Environment Test Script")
     parser.add_argument("--url", default=BASE_URL, help=f"Base URL of the app (default: {BASE_URL})")
-    parser.add_argument("--mode", choices=['paste', 'upload', 'full'], default='full')
+    parser.add_argument("--mode", choices=['paste', 'upload', 'podcast', 'full'], default='full')
     parser.add_argument("--file", help="Path to file for upload test")
     
     args = parser.parse_args()
@@ -128,20 +153,36 @@ Chapter 3
 {chapter_content}
 """
 
-
+    results = {}
 
     if args.mode in ['paste', 'full']:
+        print("\n=== STEP 1: Paste Text Test ===")
         if test_paste_text("Live Chapterization Test", sample_text):
-            time.sleep(2) # Give it a moment to split
-            jobs = poll_jobs()
+            time.sleep(5) # Wait for async task to process and ensure jobs exist
+            jobs = poll_jobs(timeout=600)
             verify_results("Live_Chapterization_Test")
+            results['paste'] = 'PASS' if jobs else 'FAIL'
 
+    if args.mode in ['podcast', 'full']:
+        print("\n=== STEP 2: Podcast API Test ===")
+        success = test_podcast_api(
+            text='"Welcome to our deep dive on Exodus," said the host.\n\n"It is a fascinating book," agreed the guest.'
+        )
+        results['podcast'] = 'PASS' if success else 'FAIL'
 
     if args.mode in ['upload', 'full']:
         if args.file:
+            print(f"\n=== STEP 3: File Upload Test ({args.file}) ===")
             if test_upload_file(args.file):
-                time.sleep(2)
-                poll_jobs()
+                print("Upload accepted. Waiting for async analysis to populate jobs...")
+                time.sleep(10) # Give analyze_book_task time to run
+                jobs = poll_jobs(timeout=900)
                 verify_results(os.path.basename(args.file).split('.')[0])
+                results['upload'] = 'PASS' if jobs else 'FAIL'
         else:
             print("\nSkip upload test (no --file provided)")
+
+    print("\n\n=== VERIFICATION SUMMARY ===")
+    for test, result in results.items():
+        print(f"{test.upper()}: {result}")
+

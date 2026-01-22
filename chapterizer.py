@@ -731,8 +731,99 @@ def _find_raw_chapters(raw_text: str, profile_key: str = "auto") -> List[Chapter
 
     return chapters
 
+# --- PDF TOC Splitting Logic ---
 
-def chapterize(filepath: str, text_content: Optional[str] = None, config: Optional[Dict[str, Any]] = None, profile: str = "auto", toc_strategy: str = "auto", debug: bool = False) -> List[Chapter]:
+def _chapterize_by_toc(text: str, toc: List[List], config: Dict[str, Any]) -> List[Chapter]:
+    """
+    Splits text based on PDF Table of Contents page numbers vs [[PAGE_X]] markers.
+    TOC format: [[level, title, page_num], ...]
+    """
+    logger.info(f"Attempting logical split using PDF TOC ({len(toc)} entries)")
+    chapters = []
+    
+    # 1. Map page numbers to text indices
+    # We look for [[PAGE_X]] markers
+    page_map = {} # page_num -> start_index
+    for match in re.finditer(r'\[\[PAGE_(\d+)\]\]', text):
+        page_num = int(match.group(1))
+        page_map[page_num] = match.start()
+        
+    doc_end = len(text)
+    
+    # 2. Iterate TOC entries to form ranges
+    # Filter for top-level chapters (level 1) unless too few, then maybe level 2
+    # For now, let's take level 1 and 2 but flatten them
+    valid_toc_entries = [e for e in toc if e[2] > 0] # Valid page numbers
+    
+    for i, entry in enumerate(valid_toc_entries):
+        level, title, page_num = entry
+        
+        start_idx = page_map.get(page_num)
+        
+        if start_idx is None:
+            logger.warning(f"  TOC Entry '{title}' points to Page {page_num}, but marker not found.")
+            continue
+            
+        # Determine end index: start of next TOC entry OR end of doc
+        end_idx = doc_end
+        if i + 1 < len(valid_toc_entries):
+            next_page = valid_toc_entries[i+1][2]
+            # Find next page marker
+            # If next page marker is missing, we might scan ahead
+            next_idx = page_map.get(next_page)
+            if next_idx:
+                end_idx = next_idx
+        
+        # Extract content
+        # We strip the page markers themselves in cleanup
+        chapter_content = text[start_idx:end_idx]
+        
+        # Verify content length
+        word_count = len(chapter_content.split())
+        if word_count < config["min_chapter_word_count"]:
+            logger.info(f"  Skipping TOC chapter '{title}' (Page {page_num}): too short ({word_count} words)")
+            continue
+            
+        # Add chapter
+        chapters.append(Chapter(
+            number=len(chapters) + 1,
+            title=title,
+            original_title=title,
+            content=chapter_content,
+            word_count=word_count,
+            part_info=(1, 1) # Simplification
+        ))
+
+    return chapters
+
+def _clean_page_markers(chapters: List[Chapter]) -> List[Chapter]:
+    """Removes [[PAGE_X]] markers from chapter content."""
+    cleaned_chapters = []
+    marker_pattern = re.compile(r'\[\[PAGE_\d+\]\]')
+    
+    for ch in chapters:
+        # Remove markers
+        new_content = marker_pattern.sub('', ch.content).strip()
+        cleaned_chapters.append(Chapter(
+            number=ch.number,
+            title=ch.title,
+            original_title=ch.original_title,
+            content=new_content,
+            word_count=len(new_content.split()),
+            part_info=ch.part_info
+        ))
+    return cleaned_chapters
+
+
+def chapterize(
+        filepath: str, 
+        text_content: Optional[str] = None, 
+        config: Optional[Dict[str, Any]] = None, 
+        profile: str = "auto", 
+        toc_strategy: str = "auto", 
+        debug: bool = False,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> List[Chapter]:
     """
     Processes a file (pdf, docx, epub, txt) and splits it into chapters.
     If text_content is provided (e.g. from OCR), it is used for PDF/DOCX/TXT
@@ -758,11 +849,9 @@ def chapterize(filepath: str, text_content: Optional[str] = None, config: Option
         
         if ext == '.epub':
             # Use our new, robust NCX-based logic.
-            # This function returns List[Chapter], bypassing _find_raw_chapters
             initial_chapters = _chapterize_epub(filepath)
             
-            # Fallback: if no chapters were found (e.g. broken/missing NCX), 
-            # extract raw text and let _find_raw_chapters handle it.
+            # Fallback
             if not initial_chapters and not raw_text:
                 logger.info(f"NCX chapterization failed for {p_filepath.name}. Falling back to raw text extraction.")
                 book = epub.read_epub(filepath, {"ignore_ncx": True})
@@ -770,7 +859,18 @@ def chapterize(filepath: str, text_content: Optional[str] = None, config: Option
                 for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
                     chapters_raw.append(_extract_html_text(item.get_content()))
                 raw_text = "\n\n".join(chapters_raw)
-
+                
+        # --- NEW: PDF TOC Logic ---
+        elif ext == '.pdf' and metadata and metadata.get('pdf_toc') and raw_text:
+             toc_chapters = _chapterize_by_toc(raw_text, metadata['pdf_toc'], config)
+             if toc_chapters:
+                 logger.info(f"Successfully split by PDF TOC into {len(toc_chapters)} chapters.")
+                 return _clean_page_markers(toc_chapters)
+             else:
+                 logger.warning("PDF TOC splitting failed. Falling back to regex.")
+                 # Remove markers so they don't break regex
+                 raw_text = re.sub(r'\[\[PAGE_\d+\]\]', '', raw_text)
+        
         elif not raw_text:
 
             # Only extract if text_content wasn't provided
@@ -785,35 +885,26 @@ def chapterize(filepath: str, text_content: Optional[str] = None, config: Option
             elif ext == '.txt':
                  raw_text = p_filepath.read_text(encoding='utf-8')
         
-        # ---
-        # This logic block handles the two different paths:
-        # 1. EPUB: initial_chapters is populated, raw_text is None.
-        # 2. Others: raw_text is populated, initial_chapters is empty.
-        # ---
         if raw_text and not initial_chapters:
-            # --- TOC Detection and Removal ---
+            # --- TOC Detection and Removal (Regex) ---
+            # ... (existing logic) ...
             toc_removed = False
             if toc_strategy in ['auto', 'remove']:
                 toc_start_idx, toc_end_idx, confidence = _detect_toc_section(raw_text)
                 
                 if toc_start_idx is not None and toc_end_idx is not None:
-                    # Decide whether to remove based on strategy and confidence
                     should_remove = (toc_strategy == 'remove') or (toc_strategy == 'auto' and confidence >= 0.7)
                     
                     if should_remove:
                         logger.info(f"Removing TOC section (lines {toc_start_idx}-{toc_end_idx}, confidence {confidence:.2f})")
                         lines = raw_text.split('\n')
-                        # Remove lines from toc_start_idx to toc_end_idx inclusive
                         raw_text = '\n'.join(lines[:toc_start_idx] + lines[toc_end_idx+1:])
                         toc_removed = True
-                    else:
-                        logger.info(f"TOC detected but not removing (confidence {confidence:.2f} below threshold)")
-
             
             # Process raw text from PDF, DOCX, TXT
             initial_chapters = _find_raw_chapters(raw_text, profile_key=profile)
+            
         elif not raw_text and not initial_chapters:
-            # This triggers if EPUB processing failed *or* other file types were empty
             logger.warning(f"No text or chapters could be extracted from {p_filepath.name}.")
             return []
             
@@ -824,6 +915,9 @@ def chapterize(filepath: str, text_content: Optional[str] = None, config: Option
         return []
 
     # --- Handle "No Split" (None) Profile explicitly for all formats ---
+    # NOTE: This block is now redundant because _find_raw_chapters handles profile='none'
+    # and _chapterize_by_toc returns directly.
+    # Keeping it for now, but it should ideally be unreachable or removed.
     if profile == 'none' and initial_chapters:
         logger.info(f"Profile is 'none'. Merging {len(initial_chapters)} chapters into one.")
         full_content = "\n\n".join([c.content for c in initial_chapters])
