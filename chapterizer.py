@@ -810,11 +810,16 @@ def _chapterize_by_toc(text: str, toc: List[List], config: Dict[str, Any]) -> Li
         chapter_content = text[start_idx:end_idx]
         
         # Verify content length
-        word_count = len(chapter_content.split())
         if word_count < config["min_chapter_word_count"]:
             logger.info(f"  Skipping TOC chapter '{title}' (Page {page_num}): too short ({word_count} words)")
             continue
             
+        # --- NEW: TOC Content Removal Strategy ---
+        # If this is one of the first few chapters (likely front matter), check for TOC text
+        if i < 5 and config.get("remove_toc_content", True):
+             chapter_content = _remove_toc_pages(chapter_content, toc)
+        # -----------------------------------------
+
         # Add chapter
         chapters.append(Chapter(
             number=len(chapters) + 1,
@@ -826,6 +831,89 @@ def _chapterize_by_toc(text: str, toc: List[List], config: Dict[str, Any]) -> Li
         ))
 
     return chapters
+
+def _remove_toc_pages(text: str, toc_metadata: List[List]) -> str:
+    """
+    Detects and removes pages that appear to be the Table of Contents itself.
+    Uses [[PAGE_N]] markers to isolate pages.
+    """
+    # Split by markers, keeping separators
+    parts = re.split(r'(\[\[PAGE_\d+\]\])', text)
+    cleaned_parts = []
+    
+    # Re-assemble roughly into (marker, content) pairs
+    # parts[0] is text before first marker (usually empty)
+    # parts[1] is marker, parts[2] is content, etc.
+    
+    cleaned_parts.append(parts[0]) 
+    
+    skip_mode = False
+    
+    # We collect known titles for fuzzy matching
+    # Only use reasonably long titles to avoid false positives on "1." or "Part I"
+    known_titles = {t[1].strip().lower() for t in toc_metadata if len(t[1]) > 4}
+    
+    i = 1
+    while i < len(parts):
+        marker = parts[i]
+        content = parts[i+1] if i+1 < len(parts) else ""
+        
+        # Analyze content for TOC characteristics
+        # 1. Header detection
+        is_toc_header = False
+        content_stripped = content.strip().lower()
+        if content_stripped.startswith("contents") or content_stripped.startswith("table of contents"):
+             is_toc_header = True
+             
+        # 2. Line Match Rate
+        # Check how many lines in this page actully match a known TOC title
+        lines = [l.strip().lower() for l in content.splitlines() if l.strip()]
+        matches = 0
+        if lines:
+            for line in lines:
+                # Direct match or "Chapter X: Title" match
+                # CLEANUP: Remove leading "1. " and trailing " .... 55"
+                # Strip leading "12. " or "Chapter 5 "
+                clean_line = re.sub(r'^(chapter\s+\w+|part\s+\w+|[\d\w]+\.)\s+', '', line).strip()
+                # Strip trailing " . . . . 55" or " ... 55"
+                clean_line = re.sub(r'[ ._]+(\d+|[ivx]+)$', '', clean_line).strip()
+                
+                if clean_line in known_titles or line in known_titles:
+                    matches += 1
+            
+            match_rate = matches / len(lines)
+        else:
+            match_rate = 0
+            
+        # Decision Logic
+        # If we see a big "CONTENTS" header, start skipping
+        if is_toc_header:
+            logger.info(f"  Detected TOC Start at {marker}. Skipping page content.")
+            skip_mode = True
+            
+        # If match rate is high (>30%), it's likely a TOC page
+        elif match_rate > 0.3:
+             logger.info(f"  Detected TOC Page at {marker} (Match Rate: {match_rate:.2f}). Skipping.")
+             skip_mode = True
+        
+        # Stop skipping if we hit a page that looks nothing like a TOC
+        elif skip_mode and match_rate < 0.1:
+             logger.info(f"  End of TOC detected at {marker}. Resuming text.")
+             skip_mode = False
+             
+        if not skip_mode:
+            cleaned_parts.append(marker)
+            cleaned_parts.append(content)
+        else:
+             # Keep the marker to preserve page counts/flow, but empty the content? 
+             # Or remove entirely? Removing content is best for TTS.
+             # We keep the marker for debugging but blank the text.
+             cleaned_parts.append(marker) 
+             cleaned_parts.append("\n[TOC REMOVED]\n")
+             
+        i += 2
+        
+    return "".join(cleaned_parts)
 
 def _clean_page_markers(chapters: List[Chapter]) -> List[Chapter]:
     """Removes [[PAGE_X]] markers from chapter content."""
