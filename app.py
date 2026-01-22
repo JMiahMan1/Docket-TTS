@@ -3,6 +3,7 @@ import subprocess
 import uuid
 import re
 import json
+import concurrent.futures
 from pathlib import Path
 from datetime import datetime, timezone
 import time
@@ -38,6 +39,33 @@ import zipfile
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+def ocr_page_worker(filepath, page_num):
+    """
+    Worker function to OCR a single page.
+    Opens its own handle to be thread-safe.
+    """
+    try:
+        # Open document locally for thread safety
+        doc = fitz.open(filepath)
+        page = doc.load_page(page_num)
+        
+        # Inject Page Marker
+        marker = f"[[PAGE_{page_num + 1}]]"
+        
+        pix = page.get_pixmap(dpi=300)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        
+        # Pytesseract must be installed and configured in the env
+        # Assuming pytesseract import is available globally or we import inside
+        import pytesseract 
+        text = pytesseract.image_to_string(img)
+        
+        doc.close()
+        return f"{marker}\n{text}"
+    except Exception as e:
+        logger.error(f"OCR failed for page {page_num} of {filepath}: {e}")
+        return f"[[PAGE_{page_num + 1}]]\n[OCR Failed]"
 
 try:
     import pytesseract
@@ -438,24 +466,21 @@ def extract_text_and_metadata(filepath):
                     app.logger.info(f"PDF {filepath} seems to be image-based (low text density).")
                     is_image_based = True
                 
-                if is_image_based:
                     app.logger.warning(f"PDF {filepath} appears to be image-based.")
                     
                     if OCR_ENABLED:
-                        app.logger.info(f"Attempting OCR on {filepath}...")
-                        ocr_text_parts = []
-                        for page_num in range(doc.page_count):
-                            # Inject Page Marker for TOC support
-                            ocr_text_parts.append(f"[[PAGE_{page_num + 1}]]")
-                            
-                            page = doc.load_page(page_num)
-                            pix = page.get_pixmap(dpi=300) # Use 300 DPI for better OCR
-                            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                            
-                            page_ocr_text = pytesseract.image_to_string(img) 
-                            ocr_text_parts.append(page_ocr_text)
+                        # Parallel OCR Implementation
+                        max_workers = 4 # Cap at 4 workers to limit RAM usage (Images are large)
+                        app.logger.info(f"Attempting Parallel OCR on {filepath} with {max_workers} workers...")
                         
-                        raw_ocr_text = "\n".join(ocr_text_parts) # Changed from \n\n to \n to keep markers tight
+                        ocr_text_parts = []
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                            # Use map to preserve order: Page 0, Page 1, Page 2...
+                            # Pass filepath and page_num to each worker
+                            results = executor.map(ocr_page_worker, [filepath] * doc.page_count, range(doc.page_count))
+                            ocr_text_parts = list(results)
+                        
+                        raw_ocr_text = "\n".join(ocr_text_parts)
                         app.logger.info(f"Successfully OCR'd {len(ocr_text_parts)} pages. Raw char count: {len(raw_ocr_text)}")
                         
                         # --- NEW STEP: LLM POST-PROCESSING ---
