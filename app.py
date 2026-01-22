@@ -954,7 +954,6 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
                 toc_strategy=toc_strategy,
                 debug=debug_mode,
                 metadata=metadata
-            )                debug=debug_mode
             )
             
             if chapters:
