@@ -58,7 +58,8 @@ from tts_service import TTSService, normalize_text
 import text_cleaner
 import chapterizer
 
-APP_VERSION = "0.0.7"
+APP_VERSION = "0.0.8"
+BUILD_TIMESTAMP = "2026-01-21 22:25 MST"
 UPLOAD_FOLDER = '/app/uploads'
 GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
@@ -92,7 +93,7 @@ except PermissionError:
 
 @app.context_processor
 def inject_version():
-    return dict(app_version=APP_VERSION)
+    return dict(app_version=APP_VERSION, build_timestamp=BUILD_TIMESTAMP)
 
 def celery_init_app(app: Flask) -> Celery:
     class FlaskTask(Task):
