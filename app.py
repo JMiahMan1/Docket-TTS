@@ -1062,13 +1062,29 @@ def process_chapter_task(self, original_filename, chapter_title, chapter_text, v
         secondary_data = None
         if secondary_voice_name:
              secondary_data = ensure_voice_available(secondary_voice_name)
-             
+        
+        # SMART THREADING: Check if we are the only job running
+        # If queue is empty, we *might* be the last one. 
+        current_queue_len = 100
+        try:
+            current_queue_len = redis_client.llen('celery')
+        except: pass
+
+        # If queue is backed up, go FAST/PARALLEL (1 thread each).
+        # If queue is empty (this is the last/only job), go TURBO (3 threads).
+        smart_thread_count = 1
+        if current_queue_len == 0:
+            smart_thread_count = 3
+        
+        # app.logger.info(f"Initializing TTS for {output_filename} with {smart_thread_count} threads (Queue: {current_queue_len})")
+
         tts = TTSService(
             voice_name=voice_name, 
             voice_data=voice_data, 
             speed_rate=speed_rate,
             secondary_voice_name=secondary_voice_name,
-            secondary_voice_data=secondary_data
+            secondary_voice_data=secondary_data,
+            thread_count=smart_thread_count
         )
         
         def progress_tracker(current, total):
