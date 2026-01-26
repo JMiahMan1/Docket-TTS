@@ -183,16 +183,17 @@
                                 <a href="{{ url_for('download_file', name=file.audio_name) }}"
                                     class="text-decoration-none text-dark stretched-link">{{ file.audio_name }}</a>
                             </h6>
-                            <p class="small text-muted mb-3 d-flex align-items-center gap-2">
-                                <span>{{ file.duration }}</span>
+                            <p class="small text-muted mb-3 d-flex align-items-center gap-2 flex-wrap">
+                                <span class="text-nowrap">{{ file.duration }}</span>
                                 <span>•</span>
-                                <span>{{ file.size }}</span>
+                                <span class="text-nowrap">{{ file.size }}</span>
                                 {% if file.generation_time %}
                                 <span>•</span>
-                                <span title="Time taken to generate">⚡ {{ file.generation_time }}</span>
+                                <span class="text-nowrap text-success" title="Time taken to generate">⚡ {{
+                                    file.generation_time }}</span>
                                 {% endif %}
                                 <span>•</span>
-                                <span data-utc-date="{{ file.date }}">Loading...</span>
+                                <span data-utc-date="{{ file.date }}" class="text-nowrap">Loading...</span>
                             </p>
 
                             <div class="file-card-actions bg-light rounded-3 p-2 d-flex justify-content-between align-items-center position-relative"
