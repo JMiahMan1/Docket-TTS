@@ -585,8 +585,23 @@ def _apply_final_processing(chapters: List[Chapter], config: Dict[str, Any]) -> 
                 logger.info(f"Skipping short/disallowed chapter: '{chapter.original_title}' ({word_count} words)")
                 continue
             
-            # Allow very short chapters if they are 'part' delimiters
+            # Allow very short chapters if they are 'part' delimiters, BUT only if they seem real
+            # A real Part page usually has "Part I\nBiblical Holiness" or similar.
+            # A TOC ghost might be just "Part I".
             if chapter.original_title.lower().startswith('part '):
+                # If it's literally just the title (or very close), and super short, it's likely a TOC ghost/duplicate
+                # unless it's a legitimate title page for the part. 
+                # Let's require at least 5 words to be safe, or just keep it but log it differently.
+                # Actually, "Part I: Biblical Holiness" is 4 words. 
+                # User complaint: "Part II... 4%" suggests it's being synthesized.
+                
+                # If the content is identical to the title, it's just a spacer.
+                # If user considers that "TOC", we should drop it or merege it.
+                # Use fuzzy match?
+                if word_count < 10 and chapter.content.lower().strip() in chapter.original_title.lower().strip():
+                     logger.info(f"Skipping short 'Part' chapter (likely TOC ghost/redundant): '{chapter.original_title}'")
+                     continue
+                
                 logger.info(f"Keeping short 'Part' chapter: '{chapter.original_title}'")
             else:
                  logger.info(f"Skipping short chapter: '{chapter.original_title}' ({word_count} words)")
