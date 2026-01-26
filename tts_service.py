@@ -49,6 +49,7 @@ else:
 
 _inflect = inflect.engine()
 HEBREW_TO_ENGLISH = None
+_KOKORO_INSTANCE = None
 
 def ensure_translation_models_are_loaded():
     """Checks for and installs translation models if they are not present, using a lock to prevent concurrent installation."""
@@ -453,12 +454,18 @@ class TTSService:
         if not self.voices_file_path.exists():
             raise FileNotFoundError(f"Kokoro voices file not found at: {self.voices_file_path}")
 
-        print(f"DEBUG: Initializing Kokoro TTS with model: {self.model_path}")
-        
-        self.kokoro = Kokoro(
-            model_path=str(self.model_path), 
-            voices_path=str(self.voices_file_path)
-        )
+        # Singleton Pattern for Model Loading
+        global _KOKORO_INSTANCE
+        if _KOKORO_INSTANCE is None:
+            print(f"DEBUG: Loading Kokoro Model from disk: {self.model_path}")
+            _KOKORO_INSTANCE = Kokoro(
+                model_path=str(self.model_path), 
+                voices_path=str(self.voices_file_path)
+            )
+        else:
+            print("DEBUG: Using cached Kokoro Model instance.")
+            
+        self.kokoro = _KOKORO_INSTANCE
         
         self.lang = self._get_lang_code(voice_name)
         self.secondary_lang = self._get_lang_code(secondary_voice_name) if secondary_voice_name else self.lang
