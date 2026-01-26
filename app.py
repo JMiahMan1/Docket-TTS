@@ -19,7 +19,7 @@ from bs4 import BeautifulSoup
 from celery import Celery, Task
 import fitz  # PyMuPDF
 from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, COMM, APIC
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, COMM, APIC, error
 from mutagen.mp4 import MP4
 import redis
 import shutil
@@ -1605,7 +1605,8 @@ def jobs_page():
                 original_filename = "N/A"
                 task_name = task.get('name', '')
                 task_args = task.get('args')
-
+                
+                custom_status = None # Initialize variable
                 if custom_status:
                     original_filename = custom_status
                 else:
