@@ -1583,6 +1583,16 @@ def jobs_page():
                              c_num = c_details.get('number', '?')
                              original_filename = f"{b_title} - Ch. {c_num}"
 
+                # Attempt to get real-time status from AsyncResult
+                try:
+                    res = celery.AsyncResult(task['id'])
+                    if res.state == 'PROGRESS' and res.info and isinstance(res.info, dict):
+                        status_text = res.info.get('status', '')
+                        if status_text:
+                            original_filename = f"{original_filename} ({status_text})"
+                except:
+                    pass
+
                 running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker})
         reserved_tasks = inspector.reserved() or {}
         for worker, tasks in reserved_tasks.items():
