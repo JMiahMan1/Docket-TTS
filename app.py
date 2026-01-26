@@ -1033,6 +1033,8 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
         app.logger.error(f"Error in analyze_book_task for {original_filename}: {e}", exc_info=True)
         # We might want to set a failed state specifically
         raise e
+
+@celery.task(bind=True)
 def process_chapter_task(self, original_filename, chapter_title, chapter_text, voice_name, speed_rate, secondary_voice_name=None):
     try:
         start_time = time.time() # Start global timer
