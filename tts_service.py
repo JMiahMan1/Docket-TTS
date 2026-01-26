@@ -12,6 +12,11 @@ import soundfile as sf
 import requests
 import numpy as np
 import torch
+# FORCE SINGLE THREADING to prevent CPU thrashing on small instances
+torch.set_num_threads(1)
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+
 from kokoro_onnx import Kokoro
 
 VOICES_MD_URL = "https://huggingface.co/hexgrad/Kokoro-82M/raw/main/VOICES.md"
