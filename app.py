@@ -1606,15 +1606,33 @@ def jobs_page():
                 task_name = task.get('name', '')
                 task_args = task.get('args')
 
-                if task_args and isinstance(task_args, (list, tuple)):
-                    if 'process_chapter_task' in task_name:
-                         if len(task_args) > 3:
-                            original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
-                    elif 'analyze_book_task' in task_name:
-                        if len(task_args) > 0 and isinstance(task_args[0], dict):
-                             original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book Used')}"
-                    elif len(task_args) > 1:
-                         original_filename = Path(task_args[1]).name
+                if custom_status:
+                    original_filename = custom_status
+                else:
+                    # Parse ARGS
+                    if task_args and isinstance(task_args, (list, tuple)):
+                        if 'process_chapter_task' in task_name and len(task_args) > 3:
+                                original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                        elif 'analyze_book_task' in task_name and len(task_args) > 0 and isinstance(task_args[0], dict):
+                                original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book Used')}"
+                        elif len(task_args) > 1:
+                                original_filename = Path(task_args[1]).name
+                    
+                    # Parse KWARGS (Fallback if args empty)
+                    task_kwargs = task.get('kwargs')
+                    if original_filename == "N/A" and task_kwargs:
+                         if 'analyze_book_task' in task_name and 'item' in task_kwargs:
+                             fname = task_kwargs['item'].get('original_filename', 'Book')
+                             original_filename = f"Analyzing: {fname}"
+                         elif 'process_chapter_task' in task_name:
+                             # New signature: original_filename, chapter_title, chapter_text...
+                             if 'original_filename' in task_kwargs and 'chapter_title' in task_kwargs:
+                                 original_filename = f"{task_kwargs['original_filename']} - {task_kwargs['chapter_title']}"
+                             elif 'book_metadata' in task_kwargs: # Fallback for old tasks (if any)
+                                 b_title = task_kwargs['book_metadata'].get('title', 'Book')
+                                 c_details = task_kwargs.get('chapter') or task_kwargs.get('chapter_details') or {}
+                                 c_num = c_details.get('number', '?')
+                                 original_filename = f"{b_title} - Ch. {c_num}"
 
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
         if redis_client:
