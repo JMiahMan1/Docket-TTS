@@ -992,12 +992,22 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
                     }
                     
                     process_chapter_task.delay(
-                        chapter_content=chapter.content,
-                        book_metadata=metadata,
-                        chapter_details=chapter_details,
+                        original_filename=original_filename,
+                        chapter_title=chapter.title,
+                        chapter_text=chapter.content,
                         voice_name=voice_name,
                         speed_rate=speed_rate,
-@celery.task(bind=True)
+                        secondary_voice_name=secondary_voice_name
+                    )
+            else:
+                 app.logger.warning(f"No chapters found for {original_filename}")
+        else:
+             pass
+
+    except Exception as e:
+        app.logger.error(f"Error in analyze_book_task for {original_filename}: {e}", exc_info=True)
+        # We might want to set a failed state specifically
+        raise e
 def process_chapter_task(self, original_filename, chapter_title, chapter_text, voice_name, speed_rate, secondary_voice_name=None):
     try:
         start_time = time.time() # Start global timer
