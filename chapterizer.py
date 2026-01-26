@@ -460,7 +460,8 @@ def _chapterize_epub(filepath) -> List[Chapter]:
                 original_title=title,
                 content=full_text,
                 word_count=len(full_text.split()),
-                part_info=(1, 1)
+                part_info=(1, 1),
+                page_range=(None, None)
             ))
             chapter_number += 1
             
@@ -481,7 +482,8 @@ def _chapterize_epub(filepath) -> List[Chapter]:
                     original_title=title,
                     content=full_text,
                     word_count=len(full_text.split()),
-                    part_info=(1, 1)
+                    part_info=(1, 1),
+                    page_range=(None, None)
                 ))
                 chapter_number += 1
             else:
@@ -496,7 +498,8 @@ def _chapterize_epub(filepath) -> List[Chapter]:
                         original_title=title,
                         content=text_content,
                         word_count=len(text_content.split()),
-                        part_info=(1, 1)
+                        part_info=(1, 1),
+                        page_range=(None, None)
                     ))
                     chapter_number += 1
             
@@ -555,7 +558,8 @@ def _split_large_chapter_into_parts(chapter: Chapter, max_words: int) -> List[Ch
             original_title=chapter.original_title,
             content=part["content"],
             word_count=part["word_count"],
-            part_info=part_info
+            part_info=part_info,
+            page_range=chapter.page_range # Preserve original page range for all parts
         ))
         
     return final_chapter_parts
@@ -682,7 +686,7 @@ def _find_raw_chapters(raw_text: str, profile_key: str = "auto") -> List[Chapter
 
     # --- "None" Profile ---
     if profile_key == "none":
-        return [Chapter(1, "Full Text", "Full Text", raw_text, len(raw_text.split()))]
+        return [Chapter(1, "Full Text", "Full Text", raw_text, len(raw_text.split()), (1,1), (None, None))]
 
     # --- Profile-Based Extraction ---
     selected_profile = PROFILES.get(profile_key, PROFILES["standard"])
@@ -720,7 +724,7 @@ def _find_raw_chapters(raw_text: str, profile_key: str = "auto") -> List[Chapter
 
     if not all_matches:
         # No chapters found, treat the whole text as one chapter
-        return [Chapter(1, "Chapter 1", "Chapter 1", raw_text, len(raw_text.split()))]
+        return [Chapter(1, "Chapter 1", "Chapter 1", raw_text, len(raw_text.split()), (1,1), (None, None))]
 
     for i, match in enumerate(all_matches):
         start_index = match.start()
@@ -752,7 +756,8 @@ def _find_raw_chapters(raw_text: str, profile_key: str = "auto") -> List[Chapter
                 title=title,
                 original_title=original_title,
                 content=content,
-                word_count=word_count
+                word_count=word_count,
+                page_range=(None, None)
             ))
 
     return chapters

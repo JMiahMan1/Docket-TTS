@@ -1022,7 +1022,8 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
                         chapter_text=chapter.content,
                         voice_name=voice_name,
                         speed_rate=speed_rate,
-                        secondary_voice_name=secondary_voice_name
+                        secondary_voice_name=secondary_voice_name,
+                        page_range=chapter.page_range
                     )
             else:
                  app.logger.warning(f"No chapters found for {original_filename}")
@@ -1035,7 +1036,7 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
         raise e
 
 @celery.task(bind=True)
-def process_chapter_task(self, original_filename, chapter_title, chapter_text, voice_name, speed_rate, secondary_voice_name=None):
+def process_chapter_task(self, original_filename, chapter_title, chapter_text, voice_name, speed_rate, secondary_voice_name=None, page_range=None):
     try:
         start_time = time.time() # Start global timer
         
@@ -1085,6 +1086,16 @@ def process_chapter_task(self, original_filename, chapter_title, chapter_text, v
             pass
         audio.tags.add(TIT2(encoding=3, text=chapter_title))
         audio.tags.add(TALB(encoding=3, text=original_filename))
+        
+        # Add Page Range to Comments if available
+        if page_range and isinstance(page_range, (list, tuple)) and page_range[0] is not None:
+            start_page, end_page = page_range
+            if start_page == end_page:
+                page_str = f"Page {start_page}"
+            else:
+                page_str = f"Pages {start_page}-{end_page}"
+            audio.tags.add(COMM(encoding=3, lang='eng', desc='Page Range', text=page_str))
+            
         audio.save()
         
         # Calculate Time
