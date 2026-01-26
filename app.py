@@ -1387,6 +1387,14 @@ def list_files():
                         meta = json.load(f)
                         file_data['generation_time'] = meta.get('generation_time', '')
                 except: pass
+            
+            # Read Page Range from ID3 Comments
+            try:
+                # COMM::eng frame typically holds the comment
+                comment_frames = [f for f in audio.tags.values() if f.FrameID == 'COMM']
+                if comment_frames:
+                     file_data['comment'] = str(comment_frames[0].text[0])
+            except: pass
                 
         elif entry.suffix == '.txt':
             file_data['txt_name'] = entry.name
