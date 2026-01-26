@@ -762,8 +762,8 @@ def _chapterize_by_toc(text: str, toc: List[List], config: Dict[str, Any]) -> Li
         logger.info(f"High-count TOC detected ({len(valid_toc_entries)} entries). Attempting to filter for major headings.")
         
         # Regex for "Major" headings: "Chapter X", "Part X", "1. Title"
-        # Also include standard front-matter like Introduction, Preface, Foreword to avoid skipping them
-        major_pattern = re.compile(r'^(Chapter|Part|Book|Section)\s+\w+|^\d+\.\s+|^(Introduction|Preface|Foreword|Prologue)', re.IGNORECASE)
+        # Also include standard front-matter strictly
+        major_pattern = re.compile(r'^(Chapter|Part|Book|Section)\s+\w+|^\d+\.\s+|^(Introduction|Preface|Foreword|Prologue|Acknowledgments|Dedication|Copyright)', re.IGNORECASE)
         
         major_entries = [e for e in valid_toc_entries if major_pattern.match(e[1].strip())]
         
@@ -861,10 +861,20 @@ def _remove_toc_pages(text: str, toc_metadata: List[List]) -> str:
         # Analyze content for TOC characteristics
         # 1. Header detection
         is_toc_header = False
-        content_stripped = content.strip().lower()
-        if content_stripped.startswith("contents") or content_stripped.startswith("table of contents"):
-             is_toc_header = True
-             
+        # Check first 300 chars for header to account for noise/page numbers
+        content_head = content[:300].lower() 
+        if "contents" in content_head or "table of contents" in content_head:
+             # Verify it's not a sentence containing 'contents'
+             lines = content_head.splitlines()
+             for line in lines:
+                 l = line.strip()
+                 if l in ["contents", "table of contents"]:
+                     is_toc_header = True
+                     break
+                 if "contents" in l and len(l) < 30: # fuzzy header check
+                     is_toc_header = True
+                     break
+
         # 2. Line Match Rate
         # Check how many lines in this page actully match a known TOC title
         lines = [l.strip().lower() for l in content.splitlines() if l.strip()]
