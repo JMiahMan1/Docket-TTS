@@ -597,67 +597,7 @@ def create_title_page_text(metadata):
     
     return " ".join(parts) + "\n\n" if parts else ""
 
-@celery.task(bind=True)
-def process_chapter_task(self, chapter_content, book_metadata, chapter_details, voice_name, speed_rate, secondary_voice_name=None):
-    generated_folder = Path(current_app.config['GENERATED_FOLDER'])
-    try:
-        status_msg = f'Processing: {book_metadata.get("title", "Unknown")} - Ch. {chapter_details["number"]} "{chapter_details["title"][:20]}..."'
-        self.update_state(state='PROGRESS', meta={'status': status_msg})
-        
-        voice_data = ensure_voice_available(voice_name)
-        secondary_voice_data = ensure_voice_available(secondary_voice_name) if secondary_voice_name else None
-        
-        tts = TTSService(
-            voice_name=voice_name, 
-            voice_data=voice_data, 
-            speed_rate=speed_rate,
-            secondary_voice_name=secondary_voice_name,
-            secondary_voice_data=secondary_voice_data
-        )
-        
-        normalized_chapter_content = normalize_text(chapter_content)
-        final_content = normalized_chapter_content 
-        
-        if chapter_details.get("number") == 1:
-            unnormalized_title_page = create_title_page_text(book_metadata)
-            normalized_title_page = normalize_text(unnormalized_title_page)
-            final_content = normalized_title_page + normalized_chapter_content
-        
-        s_book_title = clean_filename_part(book_metadata.get("title", "book"))
-        s_chapter_title = clean_filename_part(chapter_details['title'])
 
-        
-        part_info = chapter_details.get('part_info', (1, 1))
-        part_str = ""
-        if part_info[1] > 1:
-            part_str = f" - Part {part_info[0]} of {part_info[1]}"
-
-        output_filename = f"{chapter_details['number']:02d} - {s_book_title} - {s_chapter_title}{part_str}.mp3"
-        safe_output_filename = secure_filename(output_filename)
-        output_filepath = generated_folder / safe_output_filename
-        
-        _, synthesized_text = tts.synthesize(final_content, str(output_filepath))
-        
-        metadata_title = chapter_details.get('original_title', chapter_details['title'])
-        if part_info[1] > 1:
-            metadata_title += f" (Part {part_info[0]} of {part_info[1]})"
-
-        tag_mp3_file(
-            str(output_filepath),
-            metadata={'title': metadata_title, 'author': book_metadata.get("author"), 'book_title': book_metadata.get("title")},
-            voice_name=voice_name
-        )
-
-        text_filename = output_filepath.with_suffix('.txt').name
-        (generated_folder / text_filename).write_text(synthesized_text, encoding="utf-8")
-
-        app.logger.info(f"Task {self.request.id} completed successfully. Output: {safe_output_filename}")
-        return {'status': 'Success', 'filename': safe_output_filename, 'textfile': text_filename}
-
-    except Exception as e:
-        app.logger.error(f"Chapter processing failed in task {self.request.id}: {e}", exc_info=True)
-        self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
-        raise e
 
 @celery.task(bind=True)
 def convert_to_speech_task(self, input_filepath, original_filename, book_title, book_author, voice_name=None, speed_rate='1.0', secondary_voice_name=None):
