@@ -586,23 +586,34 @@ def _apply_final_processing(chapters: List[Chapter], config: Dict[str, Any]) -> 
                 continue
             
             # Allow very short chapters if they are 'part' delimiters, BUT only if they seem real
-            # A real Part page usually has "Part I\nBiblical Holiness" or similar.
-            # A TOC ghost might be just "Part I".
             if chapter.original_title.lower().startswith('part '):
-                # If it's literally just the title (or very close), and super short, it's likely a TOC ghost/duplicate
-                # unless it's a legitimate title page for the part. 
-                # Let's require at least 5 words to be safe, or just keep it but log it differently.
-                # Actually, "Part I: Biblical Holiness" is 4 words. 
-                # User complaint: "Part II... 4%" suggests it's being synthesized.
+                # 1. Check for extreme brevity or title repetition (The "Ghost" Chapter)
+                # "Part I" (title) -> "Part I" (content)
+                cleaned_lower = clean_text(chapter.content).lower().replace('\n', ' ').strip()
+                title_lower = chapter.original_title.lower().strip()
                 
-                # If the content is identical to the title, it's just a spacer.
-                # If user considers that "TOC", we should drop it or merege it.
-                # Use fuzzy match?
-                if word_count < 10 and chapter.content.lower().strip() in chapter.original_title.lower().strip():
-                     logger.info(f"Skipping short 'Part' chapter (likely TOC ghost/redundant): '{chapter.original_title}'")
+                if word_count < 15 and (cleaned_lower in title_lower or title_lower in cleaned_lower):
+                     logger.info(f"Skipping short 'Part' chapter (Ghost/Redundant): '{chapter.original_title}'")
                      continue
-                
-                logger.info(f"Keeping short 'Part' chapter: '{chapter.original_title}'")
+
+                # 2. Check for "Part TOC" structure: lines ending in numbers/dots
+                # If a "Part" chapter is just a list of the chapters inside it, we skip it.
+                # Heuristic: If > 50% of non-empty lines end with a digit, it's a TOC.
+                lines = [l.strip() for l in chapter.content.splitlines() if l.strip()]
+                if lines:
+                    toc_like_lines = 0
+                    for line in lines:
+                        # Match: "Chapter 1 ... 55" or "Biblical Holiness ...... 12" or just "12"
+                        if re.search(r'[\dIVX]+$', line):
+                            toc_like_lines += 1
+                        elif re.search(r'\.{3,}\s*\d', line): # Dots and number
+                            toc_like_lines += 1
+                    
+                    if len(lines) > 0 and (toc_like_lines / len(lines)) > 0.5:
+                        logger.info(f"Skipping 'Part' chapter (Content looks like TOC): '{chapter.original_title}'")
+                        continue
+
+                logger.info(f"Keeping 'Part' chapter: '{chapter.original_title}'")
             else:
                  logger.info(f"Skipping short chapter: '{chapter.original_title}' ({word_count} words)")
                  continue
