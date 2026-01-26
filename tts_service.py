@@ -11,11 +11,26 @@ import io
 import soundfile as sf
 import requests
 import numpy as np
-import torch
 # FORCE SINGLE THREADING to prevent CPU thrashing on small instances
-torch.set_num_threads(1)
+import os
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
+
+import onnxruntime as ort
+import torch
+torch.set_num_threads(1)
+
+# NUCLEAR OPTION: Monkey-patch InferenceSession to force thread limits
+# This overrides any defaults from the library
+_original_init = ort.InferenceSession.__init__
+def _restricted_init(self, path_or_bytes, **kwargs):
+    sess_options = kwargs.get('sess_options', ort.SessionOptions())
+    sess_options.intra_op_num_threads = 1
+    sess_options.inter_op_num_threads = 1
+    kwargs['sess_options'] = sess_options
+    print(f"DEBUG: Forced single-threaded execution for ONNX model: {path_or_bytes}")
+    _original_init(self, path_or_bytes, **kwargs)
+ort.InferenceSession.__init__ = _restricted_init
 
 from kokoro_onnx import Kokoro
 
