@@ -1071,13 +1071,12 @@ def process_chapter_task(self, original_filename, chapter_title, chapter_text, v
         except: pass
 
         # If queue is backed up, go FAST/PARALLEL (1 thread each).
-        # If queue is empty (this is the last/only job), go TURBO (2 threads).
-        # Why 2? 
-        # If concurrent mixed load happens: 
-        # Worker A (Turbo=2) + Worker B (Eco=1) + Worker C (Eco=1) = 4 Cores (Perfect Match)
+        # SAFETY FIRST: "Turbo Mode" (2 threads) caused locking on the 4-core server.
+        # Reverting to strict 1-thread mode to ensure we never exceed 75% load (3 workers * 1 thread).
+        # This leaves 1 core free for Redis/Gunicorn/OS at all times.
         smart_thread_count = 1
-        if current_queue_len == 0:
-            smart_thread_count = 2
+        # if current_queue_len == 0:
+        #    smart_thread_count = 2
         
         # app.logger.info(f"Initializing TTS for {output_filename} with {smart_thread_count} threads (Queue: {current_queue_len})")
 
