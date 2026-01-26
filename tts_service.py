@@ -13,6 +13,7 @@ import requests
 import numpy as np
 # FORCE SINGLE THREADING to prevent CPU thrashing on small instances
 import os
+# Default to 1, but allow override
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
@@ -25,14 +26,20 @@ torch.set_num_threads(1)
 _original_init = ort.InferenceSession.__init__
 def _restricted_init(self, path_or_bytes, **kwargs):
     sess_options = kwargs.get('sess_options', ort.SessionOptions())
-    sess_options.intra_op_num_threads = 1
-    sess_options.inter_op_num_threads = 1
+    
+    # DYNAMIC THREADING: Read from env var set just before model load
+    # Default to 1 for safety
+    threads = int(os.environ.get("KOKORO_SESSION_THREADS", "1"))
+    
+    sess_options.intra_op_num_threads = threads
+    sess_options.inter_op_num_threads = threads
     kwargs['sess_options'] = sess_options
-    print(f"DEBUG: Forced single-threaded execution for ONNX model: {path_or_bytes}")
+    print(f"DEBUG: Initializing ONNX session with {threads} threads for: {path_or_bytes}")
     _original_init(self, path_or_bytes, **kwargs)
 ort.InferenceSession.__init__ = _restricted_init
 
 from kokoro_onnx import Kokoro
+_KOKORO_INSTANCES = {} # Cache by thread count: {1: instance, 4: instance}
 
 VOICES_MD_URL = "https://huggingface.co/hexgrad/Kokoro-82M/raw/main/VOICES.md"
 
@@ -69,7 +76,7 @@ else:
 
 _inflect = inflect.engine()
 HEBREW_TO_ENGLISH = None
-_KOKORO_INSTANCE = None
+_KOKORO_INSTANCES = {}
 
 def ensure_translation_models_are_loaded():
     """Checks for and installs translation models if they are not present, using a lock to prevent concurrent installation."""
@@ -450,14 +457,11 @@ class TTSService:
     and Natural Pausing.
     """
     def __init__(self, voice_name: str, voice_data: any, speed_rate: str = "1.0", 
-                 secondary_voice_name: str = None, secondary_voice_data: any = None):
+                 secondary_voice_name: str = None, secondary_voice_data: any = None,
+                 thread_count: int = 1):
         """
         Initializes the TTS service.
-        :param voice_name: The string name of the primary voice.
-        :param voice_data: The data/embedding for the primary voice.
-        :param speed_rate: The speed rate.
-        :param secondary_voice_name: Optional name for the dialogue voice.
-        :param secondary_voice_data: Optional data/embedding for the dialogue voice.
+        :param thread_count: Number of threads to use for ONNX inference (Smart/Dynamic).
         """
         self.speed_rate = speed_rate
         self.voice_name = voice_name
@@ -474,18 +478,24 @@ class TTSService:
         if not self.voices_file_path.exists():
             raise FileNotFoundError(f"Kokoro voices file not found at: {self.voices_file_path}")
 
-        # Singleton Pattern for Model Loading
-        global _KOKORO_INSTANCE
-        if _KOKORO_INSTANCE is None:
-            print(f"DEBUG: Loading Kokoro Model from disk: {self.model_path}")
-            _KOKORO_INSTANCE = Kokoro(
+        # Smart Caching: Key by thread count
+        # e.g. {1: <Kokoro 1-thread>, 4: <Kokoro 4-thread>}
+        global _KOKORO_INSTANCES
+        
+        if thread_count not in _KOKORO_INSTANCES:
+            print(f"DEBUG: Loading Kokoro Model with {thread_count} threads...")
+            
+            # Set env var for monkey patch to read
+            os.environ["KOKORO_SESSION_THREADS"] = str(thread_count)
+            
+            _KOKORO_INSTANCES[thread_count] = Kokoro(
                 model_path=str(self.model_path), 
                 voices_path=str(self.voices_file_path)
             )
         else:
-            print("DEBUG: Using cached Kokoro Model instance.")
+            print(f"DEBUG: Using cached Kokoro Model ({thread_count} threads).")
             
-        self.kokoro = _KOKORO_INSTANCE
+        self.kokoro = _KOKORO_INSTANCES[thread_count]
         
         self.lang = self._get_lang_code(voice_name)
         self.secondary_lang = self._get_lang_code(secondary_voice_name) if secondary_voice_name else self.lang
