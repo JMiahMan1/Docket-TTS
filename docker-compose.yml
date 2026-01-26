@@ -29,7 +29,7 @@ services:
       args:
         - GITHUB_REPOSITORY=jmiahman1/docket-tts
         - BASE_IMAGE_TAG=latest
-    command: /opt/venv/bin/python -m celery -A app.celery worker --loglevel=info
+    command: /opt/venv/bin/python -m celery -A app.celery worker --loglevel=info --concurrency=4
     volumes:
       - generated_data:/app/generated:z
       - uploads_data:/app/uploads:z
@@ -38,10 +38,7 @@ services:
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    deploy:
-      resources:
-        limits:
-          cpus: '3.0'
+    # Removed CPU limits to allow full utilization of 16-core host
 
 volumes:
   uploads_data:
