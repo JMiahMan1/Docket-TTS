@@ -30,6 +30,11 @@ services:
         - GITHUB_REPOSITORY=jmiahman1/docket-tts
         - BASE_IMAGE_TAG=latest
     command: /opt/venv/bin/python -m celery -A app.celery worker --loglevel=info --concurrency=3
+    environment:
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - ONNXRUNTIME_INTRA_OP_NUM_THREADS=1
+      - KOKORO_VOICES_PATH=/app/voices
     volumes:
       - generated_data:/app/generated:z
       - uploads_data:/app/uploads:z
