@@ -547,8 +547,11 @@ class TTSService:
 
     def synthesize(self, text: str, output_path: str):
         # Fix unnatural breath artifact caused by " . " (space dot space)
-        # Replacing with ellipsis (...) usually encourages smoother continuation or pause without the gasp.
-        synthesized_text = text.replace(" . ", " ... ")
+        # Replacing with comma (,) creates a shorter, natural pause instead of the long silence/gasp of ellipsis.
+        synthesized_text = text.replace(" . ", ", ")
+        
+        # Collapse multiple dots (e.g. from TOCs "Chapter 1 .......... 5") into a single pause
+        synthesized_text = re.sub(r'[\. ]{3,}', ', ', synthesized_text)
 
         if not synthesized_text or not synthesized_text.strip():
             print(f"WARNING: No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
