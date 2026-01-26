@@ -1023,7 +1023,8 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
                         voice_name=voice_name,
                         speed_rate=speed_rate,
                         secondary_voice_name=secondary_voice_name,
-                        page_range=chapter.page_range
+                        page_range=chapter.page_range,
+                        chapter_number=chapter.number
                     )
             else:
                  app.logger.warning(f"No chapters found for {original_filename}")
@@ -1036,15 +1037,19 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
         raise e
 
 @celery.task(bind=True)
-def process_chapter_task(self, original_filename, chapter_title, chapter_text, voice_name, speed_rate, secondary_voice_name=None, page_range=None):
+def process_chapter_task(self, original_filename, chapter_title, chapter_text, voice_name, speed_rate, secondary_voice_name=None, page_range=None, chapter_number=None):
     try:
         start_time = time.time() # Start global timer
         
         safe_base_name = secure_filename(Path(original_filename).stem)
         safe_chapter_title = secure_filename(chapter_title)
         
-        # Unique output filename
-        output_filename = f"{safe_base_name}_{safe_chapter_title}.mp3"
+        # Unique output filename with ordering
+        if chapter_number is not None:
+             output_filename = f"{safe_base_name}_{int(chapter_number):04d}_{safe_chapter_title}.mp3"
+        else:
+             output_filename = f"{safe_base_name}_{safe_chapter_title}.mp3"
+             
         output_filepath = Path(app.config['GENERATED_FOLDER']) / output_filename
         
         # 1. Normalize (10%)
@@ -1348,7 +1353,8 @@ def upload_file():
 @app.route('/files')
 def list_files():
     file_map = {}
-    all_files = sorted(Path(app.config['GENERATED_FOLDER']).iterdir(), key=os.path.getmtime, reverse=True)
+    # Sort by filename (A-Z) to respect chapter ordering
+    all_files = sorted(Path(app.config['GENERATED_FOLDER']).iterdir(), key=lambda f: f.name)
 
     for entry in all_files:
         if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
