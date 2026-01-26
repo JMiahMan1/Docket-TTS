@@ -997,19 +997,77 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
                         chapter_details=chapter_details,
                         voice_name=voice_name,
                         speed_rate=speed_rate,
-                        secondary_voice_name=secondary_voice_name
-                    )
-            else:
-                 app.logger.warning(f"No chapters found for {original_filename}")
-        else:
-             # Single task mode (not book mode) logic could go here if needed, 
-             # but currently this path handles book_mode=True specifically from the upload controller.
-             # If book_mode is False, we might just queue a single task.
-             pass
-
+@celery.task(bind=True)
+def process_chapter_task(self, original_filename, chapter_title, chapter_text, voice_name, speed_rate, secondary_voice_name=None):
+    try:
+        start_time = time.time() # Start global timer
+        
+        safe_base_name = secure_filename(Path(original_filename).stem)
+        safe_chapter_title = secure_filename(chapter_title)
+        
+        # Unique output filename
+        output_filename = f"{safe_base_name}_{safe_chapter_title}.mp3"
+        output_filepath = Path(app.config['GENERATED_FOLDER']) / output_filename
+        
+        # 1. Normalize (10%)
+        self.update_state(state='PROGRESS', meta={'current': 10, 'total': 100, 'status': f'Normalizing {chapter_title}...'})
+        normalized_text = normalize_text(chapter_text)
+        
+        # 2. Synthesize (10-90%)
+        voice_data = ensure_voice_available(voice_name)
+        
+        secondary_data = None
+        if secondary_voice_name:
+             secondary_data = ensure_voice_available(secondary_voice_name)
+             
+        tts = TTSService(
+            voice_name=voice_name, 
+            voice_data=voice_data, 
+            speed_rate=speed_rate,
+            secondary_voice_name=secondary_voice_name,
+            secondary_voice_data=secondary_data
+        )
+        
+        def progress_tracker(current, total):
+            percent = 10 + int((current / total) * 80)
+            self.update_state(state='PROGRESS', meta={
+                'current': percent, 
+                'total': 100, 
+                'status': f'Synthesizing {chapter_title}... {int((current/total)*100)}%'
+            })
+            
+        tts.synthesize(normalized_text, str(output_filepath), progress_callback=progress_tracker)
+        
+        # 3. Tag (90-100%)
+        self.update_state(state='PROGRESS', meta={'current': 95, 'total': 100, 'status': 'Finalizing tags...'})
+        
+        audio = MP3(output_filepath, ID3=ID3)
+        try:
+            audio.add_tags()
+        except error:
+            pass
+        audio.tags.add(TIT2(encoding=3, text=chapter_title))
+        audio.tags.add(TALB(encoding=3, text=original_filename))
+        audio.save()
+        
+        # Calculate Time
+        elapsed_time = time.time() - start_time
+        minutes, seconds = divmod(int(elapsed_time), 60)
+        time_str = f"{minutes}m {seconds}s"
+        
+        # Save Metadata Sidecar
+        meta_filepath = output_filepath.with_suffix(output_filepath.suffix + '.meta.json')
+        with open(meta_filepath, 'w') as f:
+            json.dump({
+                "generation_time": time_str,
+                "timestamp": datetime.now().isoformat()
+            }, f)
+            
+        return {'current': 100, 'total': 100, 'status': 'Complete', 'result': output_filename}
+        
     except Exception as e:
-        app.logger.error(f"Error in analyze_book_task for {original_filename}: {e}", exc_info=True)
-        # We might want to set a failed state specifically
+        app.logger.error(f"Error processing chapter {chapter_title}: {e}", exc_info=True)
+        self.update_state(state='FAILURE', meta={'exc_type': type(e).__name__, 'exc_message': str(e)})
         raise e
 
 
@@ -1266,6 +1324,15 @@ def list_files():
                      file_data['duration'] = f"{minutes}:{seconds:02}"
             except Exception:
                 file_data['duration'] = "Unknown"
+                
+            # Read Generation Time Metadata
+            meta_path = entry.with_suffix(entry.suffix + '.meta.json')
+            if meta_path.exists():
+                try:
+                    with open(meta_path, 'r') as f:
+                        meta = json.load(f)
+                        file_data['generation_time'] = meta.get('generation_time', '')
+                except: pass
                 
         elif entry.suffix == '.txt':
             file_data['txt_name'] = entry.name

@@ -545,7 +545,7 @@ class TTSService:
         # Tie-breaker or closer inspection could go here
         return None
 
-    def synthesize(self, text: str, output_path: str):
+    def synthesize(self, text: str, output_path: str, progress_callback=None):
         # Fix unnatural breath artifact caused by " . " (space dot space)
         # Replacing with comma (,) creates a shorter, natural pause instead of the long silence/gasp of ellipsis.
         synthesized_text = text.replace(" . ", ", ")
@@ -589,6 +589,9 @@ class TTSService:
                 
             current_sample_rate = 24000
             previous_narration_context = ""
+            
+            total_chars = len(synthesized_text)
+            chars_processed = 0
 
             for i, (seg_text, is_dialogue) in enumerate(segments):
                 if not seg_text.strip():
@@ -675,6 +678,10 @@ class TTSService:
                     
                     # Synthesize
                     if full_chunk.strip():
+                        # Update Progress
+                        if progress_callback:
+                             progress_callback(chars_processed, total_chars)
+                        
                         print(f"DEBUG: Synthesizing chunk... '{full_chunk[:30]}...' (Voice: {'Multiple' if self.secondary_voice_data else 'Primary'})")
                         samples, sample_rate = self.kokoro.create(
                             text=full_chunk, 
@@ -684,6 +691,8 @@ class TTSService:
                         )
                         all_samples.append(samples)
                         current_sample_rate = sample_rate # Assoc. with last generated
+                        
+                        chars_processed += len(full_chunk)
                     
                     # Add pause
                     if pause_duration > 0:

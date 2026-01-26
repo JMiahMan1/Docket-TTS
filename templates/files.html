@@ -187,6 +187,10 @@
                                 <span>{{ file.duration }}</span>
                                 <span>•</span>
                                 <span>{{ file.size }}</span>
+                                {% if file.generation_time %}
+                                <span>•</span>
+                                <span title="Time taken to generate">⚡ {{ file.generation_time }}</span>
+                                {% endif %}
                                 <span>•</span>
                                 <span data-utc-date="{{ file.date }}">Loading...</span>
                             </p>
