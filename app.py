@@ -664,6 +664,8 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
     temp_cover_path = None
     generated_folder = current_app.config['GENERATED_FOLDER']
     try:
+        start_time = time.time() # Start timer
+        
         self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Checking voice model...'})
         voice_data = ensure_voice_available(voice_name)
         secondary_voice_data = ensure_voice_available(secondary_voice_name) if secondary_voice_name else None
@@ -708,7 +710,17 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
             secondary_voice_name=secondary_voice_name, 
             secondary_voice_data=secondary_voice_data
         )
-        _, synthesized_text = tts.synthesize(final_content_for_synthesis, output_filepath)
+        
+        def progress_tracker(current, total):
+            # Map synthesis (0-100) to Task Progress (30-80%)
+            percent = 30 + int((current / total) * 50)
+            self.update_state(state='PROGRESS', meta={
+                'current': percent, 
+                'total': 100, 
+                'status': f'Synthesizing... {int((current/total)*100)}%'
+            })
+            
+        _, synthesized_text = tts.synthesize(final_content_for_synthesis, output_filepath, progress_callback=progress_tracker)
         
         cover_url = enhanced_metadata.get('cover_url', '')
         unique_id = str(uuid.uuid4().hex[:8])
@@ -728,7 +740,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
             if create_generic_cover_image(enhanced_metadata.get("title"), enhanced_metadata.get("author"), temp_cover_path):
                 cover_path_to_use = temp_cover_path
         
-        self.update_state(state='PROGRESS', meta={'current': 4, 'total': 5, 'status': 'Tagging and Saving...'})
+        self.update_state(state='PROGRESS', meta={'current': 90, 'total': 100, 'status': 'Tagging and Saving...'})
         tag_mp3_file(
             output_filepath, 
             {'title': enhanced_metadata.get("title"), 'author': enhanced_metadata.get("author"), 'book_title': enhanced_metadata.get("title")}, 
@@ -736,9 +748,22 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
             voice_name=voice_name
         )
         
-        self.update_state(state='PROGRESS', meta={'current': 5, 'total': 5, 'status': 'Saving text file...'})
+        self.update_state(state='PROGRESS', meta={'current': 95, 'total': 100, 'status': 'Saving text file...'})
         text_filename = Path(output_filepath).with_suffix('.txt').name
         Path(os.path.join(generated_folder, text_filename)).write_text(synthesized_text, encoding="utf-8")
+        
+        # Calculate Time
+        elapsed_time = time.time() - start_time
+        minutes, seconds = divmod(int(elapsed_time), 60)
+        time_str = f"{minutes}m {seconds}s"
+        
+        # Save Metadata Sidecar
+        meta_filepath = Path(output_filepath).with_suffix('.mp3.meta.json')
+        with open(meta_filepath, 'w') as f:
+            json.dump({
+                "generation_time": time_str,
+                "timestamp": datetime.now().isoformat()
+            }, f)
 
         return {'status': 'Success', 'filename': safe_output_filename, 'textfile': text_filename}
     except Exception as e:
