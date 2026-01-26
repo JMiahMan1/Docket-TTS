@@ -161,7 +161,7 @@ def expand_roman_numerals(text: str) -> str:
     valid_roman_pattern = re.compile(
         r"^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$", re.IGNORECASE)
     
-    common_words_to_exclude = {'i', 'a', 'v', 'x', 'l', 'c', 'd', 'm', 'did', 'mix', 'civil', 'mid', 'dim', 'lid', 'ill'}
+    common_words_to_exclude = {'i', 'a', 'v', 'x', 'l', 'c', 'd', 'm', 'did', 'mix', 'civil', 'mid', 'dim', 'lid', 'ill', 'di', 'si', 'mi'}
 
     def roman_to_int(s):
         roman_map = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
@@ -550,8 +550,12 @@ class TTSService:
         # Replacing with comma (,) creates a shorter, natural pause instead of the long silence/gasp of ellipsis.
         synthesized_text = text.replace(" . ", ", ")
         
-        # Collapse multiple dots (e.g. from TOCs "Chapter 1 .......... 5") into a single pause
+        # Collapse multiple dots and spaces (e.g. from TOCs "Chapter 1 .......... 5") into a single pause
         synthesized_text = re.sub(r'[\. ]{3,}', ', ', synthesized_text)
+        
+        # Final cleanup: Collapse dense punctuation (e.g., ", , " or ", .")
+        synthesized_text = re.sub(r'([,.;:!])\s*([,.;:!])', r'\1', synthesized_text) # Dedup punct
+        synthesized_text = re.sub(r'\s+([,.;:!])', r'\1', synthesized_text) # Strip space before punct
 
         if not synthesized_text or not synthesized_text.strip():
             print(f"WARNING: No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
