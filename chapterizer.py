@@ -21,6 +21,7 @@ class Chapter(NamedTuple):
     content: str
     word_count: int
     part_info: tuple = (1, 1)
+    page_range: tuple = (None, None)
 
 DEFAULT_CONFIG = {
     "max_chapter_word_count": 8000,
