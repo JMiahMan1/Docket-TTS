@@ -546,7 +546,9 @@ class TTSService:
         return None
 
     def synthesize(self, text: str, output_path: str):
-        synthesized_text = text
+        # Fix unnatural breath artifact caused by " . " (space dot space)
+        # Replacing with ellipsis (...) usually encourages smoother continuation or pause without the gasp.
+        synthesized_text = text.replace(" . ", " ... ")
 
         if not synthesized_text or not synthesized_text.strip():
             print(f"WARNING: No text to synthesize for output file {output_path}. Generating 0.5s of silence.")

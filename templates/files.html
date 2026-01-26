@@ -184,6 +184,8 @@
                                     class="text-decoration-none text-dark stretched-link">{{ file.audio_name }}</a>
                             </h6>
                             <p class="small text-muted mb-3 d-flex align-items-center gap-2">
+                                <span>{{ file.duration }}</span>
+                                <span>•</span>
                                 <span>{{ file.size }}</span>
                                 <span>•</span>
                                 <span data-utc-date="{{ file.date }}">Loading...</span>

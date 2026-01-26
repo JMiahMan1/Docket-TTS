@@ -1253,6 +1253,20 @@ def list_files():
             file_data['audio_name'] = entry.name
             file_data['size'] = human_readable_size(entry.stat().st_size)
             file_data['date'] = datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc).isoformat()
+            
+            # Calculate Duration
+            try:
+                audio = MP3(entry) if entry.suffix == '.mp3' else MP4(entry)
+                duration_seconds = int(audio.info.length)
+                minutes, seconds = divmod(duration_seconds, 60)
+                if minutes > 60:
+                     hours, minutes = divmod(minutes, 60)
+                     file_data['duration'] = f"{hours}:{minutes:02}:{seconds:02}"
+                else:
+                     file_data['duration'] = f"{minutes}:{seconds:02}"
+            except Exception:
+                file_data['duration'] = "Unknown"
+                
         elif entry.suffix == '.txt':
             file_data['txt_name'] = entry.name
             
@@ -1279,6 +1293,16 @@ def api_files():
             file_data['filename'] = entry.name # For compatibility with test script
             file_data['size_formatted'] = human_readable_size(entry.stat().st_size)
             file_data['date'] = datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc).isoformat()
+            
+            # Calculate Duration
+            try:
+                audio = MP3(entry) if entry.suffix == '.mp3' else MP4(entry)
+                duration_seconds = int(audio.info.length)
+                minutes, seconds = divmod(duration_seconds, 60)
+                file_data['duration'] = f"{minutes}:{seconds:02}" 
+            except:
+                file_data['duration'] = "Unknown"
+                
         elif entry.suffix == '.txt':
             file_data['txt_name'] = entry.name
             
