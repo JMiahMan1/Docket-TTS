@@ -29,7 +29,7 @@ services:
       args:
         - GITHUB_REPOSITORY=jmiahman1/docket-tts
         - BASE_IMAGE_TAG=latest
-    command: /opt/venv/bin/python -m celery -A app.celery worker --loglevel=info --concurrency=4
+    command: /opt/venv/bin/python -m celery -A app.celery worker --loglevel=info --concurrency=3
     volumes:
       - generated_data:/app/generated:z
       - uploads_data:/app/uploads:z
