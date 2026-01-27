@@ -1658,7 +1658,105 @@ def jobs_page():
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
         if redis_client:
             try:
+                # 1. Get raw queue length
                 unassigned_job_count = redis_client.llen('celery')
+                
+                # 2. Peek at the first 50 items in the queue (Ghost Job Analysis)
+                raw_tasks = redis_client.lrange('celery', 0, 49)
+                for raw_task in raw_tasks:
+                    try:
+                        task_data = json.loads(raw_task)
+                        # Celery protocol: body is base64 encoded or plain json depending on serializer
+                        # We assume json serializer for now based on config
+                        headers = task_data.get('headers', {})
+                        body = task_data.get('body')
+                        
+                        # Sometimes body is base64, sometimes list/dict
+                        if isinstance(body, str):
+                            try:
+                                import base64
+                                body = json.loads(base64.b64decode(body).decode('utf-8'))
+                            except: pass
+                        
+                        # Normalize body structure (args/kwargs)
+                        # Standard Celery body: [args, kwargs, callbacks]
+                        t_args = []
+                        t_kwargs = {}
+                        t_name = headears.get('task') or task_data.get('task') # Task name might be in headers
+                        
+                        if isinstance(body, (list, tuple)):
+                            if len(body) > 0: t_args = body[0]
+                            if len(body) > 1: t_kwargs = body[1]
+                        elif isinstance(body, dict):
+                             t_args = body.get('args', [])
+                             t_kwargs = body.get('kwargs', {})
+                             
+                        # Extract visual name
+                        q_name = "Queued Task"
+                        if 'process_chapter_task' in t_name:
+                             if len(t_args) > 3:
+                                  q_name = f"{t_args[1].get('title', 'Book')} - Ch. {t_args[2]['number']}"
+                             elif 'original_filename' in t_kwargs:
+                                  q_name = f"{t_kwargs['original_filename']} - {t_kwargs.get('chapter_title', 'Chapter')}"
+                        elif 'analyze_book_task' in t_name:
+                             if len(t_args) > 0 and isinstance(t_args[0], dict):
+                                  q_name = f"Analyzing: {t_args[0].get('original_filename', 'Book')}"
+                             elif 'item' in t_kwargs:
+                                  q_name = f"Analyzing: {t_kwargs['item'].get('original_filename', 'Book')}"
+                        elif 'convert_to_speech_task' in t_name:
+                             if len(t_args) > 1:
+                                  q_name = f"{t_args[1]}"
+                try:
+                    raw_tasks = redis_client.lrange('celery', 0, 49)
+                    for raw_task in raw_tasks:
+                        try:
+                            task_data = json.loads(raw_task)
+                            headers = task_data.get('headers', {})
+                            body = task_data.get('body')
+                            
+                            # Normalize body (sometimes base64 encoded string)
+                            if isinstance(body, str):
+                                try:
+                                    import base64
+                                    decoded = base64.b64decode(body).decode('utf-8')
+                                    body = json.loads(decoded)
+                                except: pass
+                            
+                            # Standard Celery body: [args, kwargs, callbacks]
+                            t_args = []
+                            t_kwargs = {}
+                            t_name = headers.get('task') or task_data.get('task') or ''
+                            
+                            if isinstance(body, (list, tuple)):
+                                if len(body) > 0: t_args = body[0]
+                                if len(body) > 1: t_kwargs = body[1]
+                            elif isinstance(body, dict):
+                                 t_args = body.get('args', [])
+                                 t_kwargs = body.get('kwargs', {})
+                                 
+                            # Extract visual name
+                            q_name = "Queued Task"
+                            if 'process_chapter_task' in t_name:
+                                 if len(t_args) > 3 and isinstance(t_args[2], dict):
+                                      q_name = f"{t_args[1].get('title', 'Book')} - Ch. {t_args[2].get('number', '?')}"
+                                 elif 'original_filename' in t_kwargs:
+                                      q_name = f"{t_kwargs['original_filename']} - {t_kwargs.get('chapter_title', 'Chapter')}"
+                            elif 'analyze_book_task' in t_name:
+                                 if len(t_args) > 0 and isinstance(t_args[0], dict):
+                                      q_name = f"Analyzing: {t_args[0].get('original_filename', 'Book')}"
+                                 elif 'item' in t_kwargs:
+                                      q_name = f"Analyzing: {t_kwargs['item'].get('original_filename', 'Book')}"
+                            elif 'convert_to_speech_task' in t_name:
+                                 if len(t_args) > 1:
+                                      q_name = f"{t_args[1]}"
+                            
+                            queued_jobs.append({'id': headers.get('id', 'unknown'), 'name': q_name, 'status': 'Pending (Redis)'})
+                            
+                        except Exception:
+                            pass
+                except:
+                    pass
+                        
             except Exception as e:
                 app.logger.error(f"Could not get queue length from Redis: {e}")
     except Exception as e:
