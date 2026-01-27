@@ -865,6 +865,18 @@ def _chapterize_by_toc(text: str, toc: List[List], config: Dict[str, Any]) -> Li
              chapter_content = _remove_toc_pages(chapter_content, toc)
         # -----------------------------------------
 
+        # Determine end page for metadata
+        # If we have a next page, end page is next_page - 1
+        # If last chapter, we don't know exact end page easily without PDF total page count fn, 
+        # but we can leave it as None or just start_page
+        end_page = None
+        if i + 1 < len(valid_toc_entries):
+             end_page = valid_toc_entries[i+1][2]
+             if end_page > page_num:
+                 end_page = end_page - 1 # Inclusive range usually ends before next start
+             else:
+                 end_page = page_num # Fallback if next page is same
+        
         # Add chapter
         chapters.append(Chapter(
             number=len(chapters) + 1,
@@ -872,7 +884,8 @@ def _chapterize_by_toc(text: str, toc: List[List], config: Dict[str, Any]) -> Li
             original_title=title,
             content=chapter_content,
             word_count=word_count,
-            part_info=(1, 1) # Simplification
+            part_info=(1, 1),
+            page_range=(page_num, end_page)
         ))
 
     return chapters
