@@ -1389,27 +1389,7 @@ def list_files():
                     if comment_frames:
                          file_data['comment'] = str(comment_frames[0].text[0])
                 except: pass
-        # Save Metadata Sidecar
-        meta_filepath = output_filepath.with_suffix(output_filepath.suffix + '.meta.json')
-        meta_data = {
-            "generation_time": time_str,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        # Format Page Range string for consistent display
-        page_str = ""
-        if page_range and isinstance(page_range, (list, tuple)) and page_range[0] is not None:
-            start_page, end_page = page_range
-            if start_page == end_page or end_page is None:
-                page_str = f"Page {start_page}"
-            else:
-                page_str = f"Pages {start_page}-{end_page}"
-            meta_data["page_range"] = page_str
-            
-        with open(meta_filepath, 'w') as f:
-            json.dump(meta_data, f)
-            
-        return {'current': 100, 'total': 100, 'status': 'Complete', 'result': output_filename}
+
                 
         elif entry.suffix == '.txt':
             file_data['txt_name'] = entry.name
