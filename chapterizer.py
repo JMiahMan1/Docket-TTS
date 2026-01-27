@@ -793,29 +793,41 @@ def _chapterize_by_toc(text: str, toc: List[List], config: Dict[str, Any]) -> Li
     if len(valid_toc_entries) > 25:
         logger.info(f"High-count TOC detected ({len(valid_toc_entries)} entries). Attempting to filter for major headings.")
         
+        # 1. First, try filtering by hierarchy level (if available)
+        # TOC format: [level, title, page_num]
+        level_one_entries = [e for e in valid_toc_entries if e[0] == 1]
+        
+        # If Level 1 entries provide a reasonable structure (5-25 chapters), use them exclusively.
+        if 5 <= len(level_one_entries) < len(valid_toc_entries):
+             logger.info(f"Hierarchical Filter: Reduced from {len(valid_toc_entries)} to {len(level_one_entries)} Level-1 entries.")
+             # Check if we need to keep front matter that might be at Level 0 or 1
+             valid_toc_entries = level_one_entries
+             
+        # 2. If hierarchy didn't solve it (or wasn't present), try Regex Filter
         # Regex for "Major" headings: "Chapter X", "Part X", "1. Title"
         # Also include standard front-matter strictly
-        major_pattern = re.compile(r'^(Chapter|Part|Book|Section)\s+\w+|^\d+\.\s+|^(Introduction|Preface|Foreword|Prologue|Acknowledgments|Dedication|Copyright)', re.IGNORECASE)
-        
-        major_entries = [e for e in valid_toc_entries if major_pattern.match(e[1].strip())]
-        
-        # SAFETY CHECK: Ensure we don't skip the start of the book.
-        # If the first major entry starts way after the first actual entry, we lose text.
-        # So, if we filtered out the first entry, add it back (it will act as a catch-all for front matter).
-        if major_entries and valid_toc_entries:
-            first_original = valid_toc_entries[0]
-            first_major = major_entries[0]
-            if first_major[2] > first_original[2]:
-                logger.info(f"Adding back first TOC entry '{first_original[1]}' to capture front matter (prevent text loss).")
-                major_entries.insert(0, first_original)
-        
-        # Only apply filter if it creates a reasonable subset (e.g. > 5 chapters)
-        # and actually reduces the count.
-        if 5 <= len(major_entries) < len(valid_toc_entries):
-             logger.info(f"Filtered TOC down to {len(major_entries)} major entries (Part/Chapter/Numbered).")
-             valid_toc_entries = major_entries
         else:
-             logger.info("Filtering did not yield a reasonable subset. Using full TOC.")
+            major_pattern = re.compile(r'^(Chapter|Part|Book|Section)\s+\w+|^\d+\.\s+|^(Introduction|Preface|Foreword|Prologue|Acknowledgments|Dedication|Copyright)', re.IGNORECASE)
+            
+            major_entries = [e for e in valid_toc_entries if major_pattern.match(e[1].strip())]
+            
+            # SAFETY CHECK: Ensure we don't skip the start of the book.
+            # If the first major entry starts way after the first actual entry, we lose text.
+            # So, if we filtered out the first entry, add it back (it will act as a catch-all for front matter).
+            if major_entries and valid_toc_entries:
+                first_original = valid_toc_entries[0]
+                first_major = major_entries[0]
+                if first_major[2] > first_original[2]:
+                    logger.info(f"Adding back first TOC entry '{first_original[1]}' to capture front matter (prevent text loss).")
+                    major_entries.insert(0, first_original)
+            
+            # Only apply filter if it creates a reasonable subset (e.g. > 5 chapters)
+            # and actually reduces the count.
+            if 5 <= len(major_entries) < len(valid_toc_entries):
+                 logger.info(f"Regex Filter: Reduced to {len(major_entries)} major entries (Part/Chapter/Numbered).")
+                 valid_toc_entries = major_entries
+            else:
+                 logger.info("Filtering did not yield a reasonable subset. Using full TOC.")
     # --------------------------------------------
     
     for i, entry in enumerate(valid_toc_entries):
