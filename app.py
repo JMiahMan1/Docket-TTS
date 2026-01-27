@@ -93,7 +93,7 @@ GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'epub'}
 KOKORO_VOICES_REPO = "hexgrad/Kokoro-82M"
-LARGE_FILE_WORD_THRESHOLD = 50000 # Increased to prevent mid-sentence splitting
+LARGE_FILE_WORD_THRESHOLD = 30000 # Compromise: Fits 26k chapters, prevents OOM on 50k
 
 DEFAULT_KOKORO_VOICES = {'af_bella', 'am_adam', 'bf_isabella'}
 
@@ -1706,59 +1706,84 @@ def jobs_page():
                         elif 'convert_to_speech_task' in t_name:
                              if len(t_args) > 1:
                                   q_name = f"{t_args[1]}"
+                # Attempt to get real-time status from AsyncResult
                 try:
-                    raw_tasks = redis_client.lrange('celery', 0, 49)
-                    for raw_task in raw_tasks:
-                        try:
-                            task_data = json.loads(raw_task)
-                            headers = task_data.get('headers', {})
-                            body = task_data.get('body')
-                            
-                            # Normalize body (sometimes base64 encoded string)
-                            if isinstance(body, str):
-                                try:
-                                    import base64
-                                    decoded = base64.b64decode(body).decode('utf-8')
-                                    body = json.loads(decoded)
-                                except: pass
-                            
-                            # Standard Celery body: [args, kwargs, callbacks]
-                            t_args = []
-                            t_kwargs = {}
-                            t_name = headers.get('task') or task_data.get('task') or ''
-                            
-                            if isinstance(body, (list, tuple)):
-                                if len(body) > 0: t_args = body[0]
-                                if len(body) > 1: t_kwargs = body[1]
-                            elif isinstance(body, dict):
-                                 t_args = body.get('args', [])
-                                 t_kwargs = body.get('kwargs', {})
-                                 
-                            # Extract visual name
-                            q_name = "Queued Task"
-                            if 'process_chapter_task' in t_name:
-                                 if len(t_args) > 3 and isinstance(t_args[2], dict):
-                                      q_name = f"{t_args[1].get('title', 'Book')} - Ch. {t_args[2].get('number', '?')}"
-                                 elif 'original_filename' in t_kwargs:
-                                      q_name = f"{t_kwargs['original_filename']} - {t_kwargs.get('chapter_title', 'Chapter')}"
-                            elif 'analyze_book_task' in t_name:
-                                 if len(t_args) > 0 and isinstance(t_args[0], dict):
-                                      q_name = f"Analyzing: {t_args[0].get('original_filename', 'Book')}"
-                                 elif 'item' in t_kwargs:
-                                      q_name = f"Analyzing: {t_kwargs['item'].get('original_filename', 'Book')}"
-                            elif 'convert_to_speech_task' in t_name:
-                                 if len(t_args) > 1:
-                                      q_name = f"{t_args[1]}"
-                            
-                            queued_jobs.append({'id': headers.get('id', 'unknown'), 'name': q_name, 'status': 'Pending (Redis)'})
-                            
-                        except Exception:
-                            pass
+                    res = celery.AsyncResult(task['id'])
+                    if res.state == 'PROGRESS' and res.info and isinstance(res.info, dict):
+                        status_text = res.info.get('status', '')
+                        if status_text:
+                            original_filename = f"{original_filename} ({status_text})"
                 except:
                     pass
+
+                running_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'running'})
+        
+        # Get queued jobs from Reserved list (prefetch)
+        reserved_tasks = inspector.reserved() or {}
+        for worker, tasks in reserved_tasks.items():
+            for task in tasks:
+                original_filename = "N/A"
+                task_name = task.get('name', '')
+                task_args = task.get('args')
+
+                if task_args and isinstance(task_args, (list, tuple)):
+                    if 'process_chapter_task' in task_name and len(task_args) > 3:
+                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                    elif 'analyze_book_task' in task_name and len(task_args) > 0:
+                         original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book')}"
+                    elif len(task_args) > 1:
+                         original_filename = Path(task_args[1]).name
+                
+                queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
+
+        # Get queued jobs from Redis (Pending)
+        if redis_client:
+            try:
+                raw_tasks = redis_client.lrange('celery', 0, 49)
+                for raw_task in raw_tasks:
+                    try:
+                        task_data = json.loads(raw_task)
+                        headers = task_data.get('headers', {})
+                        body = task_data.get('body')
                         
-            except Exception as e:
-                app.logger.error(f"Could not get queue length from Redis: {e}")
+                        # Normalize body
+                        if isinstance(body, str):
+                            try:
+                                import base64
+                                body = json.loads(base64.b64decode(body).decode('utf-8'))
+                            except: pass
+                        
+                        t_args = []
+                        t_kwargs = {}
+                        t_name = headers.get('task') or task_data.get('task') or ''
+                        
+                        if isinstance(body, (list, tuple)):
+                            if len(body) > 0: t_args = body[0]
+                            if len(body) > 1: t_kwargs = body[1]
+                        elif isinstance(body, dict):
+                             t_args = body.get('args', [])
+                             t_kwargs = body.get('kwargs', {})
+                             
+                        q_name = "Queued Task"
+                        if 'process_chapter_task' in t_name:
+                             if len(t_args) > 3:
+                                  q_name = f"{t_args[1].get('title', 'Book')} - Ch. {t_args[2]['number']}"
+                             elif 'original_filename' in t_kwargs:
+                                  q_name = f"{t_kwargs['original_filename']} - {t_kwargs.get('chapter_title', 'Chapter')}"
+                        elif 'analyze_book_task' in t_name:
+                             if len(t_args) > 0:
+                                  q_name = f"Analyzing: {t_args[0].get('original_filename', 'Book')}"
+                        elif 'convert_to_speech_task' in t_name and len(t_args) > 1:
+                             q_name = f"{t_args[1]}"
+                        
+                        queued_jobs.append({'id': headers.get('id', 'unknown'), 'name': q_name, 'status': 'Pending (Redis)'})
+                    except: pass
+            except: pass
+            
+    except Exception as e:
+        app.logger.error(f"Error in api_jobs: {e}")
+        
+    return jsonify({'running': running_jobs, 'queued': queued_jobs})
     except Exception as e:
         app.logger.error(f"Could not inspect Celery/Redis: {e}")
         flash("Could not connect to the Celery worker or Redis.", "error")

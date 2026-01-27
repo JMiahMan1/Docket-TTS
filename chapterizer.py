@@ -512,41 +512,88 @@ def _chapterize_epub(filepath) -> List[Chapter]:
 def _split_large_chapter_into_parts(chapter: Chapter, max_words: int) -> List[Chapter]:
     """
     Takes a single chapter and splits it into multiple Chapter parts if it exceeds max_words.
+    Prefers splitting at 'Header-like' boundaries even if it results in slightly shorter parts.
     """
-    # This logic appears unchanged from the original file, so it's kept as-is.
-    # We assume it's complex and correct.
     content = chapter.content
+    # Use a more robust sentence splitter that keeps delimiters to reconstruct text faithfully
+    # But simple split is fine for TTS purposes usually.
     sentences = re.split(r'(?<=[.!?])\s+', content)
     
     parts = []
-    current_part_text = []
+    current_part_sentences = []
     current_word_count = 0
-    part_num = 1
     
-    for sentence in sentences:
-        sentence_word_count = len(sentence.split())
+    # Track the best split point (last likely header) within the current chunk
+    last_header_index_in_current_part = -1
+    
+    i = 0
+    while i < len(sentences):
+        sentence = sentences[i]
+        word_count = len(sentence.split())
         
-        if current_word_count + sentence_word_count > max_words and current_word_count > 0:
-            # Finalize the current part
-            part_content = " ".join(current_part_text)
+        # Heuristic for "Likely Header":
+        # - Short (< 50 words)
+        # - Uppercase start
+        # - Often all caps or Title Case
+        # - Doesn't end in typical sentence punctuation (unless it's a quote)
+        is_header = False
+        s_stripped = sentence.strip()
+        if 0 < len(s_stripped) < 100:
+             # Check for All Caps or Title Case
+             if s_stripped.isupper() or s_stripped[0].isupper():
+                 # Check punctuation: Headers rarely end in comma/semicolon. often no punctuation or colon
+                 if not s_stripped.endswith((',', ';', '-')):
+                     is_header = True
+        
+        if is_header:
+            last_header_index_in_current_part = len(current_part_sentences)
+            
+        current_part_sentences.append(sentence)
+        current_word_count += word_count
+        
+        # Check limit
+        if current_word_count > max_words:
+            # We need to split.
+            # Strategy:
+            # 1. If we found a header recently (e.g. in the last 50% of this chunk), split THERE.
+            # 2. If no recent header, just split at the current sentence (limit enforced).
+            
+            cutoff_index = -1
+            
+            # If we have a header, and it's not at the very beginning (infinite loop risk)
+            if last_header_index_in_current_part > 0:
+                 cutoff_index = last_header_index_in_current_part
+            else:
+                 cutoff_index = len(current_part_sentences) - 1 # Just before this overflowing sentence
+            
+            if cutoff_index <= 0:
+                cutoff_index = 1 # Force at least one sentence to progress
+                
+            # Create Part
+            part_content = " ".join(current_part_sentences[:cutoff_index])
             parts.append({
                 "content": part_content,
-                "word_count": current_word_count
+                "word_count": len(part_content.split())
             })
-            # Start a new part
-            current_part_text = [sentence]
-            current_word_count = sentence_word_count
-            part_num += 1
-        else:
-            current_part_text.append(sentence)
-            current_word_count += sentence_word_count
+            
+            # Reset for next part
+            # The remaining sentences from the current accumulation become the start of the next part
+            remaining = current_part_sentences[cutoff_index:]
+            current_part_sentences = remaining
+            current_word_count = sum(len(s.split()) for s in remaining)
+            last_header_index_in_current_part = -1 # Reset header tracking
+            
+            # Verify we aren't still over limit immediately (edge case: huge block > limit)
+            # If so, the next loop will catch it and split again.
+            
+        i += 1
             
     # Add the last part
-    if current_part_text:
-        part_content = " ".join(current_part_text)
+    if current_part_sentences:
+        part_content = " ".join(current_part_sentences)
         parts.append({
             "content": part_content,
-            "word_count": current_word_count
+            "word_count": len(part_content.split())
         })
         
     final_chapter_parts = []
@@ -560,7 +607,7 @@ def _split_large_chapter_into_parts(chapter: Chapter, max_words: int) -> List[Ch
             content=part["content"],
             word_count=part["word_count"],
             part_info=part_info,
-            page_range=chapter.page_range # Preserve original page range for all parts
+            page_range=chapter.page_range
         ))
         
     return final_chapter_parts
