@@ -162,16 +162,12 @@ def celery_init_app(app: Flask) -> Celery:
 
 celery = celery_init_app(app)
 
-celery = celery_init_app(app)
-
 # Use modern lowercase keys for Celery config to avoid "ImproperlyConfigured" error
-# when mixing with other lowercase settings like task_acks_late
 broker_url = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
 result_backend = os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
 
-celery = Celery(app.name, broker=broker_url, backend=result_backend)
-
 # ROBUST CONFIGURATION: Prevent Silent Failure / Ghost Jobs
+# Apply config to the existing app-bound Celery instance
 celery.conf.update(
     broker_url=broker_url,
     result_backend=result_backend,
