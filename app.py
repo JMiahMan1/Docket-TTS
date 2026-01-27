@@ -162,6 +162,22 @@ def celery_init_app(app: Flask) -> Celery:
 
 celery = celery_init_app(app)
 
+app.config['CELERY_BROKER_URL'] = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
+app.config['CELERY_RESULT_BACKEND'] = os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
+
+celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
+celery.conf.update(app.config)
+
+# ROBUST CONFIGURATION: Prevent Silent Failure / Ghost Jobs
+celery.conf.task_acks_late = True
+celery.conf.worker_prefetch_multiplier = 1
+celery.conf.task_reject_on_worker_lost = True
+celery.conf.worker_concurrency = 3 # Match our 3 workers / 3 cores target
+
+# Ensure generated directory exists at startup
+Path(GENERATED_FOLDER).mkdir(parents=True, exist_ok=True)
+os.makedirs(VOICES_FOLDER, exist_ok=True)
+
 try:
     redis_client = redis.from_url(celery.conf.broker_url)
 except Exception as e:
