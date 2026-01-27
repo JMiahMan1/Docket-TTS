@@ -93,7 +93,8 @@ GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'epub'}
 KOKORO_VOICES_REPO = "hexgrad/Kokoro-82M"
-LARGE_FILE_WORD_THRESHOLD = 30000 # Compromise: Fits 26k chapters, prevents OOM on 50k
+# Configurable Word Limit (Default: 8000 for 4GB RAM safety)
+LARGE_FILE_WORD_THRESHOLD = int(os.environ.get('MAX_CHAPTER_WORDS', 8000))
 
 DEFAULT_KOKORO_VOICES = {'af_bella', 'am_adam', 'bf_isabella'}
 
@@ -1563,190 +1564,69 @@ def jobs_page():
     try:
         inspector = celery.control.inspect()
         active_tasks = inspector.active() or {}
+        
+        # 1. Running Jobs
         for worker, tasks in active_tasks.items():
             for task in tasks:
                 original_filename = "N/A"
                 task_name = task.get('name', '')
                 task_args = task.get('args')
+                task_kwargs = task.get('kwargs') or {}
 
-                # Check for custom status in task meta/info (if available in future Celery versions)
-                custom_status = None
-                if task.get('info') and isinstance(task['info'], dict):
-                     custom_status = task['info'].get('status')
-                     
-                if custom_status:
-                     original_filename = custom_status
-                else:
-                    # Parse ARGS
-                    if task_args and isinstance(task_args, (list, tuple)):
-                        if 'process_chapter_task' in task_name and len(task_args) > 3:
-                                original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
-                        elif 'analyze_book_task' in task_name and len(task_args) > 0 and isinstance(task_args[0], dict):
-                                original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book Used')}"
-                        elif len(task_args) > 1:
-                             original_filename = Path(task_args[1]).name
-                    
-                    # Parse KWARGS (Fallback if args empty)
-                    task_kwargs = task.get('kwargs')
-                    if original_filename == "N/A" and task_kwargs:
-                         if 'analyze_book_task' in task_name and 'item' in task_kwargs:
-                             fname = task_kwargs['item'].get('original_filename', 'Book')
-                             original_filename = f"Analyzing: {fname}"
-                         elif 'process_chapter_task' in task_name and 'book_metadata' in task_kwargs and 'chapter' in task_kwargs:
-                             b_title = task_kwargs['book_metadata'].get('title', 'Book')
-                             c_num = task_kwargs['chapter'].get('number', '?')
-                         elif 'analyze_book_task' in task_name and 'item' in task_kwargs:
-                             fname = task_kwargs['item'].get('original_filename', 'Book')
-                             original_filename = f"Analyzing: {fname}"
-                         elif 'process_chapter_task' in task_name:
-                             # New signature: original_filename, chapter_title, chapter_text...
-                             if 'original_filename' in task_kwargs and 'chapter_title' in task_kwargs:
-                                 original_filename = f"{task_kwargs['original_filename']} - {task_kwargs['chapter_title']}"
-                             elif 'book_metadata' in task_kwargs: # Fallback for old tasks (if any)
-                                 b_title = task_kwargs['book_metadata'].get('title', 'Book')
-                                 c_details = task_kwargs.get('chapter') or task_kwargs.get('chapter_details') or {}
-                                 c_num = c_details.get('number', '?')
-                                 original_filename = f"{b_title} - Ch. {c_num}"
-
-                # Attempt to get real-time status from AsyncResult
-                try:
-                    res = celery.AsyncResult(task['id'])
-                    if res.state == 'PROGRESS' and res.info and isinstance(res.info, dict):
-                        status_text = res.info.get('status', '')
-                        if status_text:
-                            original_filename = f"{original_filename} ({status_text})"
-                except:
-                    pass
-
-                running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker})
-        reserved_tasks = inspector.reserved() or {}
-        for worker, tasks in reserved_tasks.items():
-            for task in tasks:
-                original_filename = "N/A"
-                task_name = task.get('name', '')
-                task_args = task.get('args')
-                
-                custom_status = None # Initialize variable
-                if custom_status:
-                    original_filename = custom_status
-                else:
-                    # Parse ARGS
-                    if task_args and isinstance(task_args, (list, tuple)):
-                        if 'process_chapter_task' in task_name and len(task_args) > 3:
-                                original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
-                        elif 'analyze_book_task' in task_name and len(task_args) > 0 and isinstance(task_args[0], dict):
-                                original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book Used')}"
-                        elif len(task_args) > 1:
-                                original_filename = Path(task_args[1]).name
-                    
-                    # Parse KWARGS (Fallback if args empty)
-                    task_kwargs = task.get('kwargs')
-                    if original_filename == "N/A" and task_kwargs:
-                         if 'analyze_book_task' in task_name and 'item' in task_kwargs:
-                             fname = task_kwargs['item'].get('original_filename', 'Book')
-                             original_filename = f"Analyzing: {fname}"
-                         elif 'process_chapter_task' in task_name:
-                             # New signature: original_filename, chapter_title, chapter_text...
-                             if 'original_filename' in task_kwargs and 'chapter_title' in task_kwargs:
-                                 original_filename = f"{task_kwargs['original_filename']} - {task_kwargs['chapter_title']}"
-                             elif 'book_metadata' in task_kwargs: # Fallback for old tasks (if any)
-                                 b_title = task_kwargs['book_metadata'].get('title', 'Book')
-                                 c_details = task_kwargs.get('chapter') or task_kwargs.get('chapter_details') or {}
-                                 c_num = c_details.get('number', '?')
-                                 original_filename = f"{b_title} - Ch. {c_num}"
-
-                queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
-        if redis_client:
-            try:
-                # 1. Get raw queue length
-                unassigned_job_count = redis_client.llen('celery')
-                
-                # 2. Peek at the first 50 items in the queue (Ghost Job Analysis)
-                raw_tasks = redis_client.lrange('celery', 0, 49)
-                for raw_task in raw_tasks:
-                    try:
-                        task_data = json.loads(raw_task)
-                        # Celery protocol: body is base64 encoded or plain json depending on serializer
-                        # We assume json serializer for now based on config
-                        headers = task_data.get('headers', {})
-                        body = task_data.get('body')
-                        
-                        # Sometimes body is base64, sometimes list/dict
-                        if isinstance(body, str):
-                            try:
-                                import base64
-                                body = json.loads(base64.b64decode(body).decode('utf-8'))
-                            except: pass
-                        
-                        # Normalize body structure (args/kwargs)
-                        # Standard Celery body: [args, kwargs, callbacks]
-                        t_args = []
-                        t_kwargs = {}
-                        t_name = headears.get('task') or task_data.get('task') # Task name might be in headers
-                        
-                        if isinstance(body, (list, tuple)):
-                            if len(body) > 0: t_args = body[0]
-                            if len(body) > 1: t_kwargs = body[1]
-                        elif isinstance(body, dict):
-                             t_args = body.get('args', [])
-                             t_kwargs = body.get('kwargs', {})
-                             
-                        # Extract visual name
-                        q_name = "Queued Task"
-                        if 'process_chapter_task' in t_name:
-                             if len(t_args) > 3:
-                                  q_name = f"{t_args[1].get('title', 'Book')} - Ch. {t_args[2]['number']}"
-                             elif 'original_filename' in t_kwargs:
-                                  q_name = f"{t_kwargs['original_filename']} - {t_kwargs.get('chapter_title', 'Chapter')}"
-                        elif 'analyze_book_task' in t_name:
-                             if len(t_args) > 0 and isinstance(t_args[0], dict):
-                                  q_name = f"Analyzing: {t_args[0].get('original_filename', 'Book')}"
-                             elif 'item' in t_kwargs:
-                                  q_name = f"Analyzing: {t_kwargs['item'].get('original_filename', 'Book')}"
-                        elif 'convert_to_speech_task' in t_name:
-                             if len(t_args) > 1:
-                                  q_name = f"{t_args[1]}"
-                # Attempt to get real-time status from AsyncResult
-                try:
-                    res = celery.AsyncResult(task['id'])
-                    if res.state == 'PROGRESS' and res.info and isinstance(res.info, dict):
-                        status_text = res.info.get('status', '')
-                        if status_text:
-                            original_filename = f"{original_filename} ({status_text})"
-                except:
-                    pass
-
-                running_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'running'})
-        
-        # Get queued jobs from Reserved list (prefetch)
-        reserved_tasks = inspector.reserved() or {}
-        for worker, tasks in reserved_tasks.items():
-            for task in tasks:
-                original_filename = "N/A"
-                task_name = task.get('name', '')
-                task_args = task.get('args')
-
+                # Name Parsing Logic
                 if task_args and isinstance(task_args, (list, tuple)):
                     if 'process_chapter_task' in task_name and len(task_args) > 3:
                          original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
-                    elif 'analyze_book_task' in task_name and len(task_args) > 0:
+                    elif 'analyze_book_task' in task_name and len(task_args) > 0 and isinstance(task_args[0], dict):
                          original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book')}"
                     elif len(task_args) > 1:
                          original_filename = Path(task_args[1]).name
                 
+                # Fallback to kwargs
+                if original_filename == "N/A":
+                     if 'process_chapter_task' in task_name and 'original_filename' in task_kwargs:
+                          original_filename = f"{task_kwargs['original_filename']} - {task_kwargs.get('chapter_title', 'Chapter')}"
+                     elif 'analyze_book_task' in task_name and 'item' in task_kwargs:
+                          original_filename = f"Analyzing: {task_kwargs['item'].get('original_filename', 'Book')}"
+
+                # Real-time Status Check
+                try:
+                    res = celery.AsyncResult(task['id'])
+                    if res.state == 'PROGRESS' and res.info and isinstance(res.info, dict):
+                        status_text = res.info.get('status', '')
+                        if status_text:
+                            original_filename = f"{original_filename} ({status_text})"
+                except: pass
+
+                running_jobs.append({'id': task['id'], 'name': original_filename, 'worker': worker})
+
+        # 2. Reserved Jobs (Prefetched)
+        reserved_tasks = inspector.reserved() or {}
+        for worker, tasks in reserved_tasks.items():
+            for task in tasks:
+                original_filename = "Queued Task"
+                task_name = task.get('name', '')
+                task_args = task.get('args')
+                # Similar parsing logic...
+                if task_args and isinstance(task_args, (list, tuple)):
+                    if 'process_chapter_task' in task_name and len(task_args) > 3:
+                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                    elif 'analyze_book_task' in task_name and len(task_args) > 0 and isinstance(task_args[0], dict):
+                         original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book')}"
+                
                 queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
 
-        # Get queued jobs from Redis (Pending)
+        # 3. Redis Pending Jobs (Ghost Jobs)
         if redis_client:
             try:
-                raw_tasks = redis_client.lrange('celery', 0, 49)
+                unassigned_job_count = redis_client.llen('celery')
+                raw_tasks = redis_client.lrange('celery', 0, 99)
                 for raw_task in raw_tasks:
                     try:
                         task_data = json.loads(raw_task)
                         headers = task_data.get('headers', {})
                         body = task_data.get('body')
                         
-                        # Normalize body
                         if isinstance(body, str):
                             try:
                                 import base64
@@ -1766,76 +1646,31 @@ def jobs_page():
                              
                         q_name = "Queued Task"
                         if 'process_chapter_task' in t_name:
-                             if len(t_args) > 3:
-                                  q_name = f"{t_args[1].get('title', 'Book')} - Ch. {t_args[2]['number']}"
+                             if len(t_args) > 3 and isinstance(t_args[2], dict):
+                                  q_name = f"{t_args[1].get('title', 'Book')} - Ch. {t_args[2].get('number', '?')}"
                              elif 'original_filename' in t_kwargs:
                                   q_name = f"{t_kwargs['original_filename']} - {t_kwargs.get('chapter_title', 'Chapter')}"
                         elif 'analyze_book_task' in t_name:
-                             if len(t_args) > 0:
+                             if len(t_args) > 0 and isinstance(t_args[0], dict):
                                   q_name = f"Analyzing: {t_args[0].get('original_filename', 'Book')}"
-                        elif 'convert_to_speech_task' in t_name and len(t_args) > 1:
-                             q_name = f"{t_args[1]}"
+                        elif 'convert_to_speech_task' in t_name:
+                             if len(t_args) > 1:
+                                  q_name = f"{t_args[1]}"
                         
                         queued_jobs.append({'id': headers.get('id', 'unknown'), 'name': q_name, 'status': 'Pending (Redis)'})
                     except: pass
-            except: pass
-            
-    except Exception as e:
-        app.logger.error(f"Error in api_jobs: {e}")
-        
-    return jsonify({'running': running_jobs, 'queued': queued_jobs})
+            except Exception as e:
+                app.logger.error(f"Redis fetch error: {e}")
+
     except Exception as e:
         app.logger.error(f"Could not inspect Celery/Redis: {e}")
         flash("Could not connect to the Celery worker or Redis.", "error")
+        
     return render_template('jobs.html', running_jobs=running_jobs, waiting_jobs=queued_jobs, unassigned_job_count=unassigned_job_count)
 
 @app.route('/api/jobs')
 def api_jobs():
-    running_jobs, queued_jobs = [], []
-    try:
-        inspector = celery.control.inspect()
-        active_tasks = inspector.active() or {}
-        for worker, tasks in active_tasks.items():
-            for task in tasks:
-                original_filename = "N/A"
-                task_name = task.get('name', '')
-                task_args = task.get('args')
-                
-                if task_args and isinstance(task_args, (list, tuple)):
-                    if 'process_chapter_task' in task_name:
-                         if len(task_args) > 3:
-                            original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
-                    elif 'analyze_book_task' in task_name:
-                        if len(task_args) > 0 and isinstance(task_args[0], dict):
-                             original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book Used')}"
-                    elif len(task_args) > 1:
-                         original_filename = Path(task_args[1]).name
-
-                running_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'running'})
-        reserved_tasks = inspector.reserved() or {}
-        for worker, tasks in reserved_tasks.items():
-            for task in tasks:
-                original_filename = "N/A"
-                task_name = task.get('name', '')
-                task_args = task.get('args')
-
-                if task_args and isinstance(task_args, (list, tuple)):
-                    if 'process_chapter_task' in task_name:
-                         if len(task_args) > 3:
-                            original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
-                    elif 'analyze_book_task' in task_name:
-                        if len(task_args) > 0 and isinstance(task_args[0], dict):
-                             original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book Used')}"
-                    elif len(task_args) > 1:
-                         original_filename = Path(task_args[1]).name
-
-                queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'pending'})
-    except Exception as e:
-        app.logger.error(f"Could not inspect Celery: {e}")
-        return jsonify({'error': str(e)}), 500
-        
-    return jsonify(running_jobs + queued_jobs)
-
+    return jsonify({'status': 'ok', 'note': 'Use /jobs page for full details'})
 
 
 @app.route('/cancel-job/<task_id>', methods=['POST'])
