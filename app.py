@@ -1087,11 +1087,24 @@ def process_chapter_task(self, original_filename, chapter_title, chapter_text, v
         
         # Save Metadata Sidecar
         meta_filepath = output_filepath.with_suffix(output_filepath.suffix + '.meta.json')
+        meta_data = {
+            "generation_time": time_str,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Format Page Range string for consistent display
+        if page_range and isinstance(page_range, (list, tuple)) and page_range[0] is not None:
+            start_page = page_range[0]
+            end_page = page_range[1] if len(page_range) > 1 else None
+            
+            if start_page == end_page or end_page is None:
+                page_str = f"Page {start_page}"
+            else:
+                page_str = f"Pages {start_page}-{end_page}"
+            meta_data["page_range"] = page_str
+            
         with open(meta_filepath, 'w') as f:
-            json.dump({
-                "generation_time": time_str,
-                "timestamp": datetime.now().isoformat()
-            }, f)
+            json.dump(meta_data, f)
             
         return {'current': 100, 'total': 100, 'status': 'Complete', 'result': output_filename}
         
@@ -1356,22 +1369,47 @@ def list_files():
             except Exception:
                 file_data['duration'] = "Unknown"
                 
-            # Read Generation Time Metadata
+            # Read Generation Time & Page Range from Metadata
             meta_path = entry.with_suffix(entry.suffix + '.meta.json')
             if meta_path.exists():
                 try:
                     with open(meta_path, 'r') as f:
                         meta = json.load(f)
                         file_data['generation_time'] = meta.get('generation_time', '')
+                        # Prefer metadata file over ID3 tag for speed
+                        if 'page_range' in meta:
+                            file_data['comment'] = meta['page_range']
                 except: pass
             
-            # Read Page Range from ID3 Comments
-            try:
-                # COMM::eng frame typically holds the comment
-                comment_frames = [f for f in audio.tags.values() if f.FrameID == 'COMM']
-                if comment_frames:
-                     file_data['comment'] = str(comment_frames[0].text[0])
-            except: pass
+            # Fallback: Read Page Range from ID3 Comments if not in sidecar
+            if 'comment' not in file_data:
+                try:
+                    # COMM::eng frame typically holds the comment
+                    comment_frames = [f for f in audio.tags.values() if f.FrameID == 'COMM']
+                    if comment_frames:
+                         file_data['comment'] = str(comment_frames[0].text[0])
+                except: pass
+        # Save Metadata Sidecar
+        meta_filepath = output_filepath.with_suffix(output_filepath.suffix + '.meta.json')
+        meta_data = {
+            "generation_time": time_str,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Format Page Range string for consistent display
+        page_str = ""
+        if page_range and isinstance(page_range, (list, tuple)) and page_range[0] is not None:
+            start_page, end_page = page_range
+            if start_page == end_page or end_page is None:
+                page_str = f"Page {start_page}"
+            else:
+                page_str = f"Pages {start_page}-{end_page}"
+            meta_data["page_range"] = page_str
+            
+        with open(meta_filepath, 'w') as f:
+            json.dump(meta_data, f)
+            
+        return {'current': 100, 'total': 100, 'status': 'Complete', 'result': output_filename}
                 
         elif entry.suffix == '.txt':
             file_data['txt_name'] = entry.name

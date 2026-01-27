@@ -194,7 +194,9 @@
                                 {% endif %}
                                 {% if file.comment %}
                                 <span>•</span>
-                                <span class="text-nowrap text-info" title="Metadata">{{ file.comment }}</span>
+                                <span
+                                    class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25"
+                                    title="Page Range">{{ file.comment }}</span>
                                 {% endif %}
                                 <span>•</span>
                                 <span data-utc-date="{{ file.date }}" class="text-nowrap">Loading...</span>
