@@ -93,7 +93,7 @@ GENERATED_FOLDER = '/app/generated'
 VOICES_FOLDER = '/app/voices'
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'docx', 'epub'}
 KOKORO_VOICES_REPO = "hexgrad/Kokoro-82M"
-LARGE_FILE_WORD_THRESHOLD = 8000
+LARGE_FILE_WORD_THRESHOLD = 50000 # Increased to prevent mid-sentence splitting
 
 DEFAULT_KOKORO_VOICES = {'af_bella', 'am_adam', 'bf_isabella'}
 
@@ -958,7 +958,7 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
             chapters = chapterizer.chapterize(
                 filepath=input_filepath, 
                 text_content=text_content, 
-                config=None,
+                config={'max_chapter_word_count': LARGE_FILE_WORD_THRESHOLD},
                 profile=chapter_profile,
                 toc_strategy=toc_strategy,
                 debug=debug_mode,
