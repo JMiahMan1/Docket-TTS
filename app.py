@@ -1326,8 +1326,6 @@ def list_files():
         if entry.suffix == ".mp4":
             key = f"{key}_video"
         app.logger.info(f"Processing file: {entry.name} -> Key: {key}")
-        if entry.suffix == '.mp4': key = f"{key}_video"
-        if entry.suffix == '.mp4': key = f"{key}_video"
         file_data = file_map.setdefault(key, {})
         if entry.suffix in ['.mp3', '.m4b', '.mp4']:
             file_data['audio_name'] = entry.name
@@ -1392,8 +1390,6 @@ def api_files():
         if entry.suffix == ".mp4":
             key = f"{key}_video"
         app.logger.info(f"Processing file: {entry.name} -> Key: {key}")
-        if entry.suffix == '.mp4': key = f"{key}_video"
-        if entry.suffix == '.mp4': key = f"{key}_video"
         file_data = file_map.setdefault(key, {})
         if entry.suffix in ['.mp3', '.m4b', '.mp4']:
             file_data['audio_name'] = entry.name
