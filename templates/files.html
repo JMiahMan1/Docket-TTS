@@ -183,7 +183,7 @@
 
                             <h6 class="fw-bold text-truncate mb-1" title="{{ file.audio_name }}">
                                 <a href="{{ url_for('download_file', name=file.audio_name) }}"
-                                    class="text-decoration-none text-dark stretched-link">{{ file.audio_name }}</a>
+                                    class="text-decoration-none text-dark">{{ file.audio_name }}</a>
                             </h6>
                             <p class="small text-muted mb-3 d-flex align-items-center gap-2 flex-wrap">
                                 <span class="text-nowrap">{{ file.duration }}</span>
@@ -204,7 +204,7 @@
                                 <span data-utc-date="{{ file.date }}" class="text-nowrap">Loading...</span>
                             </p>
 
-                            <div class="mb-3 position-relative" style="z-index: 2;">
+                            <div class="mb-3">
                                 {% if file.audio_name.endswith('.mp4') %}
                                 <div class="ratio ratio-16x9 rounded overflow-hidden shadow-sm bg-black">
                                     <video controls preload="metadata" class="w-100 h-100">
