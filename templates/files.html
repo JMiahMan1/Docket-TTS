@@ -204,7 +204,7 @@
                                 <span data-utc-date="{{ file.date }}" class="text-nowrap">Loading...</span>
                             </p>
 
-                            <div class="mb-3">
+                            <div class="mb-3 position-relative" style="z-index: 2;">
                                 {% if file.audio_name.endswith('.mp4') %}
                                 <div class="ratio ratio-16x9 rounded overflow-hidden shadow-sm bg-black">
                                     <video controls preload="metadata" class="w-100 h-100">
