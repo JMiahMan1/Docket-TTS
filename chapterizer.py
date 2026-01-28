@@ -703,6 +703,9 @@ def _find_raw_chapters(raw_text: str, profile_key: str = "auto") -> List[Chapter
     """
     Uses regex to find chapters in a raw text blob based on the selected profile.
     """
+    page_markers = []
+    for m in re.finditer(r'\[\[PAGE_(\d+)\]\]', raw_text):
+        page_markers.append((m.start(), int(m.group(1))))
     
     # --- Auto-Detection Heuristic ---
     if profile_key == "auto":
@@ -800,13 +803,35 @@ def _find_raw_chapters(raw_text: str, profile_key: str = "auto") -> List[Chapter
         
         if not DISALLOWED_TITLES_PATTERN.search(original_title):
             
+            start_page = None
+            end_page = None
+            
+            if page_markers:
+                # Find start_page: The last marker occurring before the chapter starts
+                current_start_marker = next((p for p in reversed(page_markers) if p[0] <= start_index), None)
+                if current_start_marker:
+                    start_page = current_start_marker[1]
+
+                # Find end_page: The last marker occurring before the chapter ends
+                current_end_marker = next((p for p in reversed(page_markers) if p[0] < end_index), None)
+                if current_end_marker:
+                    end_page = current_end_marker[1]
+                
+                # Fallback: If markers exist but lookup failed, ensure we don't crash
+                if start_page is None: start_page = 1
+                if end_page is None or end_page < start_page: end_page = start_page
+            else:
+                # No markers (txt/docx) -> Default to Page 1
+                start_page = 1
+                end_page = 1
+                
             chapters.append(Chapter(
                 number=i + 1,
                 title=title,
                 original_title=original_title,
                 content=content,
                 word_count=word_count,
-                page_range=(None, None)
+                page_range=(start_page, end_page)
             ))
 
     return chapters
