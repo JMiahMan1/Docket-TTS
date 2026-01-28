@@ -799,13 +799,19 @@ def _find_raw_chapters(raw_text: str, profile_key: str = "auto") -> List[Chapter
         word_count = len(content.split())
         
         if not DISALLOWED_TITLES_PATTERN.search(original_title):
+            # Calculate page range
+            # Start page is definitely page_num
+            # End page is next_page (exclusive? or inclusive of content before it?)
+            # Usually chapter ends where next begins.
+            range_end = next_page if i + 1 < len(valid_toc_entries) else max(page_map.keys()) if page_map else None
+            
             chapters.append(Chapter(
                 number=i + 1,
                 title=title,
                 original_title=original_title,
                 content=content,
                 word_count=word_count,
-                page_range=(None, None)
+                page_range=(page_num, range_end)
             ))
 
     return chapters
@@ -900,6 +906,7 @@ def _chapterize_by_toc(text: str, toc: List[List], config: Dict[str, Any]) -> Li
         # Extract content
         # We strip the page markers themselves in cleanup
         chapter_content = text[start_idx:end_idx]
+        chapter_content = re.sub(r'\[\[PAGE_\d+\]\]', '', chapter_content)
         
         # Verify content length
         if word_count < config["min_chapter_word_count"]:

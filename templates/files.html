@@ -204,11 +204,28 @@
                                 <span data-utc-date="{{ file.date }}" class="text-nowrap">Loading...</span>
                             </p>
 
-                            <div class="file-card-actions bg-light rounded-3 p-2 d-flex justify-content-between align-items-center position-relative"
-                                style="z-index: 2;">
+                            <div class="mb-3">
+                                {% if file.audio_name.endswith('.mp4') %}
+                                <div class="ratio ratio-16x9 rounded overflow-hidden shadow-sm bg-black">
+                                    <video controls preload="metadata" class="w-100 h-100">
+                                        <source src="{{ url_for('download_file', name=file.audio_name) }}"
+                                            type="video/mp4">
+                                        Your browser does not support the video tag.
+                                    </video>
+                                </div>
+                                {% else %}
+                                <audio controls class="w-100" preload="metadata">
+                                    <source src="{{ url_for('download_file', name=file.audio_name) }}"
+                                        type="audio/{{ 'mp4' if file.audio_name.endswith('.m4b') else 'mpeg' }}">
+                                    Your browser does not support the audio element.
+                                </audio>
+                                {% endif %}
+                            </div>
+
+                            <div class="d-flex justify-content-between align-items-center">
                                 <div class="btn-group btn-group-sm">
                                     <a href="{{ url_for('download_file', name=file.audio_name) }}"
-                                        class="btn btn-outline-secondary" title="Download Audio"><i
+                                        class="btn btn-outline-secondary" title="Download Media"><i
                                             class="bi bi-download"></i></a>
                                     {% if file.txt_name %}
                                     <a href="{{ url_for('download_file', name=file.txt_name) }}"
