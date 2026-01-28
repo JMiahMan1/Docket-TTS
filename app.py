@@ -1815,6 +1815,15 @@ def cancel_all_jobs():
 def delete_bulk():
     basenames_to_delete = set(request.form.getlist('files_to_delete'))
     
+    # Clean up keys (remove _video suffix functionality)
+    cleaned_basenames = set()
+    for name in basenames_to_delete:
+        if name.endswith('_video'):
+            cleaned_basenames.add(name.replace('_video', ''))
+        else:
+            cleaned_basenames.add(name)
+    basenames_to_delete = cleaned_basenames
+    
     deleted_count = 0
     if not basenames_to_delete:
         flash("No files selected for deletion.", "warning")
