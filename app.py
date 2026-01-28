@@ -118,7 +118,6 @@ try:
         file_handler.setLevel(logging.INFO)
         app.logger.addHandler(file_handler)
         app.logger.setLevel(logging.INFO)
-        app.logger.info('Docket TTS startup')
 except PermissionError:
     app.logger.warning("Could not configure file logger due to a permission error. This is expected in some test environments.")
 
@@ -201,7 +200,6 @@ def get_kokoro_voices():
     if CACHED_KOKORO_VOICES is not None:
         return CACHED_KOKORO_VOICES
     
-    app.logger.info("Fetching Kokoro voice list from Hugging Face Hub...")
     voices = [
         {"id": "af_bella", "name": "American Female (Bella) [Default]"},
         {"id": "am_adam", "name": "American Male (Adam) [Default]"},
@@ -232,7 +230,6 @@ def get_kokoro_voices():
                     voices.append({"id": voice_id, "name": readable_name})
         
         CACHED_KOKORO_VOICES = sorted(voices, key=lambda v: v['name'])
-        app.logger.info(f"Successfully fetched and cached {len(CACHED_KOKORO_VOICES)} Kokoro voices.")
         return CACHED_KOKORO_VOICES
     except Exception as e:
         app.logger.error(f"Could not fetch voices from Hugging Face Hub: {e}")
@@ -244,7 +241,6 @@ def ensure_voice_available(voice_name):
     Always returns the voice_name string.
     """
     if voice_name in DEFAULT_KOKORO_VOICES:
-        app.logger.info(f"Using default built-in voice: {voice_name}")
         return voice_name
 
     voice_filename = f"{voice_name}.pt"
@@ -252,7 +248,6 @@ def ensure_voice_available(voice_name):
     local_voice_path = Path(VOICES_FOLDER) / voice_filename
 
     if local_voice_path.exists():
-        app.logger.info(f"Voice '{voice_name}' found locally.")
         return voice_name
 
     if not redis_client:
@@ -268,16 +263,13 @@ def ensure_voice_available(voice_name):
                 lock_acquired = redis_client.set(lock_key, "1", nx=True, ex=60)
             
             if lock_acquired:
-                app.logger.info(f"Acquired lock for downloading voice '{voice_name}'.")
                 break
             else:
-                app.logger.info(f"Waiting for lock on voice '{voice_name}'...")
                 time.sleep(2)
         else:
             raise RuntimeError(f"Could not acquire lock for voice '{voice_name}' after 2 minutes.")
 
         if local_voice_path.exists():
-            app.logger.info(f"Voice '{voice_name}' was downloaded by another worker.")
             return voice_name
 
         app.logger.warning(f"Voice '{voice_name}' not found locally. Starting download from {KOKORO_VOICES_REPO}...")
@@ -299,7 +291,6 @@ def ensure_voice_available(voice_name):
             if empty_dir.is_dir() and not any(empty_dir.iterdir()):
                 empty_dir.rmdir()
 
-        app.logger.info(f"Successfully downloaded {voice_filename}.")
         return voice_name
 
     except Exception as e:
@@ -308,7 +299,6 @@ def ensure_voice_available(voice_name):
     finally:
         if lock_acquired and redis_client:
             redis_client.delete(lock_key)
-            app.logger.info(f"Released lock for voice '{voice_name}'.")
 
 def human_readable_size(size, decimal_places=2):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -350,7 +340,6 @@ def tag_mp3_file(filepath, metadata, cover_image_path=None, voice_name=None):
             audio.tags.add(APIC(encoding=3, mime=mime, type=3, desc='Cover', data=image_data))
         
         audio.save()
-        app.logger.info(f"Successfully tagged {filepath}")
     except Exception as e:
         app.logger.error(f"Failed to tag {filepath}: {e}")
 
@@ -420,7 +409,6 @@ def llm_ocr_postprocess(raw_text: str) -> str:
             }
         }
         
-        app.logger.info(f"Sending {len(raw_text)} chars to LLM for OCR cleanup...")
         response = requests.post(LLM_API_ENDPOINT, json=payload, timeout=300) # 5 min timeout
         response.raise_for_status()
         
@@ -430,7 +418,6 @@ def llm_ocr_postprocess(raw_text: str) -> str:
         if cleaned_text == raw_text:
             app.logger.warning("LLM cleanup returned the original text. Check LLM logs.")
         else:
-            app.logger.info(f"LLM cleanup successful. Corrected {len(cleaned_text)} chars.")
             
         return cleaned_text.strip()
 
@@ -460,7 +447,6 @@ def extract_text_and_metadata(filepath):
                 try:
                     toc = doc.get_toc()
                     if toc:
-                        app.logger.info(f"Found TOC in {filepath} with {len(toc)} entries.")
                         metadata['pdf_toc'] = toc
                 except Exception as e:
                     app.logger.warning(f"Failed to extract TOC from {filepath}: {e}")
@@ -479,13 +465,11 @@ def extract_text_and_metadata(filepath):
                     
                     if not is_image_based and (page.get_images(full=True) or page.get_drawings()):
                         if len(page_text.strip()) < 150: 
-                            app.logger.info(f"Page {page_num} has images/drawings and low text. Checking PDF type.")
                             is_image_based = True
                     
                     text_parts.append(page_text)
 
                 if not is_image_based and doc.page_count > 3 and total_text_len < (doc.page_count * 100):
-                    app.logger.info(f"PDF {filepath} seems to be image-based (low text density).")
                     is_image_based = True
                 
                     app.logger.warning(f"PDF {filepath} appears to be image-based.")
@@ -493,7 +477,6 @@ def extract_text_and_metadata(filepath):
                     if OCR_ENABLED:
                         # Parallel OCR Implementation
                         max_workers = 4 # Cap at 4 workers to limit RAM usage (Images are large)
-                        app.logger.info(f"Attempting Parallel OCR on {filepath} with {max_workers} workers...")
                         
                         ocr_text_parts = []
                         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -503,7 +486,6 @@ def extract_text_and_metadata(filepath):
                             ocr_text_parts = list(results)
                         
                         raw_ocr_text = "\n".join(ocr_text_parts)
-                        app.logger.info(f"Successfully OCR'd {len(ocr_text_parts)} pages. Raw char count: {len(raw_ocr_text)}")
                         
                         # --- NEW STEP: LLM POST-PROCESSING ---
                         text = llm_ocr_postprocess(raw_ocr_text)
@@ -513,7 +495,6 @@ def extract_text_and_metadata(filepath):
                         app.logger.error("OCR is required, but OCR_ENABLED is False. Install Tesseract and pytesseract.")
                         text = "\n".join(text_parts) # Fallback to (likely empty) text
                 else:
-                    app.logger.info(f"PDF {filepath} appears to be text-based. Proceeding with standard extraction.")
                     text = "\n".join(text_parts)
 
         elif extension == '.epub':
@@ -584,7 +565,6 @@ def fetch_enhanced_metadata(title, author):
             metadata['publisher'] = book_info.get('publisher')
             metadata['published_date'] = book_info.get('publishedDate')
             metadata['cover_url'] = book_info.get('imageLinks', {}).get('thumbnail', '')
-            app.logger.info(f"Google Books API found enhanced metadata for '{title}'")
     except requests.RequestException as e:
         app.logger.error(f"Google Books API request failed: {e}")
     
@@ -801,7 +781,6 @@ def regenerate_audio_task(self, edited_text, base_name, voice_name, speed_rate, 
             voice_name=voice_name # Use the *new* voice for the tag
         )
         
-        app.logger.info(f"Task {self.request.id} (regenerate) completed. Output: {audio_filepath.name}")
         return {'status': 'Success', 'filename': audio_filepath.name, 'textfile': text_filepath.name}
         
     except Exception as e:
@@ -883,7 +862,6 @@ def update_metadata_task(self, base_name, new_chapter_title, new_book_title, new
             os.rename(old_mp3_path, new_mp3_path)
             if old_txt_path.exists():
                 os.rename(old_txt_path, new_txt_path)
-            app.logger.info(f"Renamed {old_mp3_path.name} to {new_mp3_path.name}")
         
         return {'status': 'Success', 'filename': new_mp3_path.name, 'textfile': new_txt_path.name}
 
@@ -933,13 +911,11 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
     text_content = item['text_content']
     metadata = item['metadata']
     
-    app.logger.info(f"Starting analysis for {original_filename} (Profile: {chapter_profile})")
     self.update_state(state='PROGRESS', meta={'status': f"Analyzing {original_filename}..."})
     
     try:
         # 1. Perform Text Extraction/OCR if not provided
         if not text_content:
-            app.logger.info(f"No text content provided for {original_filename}. Performing extraction (OCR takes time)...")
             self.update_state(state='PROGRESS', meta={'status': f"OCR: {original_filename} (Please Wait...)"})
             text_content, extracted_metadata = extract_text_and_metadata(input_filepath)
             
@@ -949,7 +925,6 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
             if (not metadata.get('author') or metadata.get('author') == 'Unknown') and extracted_metadata.get('author'):
                 metadata['author'] = extracted_metadata['author']
                 
-            app.logger.info(f"Extraction complete for {original_filename}. Text length: {len(text_content)}")
 
         # Re-fetch metadata if needed or just use what we have
         enhanced_metadata = fetch_enhanced_metadata(metadata.get('title'), metadata.get('author'))
@@ -969,7 +944,6 @@ def analyze_book_task(self, item, chapter_profile, toc_strategy, book_mode, voic
             )
             
             if chapters:
-                app.logger.info(f"Chapterizer found {len(chapters)} chapters for '{original_filename}'. Queuing tasks.")
                 for chapter in chapters:
                     chapter_details = {
                         'number': chapter.number,
@@ -1040,7 +1014,6 @@ def process_chapter_task(self, original_filename, chapter_title, chapter_text, v
         # if current_queue_len == 0:
         #    smart_thread_count = 2
         
-        # app.logger.info(f"Initializing TTS for {output_filename} with {smart_thread_count} threads (Queue: {current_queue_len})")
 
         tts = TTSService(
             voice_name=voice_name, 
@@ -1132,7 +1105,6 @@ def _create_audiobook_logic(file_list, audiobook_title_from_form, audiobook_auth
     final_audiobook_title = str(audio_tags.get('TALB', [audiobook_title_from_form])[0])
     final_audiobook_author = str(audio_tags.get('TPE1', [audiobook_author_from_form])[0])
 
-    app.logger.info(f"Using metadata for Audiobook: Title='{final_audiobook_title}', Author='{final_audiobook_author}'")
 
     update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Gathering chapters and text...'})
     safe_mp3_paths = [generated_folder / secure_filename(fname) for fname in unique_file_list]
@@ -1311,7 +1283,6 @@ def upload_file():
             if enhanced_metadata: metadata.update(enhanced_metadata)
 
             if book_mode:
-                app.logger.info(f"Queueing async analysis for '{original_filename}' with Book Mode.")
                 task = analyze_book_task.delay(
                     item=item,
                     chapter_profile=chapter_profile,
@@ -1325,7 +1296,6 @@ def upload_file():
                 tasks.append(task.id)
             else:
                 # Standard Mode (No splitting)
-                app.logger.info(f"Processing '{original_filename}' in Single File Mode.")
                 task = convert_to_speech_task.delay(input_filepath, original_filename, enhanced_metadata.get('title'), enhanced_metadata.get('author'), voice_name, speed_rate, secondary_voice_name)
                 tasks.append(task.id)
 
@@ -1353,6 +1323,9 @@ def list_files():
         if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
             continue
         key = entry.stem
+        if entry.suffix == ".mp4":
+            key = f"{key}_video"
+        app.logger.info(f"Processing file: {entry.name} -> Key: {key}")
         if entry.suffix == '.mp4': key = f"{key}_video"
         if entry.suffix == '.mp4': key = f"{key}_video"
         file_data = file_map.setdefault(key, {})
@@ -1416,6 +1389,9 @@ def api_files():
         if not entry.is_file() or entry.name.startswith(('sample_', 'cover_')):
             continue
         key = entry.stem
+        if entry.suffix == ".mp4":
+            key = f"{key}_video"
+        app.logger.info(f"Processing file: {entry.name} -> Key: {key}")
         if entry.suffix == '.mp4': key = f"{key}_video"
         if entry.suffix == '.mp4': key = f"{key}_video"
         file_data = file_map.setdefault(key, {})
@@ -1802,7 +1778,6 @@ def cancel_all_jobs():
                 task_id = task['id']
                 celery.control.revoke(task_id, terminate=True, signal='SIGKILL')
                 cancelled_count += 1
-                app.logger.info(f"Cancelled active task {task_id}")
         
         # Get all reserved/queued tasks
         reserved_tasks = inspector.reserved() or {}
@@ -1811,7 +1786,6 @@ def cancel_all_jobs():
                 task_id = task['id']
                 celery.control.revoke(task_id, terminate=True)
                 cancelled_count += 1
-                app.logger.info(f"Cancelled queued task {task_id}")
         
         # CRITICAL: Purge the entire Celery queue and unacknowledged tasks from Redis
         # This clears unassigned jobs and tasks stuck in "visibility timeout" state
@@ -1827,9 +1801,7 @@ def cancel_all_jobs():
                 
                 if queue_length > 0:
                     cancelled_count += queue_length
-                    app.logger.info(f"Purged {queue_length} unassigned jobs from Redis queue")
                 
-                app.logger.info("Cleared Celery queues and unacknowledged states in Redis")
             except Exception as redis_error:
                 app.logger.error(f"Error purging Redis queue: {redis_error}")
         
@@ -1845,9 +1817,7 @@ def cancel_all_jobs():
 
 @app.route('/delete-bulk', methods=['POST'])
 def delete_bulk():
-    app.logger.info(f"Received delete request. Form data: {request.form}")
     basenames_to_delete = set(request.form.getlist('files_to_delete'))
-    app.logger.info(f"Basenames to delete from form: {basenames_to_delete}")
     
     deleted_count = 0
     if not basenames_to_delete:
@@ -1857,15 +1827,12 @@ def delete_bulk():
         
     for base_name in basenames_to_delete:
         safe_base_name = secure_filename(base_name)
-        app.logger.info(f"Processing base_name: '{base_name}', sanitized to: '{safe_base_name}'")
         
         files_found = list(Path(app.config['GENERATED_FOLDER']).glob(f"{safe_base_name}*.*"))
-        app.logger.info(f"Glob pattern '{safe_base_name}*.*' found {len(files_found)} files: {files_found}")
 
         for f in files_found:
             try:
                 f.unlink()
-                app.logger.info(f"Successfully deleted {f}")
                 deleted_count += 1
             except OSError as e:
                 app.logger.error(f"Error deleting file {f}: {e}")
@@ -2160,7 +2127,6 @@ def generate_video_task(self, mp3_filename, image_filename=None):
     
     # 1. Transcribe with Whisper
     self.update_state(state='PROGRESS', meta={'current': 10, 'total': 100, 'status': 'Transcribing audio (Whisper)...'})
-    app.logger.info(f"Loading Whisper model to transcribe {mp3_filename}...")
     
     try:
         model = whisper.load_model("base") # Use 'base' for speed/quality balance
@@ -2193,7 +2159,6 @@ def generate_video_task(self, mp3_filename, image_filename=None):
         tmp_srt.write(srt_content)
         tmp_srt_path = tmp_srt.name
         
-    app.logger.info(f"Generated SRT file at {tmp_srt_path}")
 
     # 3. Render Video with FFmpeg
     self.update_state(state='PROGRESS', meta={'current': 50, 'total': 100, 'status': 'Rendering video (FFmpeg)...'})
@@ -2249,7 +2214,6 @@ def generate_video_task(self, mp3_filename, image_filename=None):
         
         cmd.append(str(output_filepath))
         
-        app.logger.info(f"Running FFmpeg: {' '.join(cmd)}")
         
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         stdout, stderr = process.communicate()
