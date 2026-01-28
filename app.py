@@ -1815,14 +1815,30 @@ def cancel_all_jobs():
 def delete_bulk():
     basenames_to_delete = set(request.form.getlist('files_to_delete'))
     
-    # Clean up keys (remove _video suffix functionality)
-    cleaned_basenames = set()
-    for name in basenames_to_delete:
-        if name.endswith('_video'):
-            cleaned_basenames.add(name.replace('_video', ''))
+    # Logic split:
+    # 1. If key ends in _video -> Delete specific .mp4 ONLY
+    # 2. If key is standard -> Delete all associated files (*.*)
+    
+    deleted_count = 0
+    if not basenames_to_delete:
+        flash("No files selected for deletion.", "warning")
+        app.logger.warning("files_to_delete was empty, no files will be deleted.")
+        return redirect(url_for('list_files'))
+                app.logger.error(f"Error deleting video file {target_mp4}: {e}")
+        
         else:
-            cleaned_basenames.add(name)
-    basenames_to_delete = cleaned_basenames
+            # Audio Deletion: Delete all associated files (mp3, txt, json, etc.)
+            safe_base_name = secure_filename(base_name)
+            files_found = list(Path(app.config['GENERATED_FOLDER']).glob(f"{safe_base_name}*.*"))
+            for f in files_found:
+                try:
+                    f.unlink()
+                    deleted_count += 1
+                except OSError as e:
+                    app.logger.error(f"Error deleting file {f}: {e}")
+                    
+    flash(f"Successfully deleted {deleted_count} file(s).", "success")
+    return redirect(url_for('list_files'))
     
     deleted_count = 0
     if not basenames_to_delete:
@@ -1834,19 +1850,6 @@ def delete_bulk():
         safe_base_name = secure_filename(base_name)
         
         files_found = list(Path(app.config['GENERATED_FOLDER']).glob(f"{safe_base_name}*.*"))
-
-        for f in files_found:
-            try:
-                f.unlink()
-                deleted_count += 1
-            except OSError as e:
-                app.logger.error(f"Error deleting file {f}: {e}")
-                
-    flash(f"Successfully deleted {deleted_count} file(s).", "success")
-    return redirect(url_for('list_files'))
-
-@app.route('/speak_sample/<voice_name>')
-def speak_sample(voice_name):
     sample_text = "The Lord is my shepherd; I shall not want. He makes me to lie down in green pastures; He leads me beside the still waters. He restores my soul; He leads me in the paths of righteousness For His name’s sake."
     speed_rate = request.args.get('speed', '1.0')
 
