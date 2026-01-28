@@ -418,7 +418,7 @@ def llm_ocr_postprocess(raw_text: str) -> str:
         if cleaned_text == raw_text:
             app.logger.warning("LLM cleanup returned the original text. Check LLM logs.")
         else:
-            
+            app.logger.info("LLM cleanup modified the text.")
         return cleaned_text.strip()
 
     except requests.RequestException as e:
