@@ -14,6 +14,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Stage 3: Create the final application image
 FROM base
+
+# Install FFmpeg with H.264 support from RPM Fusion
+RUN dnf install -y https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
+    https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm && \
+    dnf install -y ffmpeg --allowerasing && \
+    dnf clean all
 WORKDIR /app
 # Copy the updated venv (with gunicorn and filetype) from the 'builder' stage
 COPY --from=builder /opt/venv /opt/venv

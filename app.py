@@ -2231,9 +2231,17 @@ def generate_video_task(self, mp3_filename, image_filename=None):
         cmd.extend(['-vf', vf_chain])
         
         # Encoding options
-        # Use mpeg4 for broader compatibility if libx264 is missing
-        # -q:v 5 gives high quality (1 is best, 31 is worst)
-        cmd.extend(['-c:v', 'mpeg4', '-q:v', '5', '-c:a', 'aac', '-b:a', '192k', '-pix_fmt', 'yuv420p', '-shortest'])
+        # Use libx264 for Chromecast/Roku compatibility (profile high, level 4.0, yuv420p)
+        cmd.extend([
+            '-c:v', 'libx264', 
+            '-profile:v', 'high', 
+            '-level:v', '4.0', 
+            '-pix_fmt', 'yuv420p', 
+            '-tune', 'stillimage',
+            '-c:a', 'aac', 
+            '-b:a', '192k', 
+            '-shortest'
+        ])
         
         cmd.append(str(output_filepath))
         
