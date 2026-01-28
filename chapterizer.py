@@ -811,7 +811,7 @@ def _find_raw_chapters(raw_text: str, profile_key: str = "auto") -> List[Chapter
                 original_title=original_title,
                 content=content,
                 word_count=word_count,
-                page_range=(page_num, range_end)
+                page_range=(None, None)
             ))
 
     return chapters
