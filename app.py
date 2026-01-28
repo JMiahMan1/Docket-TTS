@@ -1056,6 +1056,11 @@ def process_chapter_task(self, original_filename, chapter_title, chapter_text, v
             
         audio.save()
         
+        # Save Normalized Text file (Required for Edit/Regenerate feature)
+        text_filepath = output_filepath.with_suffix('.txt')
+        with open(text_filepath, 'w', encoding='utf-8') as f:
+            f.write(normalized_text)
+            
         # Calculate Time
         elapsed_time = time.time() - start_time
         minutes, seconds = divmod(int(elapsed_time), 60)
