@@ -1824,6 +1824,17 @@ def delete_bulk():
         flash("No files selected for deletion.", "warning")
         app.logger.warning("files_to_delete was empty, no files will be deleted.")
         return redirect(url_for('list_files'))
+        
+    for base_name in basenames_to_delete:
+        if base_name.endswith('_video'):
+            # Video Deletion: Only delete the specific MP4 file
+            safe_base_name = secure_filename(base_name.replace('_video', ''))
+            target_mp4 = Path(app.config['GENERATED_FOLDER']) / f"{safe_base_name}.mp4"
+            try:
+                if target_mp4.exists():
+                    target_mp4.unlink()
+                    deleted_count += 1
+            except OSError as e:
                 app.logger.error(f"Error deleting video file {target_mp4}: {e}")
         
         else:
