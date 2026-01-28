@@ -1354,7 +1354,7 @@ def list_files():
             continue
         key = entry.stem
         file_data = file_map.setdefault(key, {})
-        if entry.suffix in ['.mp3', '.m4b']:
+        if entry.suffix in ['.mp3', '.m4b', '.mp4']:
             file_data['audio_name'] = entry.name
             file_data['size'] = human_readable_size(entry.stat().st_size)
             file_data['date'] = datetime.fromtimestamp(entry.stat().st_mtime, tz=timezone.utc).isoformat()
@@ -1415,7 +1415,7 @@ def api_files():
             continue
         key = entry.stem
         file_data = file_map.setdefault(key, {})
-        if entry.suffix in ['.mp3', '.m4b']:
+        if entry.suffix in ['.mp3', '.m4b', '.mp4']:
             file_data['audio_name'] = entry.name
             file_data['filename'] = entry.name # For compatibility with test script
             file_data['size_formatted'] = human_readable_size(entry.stat().st_size)
