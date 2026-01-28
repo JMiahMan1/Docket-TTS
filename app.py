@@ -35,6 +35,8 @@ import torch
 from dotenv import load_dotenv
 import io
 import zipfile
+import whisper
+import tempfile
 
 load_dotenv()
 
@@ -1670,7 +1672,108 @@ def jobs_page():
 
 @app.route('/api/jobs')
 def api_jobs():
-    return jsonify({'status': 'ok', 'note': 'Use /jobs page for full details'})
+    running_jobs, queued_jobs = [], []
+    try:
+        inspector = celery.control.inspect()
+        active_tasks = inspector.active() or {}
+        for worker, tasks in active_tasks.items():
+            for task in tasks:
+                original_filename = "N/A"
+                task_name = task.get('name', '')
+                task_args = task.get('args')
+                task_kwargs = task.get('kwargs') or {}
+                
+                # Name Parsing Logic
+                if task_args and isinstance(task_args, (list, tuple)):
+                    if 'process_chapter_task' in task_name and len(task_args) > 3:
+                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                    elif 'analyze_book_task' in task_name and len(task_args) > 0 and isinstance(task_args[0], dict):
+                         original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book')}"
+                    elif len(task_args) > 1:
+                         original_filename = Path(task_args[1]).name
+                
+                # Fallback to kwargs
+                if original_filename == "N/A":
+                     if 'process_chapter_task' in task_name and 'original_filename' in task_kwargs:
+                          original_filename = f"{task_kwargs['original_filename']} - {task_kwargs.get('chapter_title', 'Chapter')}"
+                     elif 'analyze_book_task' in task_name and 'item' in task_kwargs:
+                          original_filename = f"Analyzing: {task_kwargs['item'].get('original_filename', 'Book')}"
+
+                # Real-time Status Check
+                try:
+                    res = celery.AsyncResult(task['id'])
+                    if res.state == 'PROGRESS' and res.info and isinstance(res.info, dict):
+                        status_text = res.info.get('status', '')
+                        if status_text:
+                            original_filename = f"{original_filename} ({status_text})"
+                except: pass
+
+                running_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'running'})
+        
+        reserved_tasks = inspector.reserved() or {}
+        for worker, tasks in reserved_tasks.items():
+            for task in tasks:
+                original_filename = "Queued Task"
+                task_name = task.get('name', '')
+                task_args = task.get('args')
+                # Similar parsing logic...
+                if task_args and isinstance(task_args, (list, tuple)):
+                    if 'process_chapter_task' in task_name and len(task_args) > 3:
+                         original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
+                    elif 'analyze_book_task' in task_name and len(task_args) > 0 and isinstance(task_args[0], dict):
+                         original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book')}"
+                
+                queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
+
+        if redis_client:
+            try:
+                raw_tasks = redis_client.lrange('celery', 0, 99)
+                for raw_task in raw_tasks:
+                    try:
+                        task_data = json.loads(raw_task)
+                        headers = task_data.get('headers', {})
+                        body = task_data.get('body')
+                        
+                        if isinstance(body, str):
+                            try:
+                                import base64
+                                body = json.loads(base64.b64decode(body).decode('utf-8'))
+                            except: pass
+                        
+                        t_args = []
+                        t_kwargs = {}
+                        t_name = headers.get('task') or task_data.get('task') or ''
+                        
+                        if isinstance(body, (list, tuple)):
+                            if len(body) > 0: t_args = body[0]
+                            if len(body) > 1: t_kwargs = body[1]
+                        elif isinstance(body, dict):
+                             t_args = body.get('args', [])
+                             t_kwargs = body.get('kwargs', {})
+                             
+                        q_name = "Queued Task"
+                        if 'process_chapter_task' in t_name:
+                             if len(t_args) > 3 and isinstance(t_args[2], dict):
+                                  q_name = f"{t_args[1].get('title', 'Book')} - Ch. {t_args[2].get('number', '?')}"
+                             elif 'original_filename' in t_kwargs:
+                                  q_name = f"{t_kwargs['original_filename']} - {t_kwargs.get('chapter_title', 'Chapter')}"
+                        elif 'analyze_book_task' in t_name:
+                             if len(t_args) > 0 and isinstance(t_args[0], dict):
+                                  q_name = f"Analyzing: {t_args[0].get('original_filename', 'Book')}"
+                        elif 'convert_to_speech_task' in t_name:
+                             if len(t_args) > 1:
+                                  q_name = f"{t_args[1]}"
+                        
+                        queued_jobs.append({'id': headers.get('id', 'unknown'), 'name': q_name, 'status': 'Pending (Redis)'})
+                    except: pass
+            except Exception as e:
+                app.logger.error(f"Redis fetch error: {e}")
+
+    except Exception as e:
+        app.logger.error(f"Could not inspect Celery: {e}")
+        return jsonify({'error': str(e)}), 500
+        
+    return jsonify(running_jobs + queued_jobs)
 
 
 @app.route('/cancel-job/<task_id>', methods=['POST'])
@@ -2033,4 +2136,140 @@ def api_synthesize():
         'message': 'Synthesis job queued.',
         'task_id': task.id,
         'status_url': url_for('task_status', task_id=task.id, _external=True)
+    }), 202
+
+@celery.task(bind=True)
+def generate_video_task(self, mp3_filename, image_filename=None):
+    """
+    Celery task to generate an MP4 from an MP3 and optional image.
+    Uses OpenAI Whisper for timestamped subtitles and FFmpeg for rendering.
+    """
+    self.update_state(state='PROGRESS', meta={'current': 5, 'total': 100, 'status': 'Initializing...'})
+    
+    generated_folder = Path(app.config['GENERATED_FOLDER'])
+    mp3_path = generated_folder / mp3_filename
+    if not mp3_path.exists():
+         raise ValueError(f"MP3 file not found: {mp3_path}")
+         
+    output_filename = mp3_path.stem + '.mp4'
+    output_filepath = generated_folder / output_filename
+    
+    # 1. Transcribe with Whisper
+    self.update_state(state='PROGRESS', meta={'current': 10, 'total': 100, 'status': 'Transcribing audio (Whisper)...'})
+    app.logger.info(f"Loading Whisper model to transcribe {mp3_filename}...")
+    
+    try:
+        model = whisper.load_model("base") # Use 'base' for speed/quality balance
+        result = model.transcribe(str(mp3_path))
+        segments = result['segments']
+    except Exception as e:
+        app.logger.error(f"Whisper transcription failed: {e}")
+        raise RuntimeError(f"Transcription failed: {e}")
+
+    # 2. Generate SRT Content
+    self.update_state(state='PROGRESS', meta={'current': 40, 'total': 100, 'status': 'Generating subtitles...'})
+    
+    def format_timestamp(seconds):
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        millis = int((seconds - int(seconds)) * 1000)
+        return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
+
+    srt_content = ""
+    for i, segment in enumerate(segments):
+        start = format_timestamp(segment['start'])
+        end = format_timestamp(segment['end'])
+        text = segment['text'].strip()
+        srt_content += f"{i+1}\n{start} --> {end}\n{text}\n\n"
+        
+    # Write SRT to temp file
+    # We use a named temp file so ffmpeg can read it
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.srt', delete=False, encoding='utf-8') as tmp_srt:
+        tmp_srt.write(srt_content)
+        tmp_srt_path = tmp_srt.name
+        
+    app.logger.info(f"Generated SRT file at {tmp_srt_path}")
+
+    # 3. Render Video with FFmpeg
+    self.update_state(state='PROGRESS', meta={'current': 50, 'total': 100, 'status': 'Rendering video (FFmpeg)...'})
+    
+    try:
+        # Construct FFmpeg command
+        cmd = ['ffmpeg', '-y']
+        
+        # Inputs
+        if image_filename:
+            image_path = generated_folder / image_filename
+            if not image_path.exists():
+                 # Fallback to black if image missing
+                 cmd.extend(['-f', 'lavfi', '-i', 'color=c=black:s=1280x720:r=30'])
+            else:
+                 cmd.extend(['-loop', '1', '-i', str(image_path)])
+        else:
+            cmd.extend(['-f', 'lavfi', '-i', 'color=c=black:s=1280x720:r=30'])
+            
+        cmd.extend(['-i', str(mp3_path)])
+        
+        # Subtitle filter (must escape path for filter_complex)
+        # Note: escaping for FFmpeg filters can be tricky.
+        # We'll use the 'subtitles' filter.
+        # Ensure path is absolute and safe.
+        safe_srt_path = str(Path(tmp_srt_path).absolute()).replace('\\', '/').replace(':', '\\:')
+        
+        # Filters: Scaling (if image), burning subtitles
+        # We ensure the video stream is scaled to 720p to normalize
+        vf_chain = f"scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,subtitles='{safe_srt_path}':force_style='Fontname=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=1'"
+        
+        # If no image (lavfi), we don't strictly need scaling/padding as we generated 720p,
+        # but keeping it consistent for the subtitle filter chain is safer.
+        # Simple subtitle burn for now.
+        
+        if not image_filename:
+             vf_chain = f"subtitles='{safe_srt_path}':force_style='Fontname=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=1'"
+
+        cmd.extend(['-vf', vf_chain])
+        
+        # Encoding options
+        cmd.extend(['-c:v', 'libx264', '-tune', 'stillimage', '-c:a', 'aac', '-b:a', '192k', '-pix_fmt', 'yuv420p', '-shortest'])
+        
+        cmd.append(str(output_filepath))
+        
+        app.logger.info(f"Running FFmpeg: {' '.join(cmd)}")
+        
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        stdout, stderr = process.communicate()
+        
+        if process.returncode != 0:
+            app.logger.error(f"FFmpeg failed: {stderr}")
+            raise RuntimeError(f"FFmpeg failed: {stderr}")
+            
+    finally:
+        # Cleanup temp SRT
+        if os.path.exists(tmp_srt_path):
+            os.unlink(tmp_srt_path)
+
+    self.update_state(state='PROGRESS', meta={'current': 100, 'total': 100, 'status': 'Complete!'})
+    return {'filename': output_filename}
+
+@app.route('/api/generate-video', methods=['POST'])
+def api_generate_video():
+    mp3_filename = request.form.get('filename')
+    image_file = request.files.get('background_image')
+    
+    if not mp3_filename:
+        return jsonify({'error': 'No filename provided'}), 400
+        
+    image_filename = None
+    if image_file and image_file.filename:
+        ext = Path(image_file.filename).suffix
+        image_filename = f"bg_{uuid.uuid4().hex}{ext}"
+        image_path = Path(app.config['GENERATED_FOLDER']) / image_filename
+        image_file.save(image_path)
+        
+    task = generate_video_task.delay(mp3_filename, image_filename)
+    
+    return jsonify({
+        'message': 'Video generation queued.',
+        'task_id': task.id
     }), 202

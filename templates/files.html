@@ -222,6 +222,9 @@
                                             class="bi bi-pencil"></i></a>
                                     <a href="{{ url_for('edit_metadata', base_name=file.base_name) }}"
                                         class="btn btn-outline-info" title="Edit Metadata"><i class="bi bi-tag"></i></a>
+                                    <button type="button" class="btn btn-outline-dark create-video-btn"
+                                        data-filename="{{ file.audio_name }}" title="Create Video"><i
+                                            class="bi bi-camera-video"></i></button>
                                 </div>
                                 {% endif %}
                             </div>
@@ -259,6 +262,38 @@
             {% endif %}
         </form>
 
+    </div>
+
+    <!-- Create Video Modal -->
+    <div class="modal fade" id="videoModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+                <div class="modal-header bg-light border-0">
+                    <h5 class="modal-title fw-bold" id="videoModalLabel">Create Video</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <p class="text-muted small mb-4">Generate an MP4 video with synced lyrics/subtitles. You can
+                        optionally upload a background image.</p>
+                    <form id="videoForm">
+                        <input type="hidden" id="videoMp3Filename" name="filename">
+
+                        <div class="mb-3">
+                            <label for="videoBgImage" class="form-label fw-bold">Background Image (Optional)</label>
+                            <input class="form-control" type="file" id="videoBgImage" name="background_image"
+                                accept="image/*">
+                            <div class="form-text">If left empty, a black background will be used.</div>
+                        </div>
+
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary rounded-pill fw-bold">
+                                <i class="bi bi-film me-2"></i> Start Rendering
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Audiobook Modal -->
@@ -488,6 +523,50 @@
                 e.stopPropagation(); // Prevent click from bubbling to the card
             });
         });
+
+        // Create Video Logic
+        const videoModal = new bootstrap.Modal(document.getElementById('videoModal'));
+        const videoForm = document.getElementById('videoForm');
+
+        document.querySelectorAll('.create-video-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const filename = btn.getAttribute('data-filename');
+                document.getElementById('videoMp3Filename').value = filename;
+                videoModal.show();
+            });
+        });
+
+        videoForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(videoForm);
+            const submitBtn = videoForm.querySelector('button[type="submit"]');
+
+            try {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Queuing...';
+
+                const response = await fetch('/api/generate-video', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    alert('Video generation started! Check the Jobs page for progress.');
+                    videoModal.hide();
+                    videoForm.reset();
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (err) {
+                alert('Request failed: ' + err.message);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="bi bi-film me-2"></i> Start Rendering';
+            }
+        });
+
     </script>
 </body>
 
