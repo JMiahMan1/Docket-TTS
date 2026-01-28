@@ -907,7 +907,8 @@ def _chapterize_by_toc(text: str, toc: List[List], config: Dict[str, Any]) -> Li
         # We strip the page markers themselves in cleanup
         chapter_content = text[start_idx:end_idx]
         chapter_content = re.sub(r'\[\[PAGE_\d+\]\]', '', chapter_content)
-        
+
+        word_count = len(chapter_content.split())
         # Verify content length
         if word_count < config["min_chapter_word_count"]:
             logger.info(f"  Skipping TOC chapter '{title}' (Page {page_num}): too short ({word_count} words)")
