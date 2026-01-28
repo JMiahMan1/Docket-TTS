@@ -2231,7 +2231,9 @@ def generate_video_task(self, mp3_filename, image_filename=None):
         cmd.extend(['-vf', vf_chain])
         
         # Encoding options
-        cmd.extend(['-c:v', 'libx264', '-tune', 'stillimage', '-c:a', 'aac', '-b:a', '192k', '-pix_fmt', 'yuv420p', '-shortest'])
+        # Use mpeg4 for broader compatibility if libx264 is missing
+        # -q:v 5 gives high quality (1 is best, 31 is worst)
+        cmd.extend(['-c:v', 'mpeg4', '-q:v', '5', '-c:a', 'aac', '-b:a', '192k', '-pix_fmt', 'yuv420p', '-shortest'])
         
         cmd.append(str(output_filepath))
         
