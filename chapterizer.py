@@ -799,11 +799,6 @@ def _find_raw_chapters(raw_text: str, profile_key: str = "auto") -> List[Chapter
         word_count = len(content.split())
         
         if not DISALLOWED_TITLES_PATTERN.search(original_title):
-            # Calculate page range
-            # Start page is definitely page_num
-            # End page is next_page (exclusive? or inclusive of content before it?)
-            # Usually chapter ends where next begins.
-            range_end = next_page if i + 1 < len(valid_toc_entries) else max(page_map.keys()) if page_map else None
             
             chapters.append(Chapter(
                 number=i + 1,
@@ -910,7 +905,7 @@ def _chapterize_by_toc(text: str, toc: List[List], config: Dict[str, Any]) -> Li
 
         word_count = len(chapter_content.split())
         # Verify content length
-        if word_count < config["min_chapter_word_count"]:
+        if word_count < config.get("min_chapter_word_count", 100):
             logger.info(f"  Skipping TOC chapter '{title}' (Page {page_num}): too short ({word_count} words)")
             continue
             
