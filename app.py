@@ -1033,7 +1033,7 @@ def process_chapter_task(self, original_filename, chapter_title, chapter_text, v
         )
         
         def progress_tracker(current, total):
-            percent = 10 + int((current / total) * 80)
+            percent = int((current / total) * 95)
             self.update_state(state='PROGRESS', meta={
                 'current': percent, 
                 'total': 100, 
@@ -1912,7 +1912,7 @@ def cancel_all_jobs():
         app.logger.error(f"Error cancelling jobs: {e}")
         flash('Error cancelling jobs. Please try again.', 'error')
         
-    return redirect(url_for('jobs_page'))
+    return jsonify({'status': 'success', 'cancelled': cancelled_count})
 
 @app.route('/delete-bulk', methods=['POST'])
 def delete_bulk():
