@@ -1720,7 +1720,7 @@ def jobs_page():
 @app.route('/api/jobs')
 def api_jobs():
     running_jobs, queued_jobs = [], []
-    if request.method == 'GET':
+    try:
         inspector = celery.control.inspect()
 
         # Get Revoked Tasks to filter out "zombies"
