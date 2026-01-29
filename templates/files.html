@@ -128,7 +128,7 @@
             </div>
 
             <div class="card-body">
-                <div class="d-flex align-items-start gap-3 mb-3">
+                <div class="d-flex align-items-start gap-3 mb-3 ps-4">
                     <div class="file-icon flex-shrink-0">
                         {% if file.audio_name and file.audio_name.endswith('.mp4') %}
                         <i class="bi bi-file-earmark-play-fill text-danger"></i>
@@ -136,8 +136,7 @@
                         <i class="bi bi-file-earmark-music-fill"></i>
                         {% endif %}
                     </div>
-                    <div class="flex-grow-1 min-width-0" style="padding-left: 2.5rem;">
-                        <!-- INCREASED padding for checkbox -->
+                    <div class="flex-grow-1 min-width-0">
                         <h6 class="fw-bold text-truncate mb-1" title="{{ key }}">
                             {{ key[:50] }}...
                         </h6>
