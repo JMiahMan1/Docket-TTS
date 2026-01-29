@@ -42,7 +42,8 @@
                                 <select class="form-select border-start-0 ps-0" id="voice" name="voice">
                                     {% if voices %}
                                     {% for v in voices %}
-                                    <option value="{{ v.id }}" {% if v.id=='af_bella' %}selected{% endif %}>{{ v.name }}
+                                    <option value="{{ v.id }}" {% if v.id==current_voice %}selected{% endif %}>{{ v.name
+                                        }}
                                     </option>
                                     {% endfor %}
                                     {% else %}
