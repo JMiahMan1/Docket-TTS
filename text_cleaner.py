@@ -144,8 +144,18 @@ def clean_text(text: str, config: Dict[str, Any] = None) -> str:
         )
         cleaned_text = header_pattern.sub("", cleaned_text)
 
-    cleaned_text = re.sub(r'^\s*Page\s*\d+\s*$', '', cleaned_text, flags=re.MULTILINE)
+
+    # Strip Internal Page Markers (e.g. [[PAGE_52]] or PAGE_52)
+    cleaned_text = re.sub(r'\[\[PAGE_\d+\]\]', '', cleaned_text, flags=re.IGNORECASE)
+    cleaned_text = re.sub(r'\bPAGE_\d+\b', '', cleaned_text, flags=re.IGNORECASE)
+
+    # Strip literal "Page X" lines
+    cleaned_text = re.sub(r'^\s*Page\s*\d+\s*$', '', cleaned_text, flags=re.MULTILINE | re.IGNORECASE)
+    
+    # Strip standalone numbers (likely page numbers), but be careful not to eat stats
+    # Only if surrounded by newlines, making it a "line" of just a number.
     cleaned_text = re.sub(r'^\s*\d+\s*$', '', cleaned_text, flags=re.MULTILINE)
+
 
     cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text)
 
