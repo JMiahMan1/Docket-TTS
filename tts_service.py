@@ -397,6 +397,7 @@ FUNCTION_REGISTRY = {
     "time_replacer": time_replacer, 
 }
 SYMBOLS.pop('$', None)
+DICTIONARY_REGISTRY = {
     "latin_phrases": LATIN_PHRASES,
     "abbreviations": ABBREVIATIONS,
     "contractions": CONTRACTIONS,
