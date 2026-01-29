@@ -150,9 +150,9 @@
 
                     <!-- Text Content -->
                     <div class="flex-grow-1 min-width-0 pe-2">
-                        <!-- Line Clamp 2 lines + Standard Break Word -->
+                        <!-- Single Line Truncation (No Wrapping) -->
                         <h6 class="fw-bold mb-1" title="{{ key }}"
-                            style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; word-break: normal; overflow-wrap: break-word;">
+                            style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">
                             {{ key }}
                         </h6>
                         <div class="small text-muted mb-2">
