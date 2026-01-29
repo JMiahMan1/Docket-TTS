@@ -53,9 +53,9 @@ normalization_rules:
   - name: "Expand Roman numerals"
     type: "function"
     function_name: "expand_roman_numerals"
-  - name: "Expand non-Biblical abbreviations"
+  - name: "Expand all abbreviations"
     type: "dict_lookup"
-    dictionary_name: "non_bible_abbrs"
+    dictionary_name: "abbreviations"
     options: { use_case_sensitive_list: true, word_boundary: true }
   - name: "Expand contractions"
     type: "dict_lookup"

@@ -397,9 +397,8 @@ FUNCTION_REGISTRY = {
     "time_replacer": time_replacer, 
 }
 SYMBOLS.pop('$', None)
-DICTIONARY_REGISTRY = {
     "latin_phrases": LATIN_PHRASES,
-    "non_bible_abbrs": {k: v for k, v in ABBREVIATIONS.items() if not any(book in v for book in BIBLE_BOOKS)},
+    "abbreviations": ABBREVIATIONS,
     "contractions": CONTRACTIONS,
     "symbols": SYMBOLS,
     "punctuation": PUNCTUATION,
