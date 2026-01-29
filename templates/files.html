@@ -300,10 +300,7 @@
     const countSpan = document.getElementById('selectedCount');
     const selectAllSwitch = document.getElementById('selectAllSwitch');
 
-    // FIX: Move toolbar to body to avoid CSS containment issues (z-index/transform of parents)
-    if (toolbar) {
-        document.body.appendChild(toolbar);
-    }
+
 
     function updateToolbar() {
         const selected = document.querySelectorAll('.file-checkbox:checked');
