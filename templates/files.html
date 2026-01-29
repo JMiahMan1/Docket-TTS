@@ -149,9 +149,9 @@
 
                     <!-- Text Content -->
                     <div class="flex-grow-1 min-width-0">
-                        <!-- Line Clamp 2 lines + Word Break for long filenames -->
+                        <!-- Full Filename: Allow unlimited wrapping -->
                         <h6 class="fw-bold mb-1" title="{{ key }}"
-                            style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; word-break: break-word; overflow-wrap: anywhere;">
+                            style="word-break: break-word; overflow-wrap: anywhere; line-height: 1.3;">
                             {{ key }}
                         </h6>
                         <div class="small text-muted mb-2">
