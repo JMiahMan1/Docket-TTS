@@ -1397,13 +1397,12 @@ def list_files():
         elif entry.suffix == '.txt':
             file_data['txt_name'] = entry.name
             
-    processed_files = []
+    processed_files = {}
     for key, data in file_map.items():
         if 'audio_name' not in data: continue
-        data['base_name'] = key
-        processed_files.append(data)
+        processed_files[key] = data
         
-    return render_template('files.html', audio_files=processed_files)
+    return render_template('files.html', files=processed_files)
     
 @app.route('/api/files')
 def api_files():
