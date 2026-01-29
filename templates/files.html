@@ -38,14 +38,19 @@
         left: 50%;
         transform: translateX(-50%);
         background: #ffffff;
-        padding: 1rem 2rem;
+        padding: 0.75rem 1.5rem;
         border-radius: 50rem;
         box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
         z-index: 1000;
         display: none;
         align-items: center;
-        gap: 1rem;
+        gap: 0.75rem;
         border: 1px solid rgba(0, 0, 0, 0.1);
+        width: max-content;
+        max-width: 90vw;
+        /* Prevent overflow on mobile */
+        flex-wrap: wrap;
+        justify-content: center;
     }
 
     .floating-toolbar.active {
@@ -131,7 +136,8 @@
                         <i class="bi bi-file-earmark-music-fill"></i>
                         {% endif %}
                     </div>
-                    <div class="flex-grow-1 min-width-0" style="padding-left: 2rem;"> <!-- Padding for checkbox -->
+                    <div class="flex-grow-1 min-width-0" style="padding-left: 2.5rem;">
+                        <!-- INCREASED padding for checkbox -->
                         <h6 class="fw-bold text-truncate mb-1" title="{{ key }}">
                             {{ key[:50] }}...
                         </h6>
@@ -165,13 +171,13 @@
                     {% if file.audio_name and file.audio_name.endswith('.mp4') %}
                     <!-- Video Player -->
                     <video controls class="w-100 rounded" style="max-height: 150px; background: black;">
-                        <source src="{{ url_for('download_file', filename=file.audio_name) }}" type="video/mp4">
+                        <source src="{{ url_for('download_file', name=file.audio_name) }}" type="video/mp4">
                         Your browser does not support the video element.
                     </video>
                     {% elif file.audio_name %}
                     <!-- Audio Player -->
                     <audio controls class="w-100" style="height: 30px;">
-                        <source src="{{ url_for('download_file', filename=file.audio_name) }}" type="audio/mpeg">
+                        <source src="{{ url_for('download_file', name=file.audio_name) }}" type="audio/mpeg">
                     </audio>
                     {% else %}
                     <div class="text-center text-muted small py-2">Audio preview unavailable</div>
@@ -181,7 +187,7 @@
                 <!-- Actions -->
                 <div class="file-card-actions d-flex justify-content-between align-items-center pt-2 border-top">
                     <div class="btn-group">
-                        <a href="{{ url_for('download_file', filename=file.audio_name) }}"
+                        <a href="{{ url_for('download_file', name=file.audio_name) }}"
                             class="btn btn-sm btn-outline-primary rounded-pill px-3" download>
                             <i class="bi bi-download me-1"></i>Download
                         </a>
@@ -200,18 +206,18 @@
                             <i class="bi bi-three-dots-vertical"></i>
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
-                            {% if file.text_name %}
-                            <li><a class="dropdown-item" href="{{ url_for('edit_text', filename=file.text_name) }}">
+                            {% if file.txt_name %}
+                            <li><a class="dropdown-item" href="{{ url_for('edit_normalized_text', base_name=key) }}">
                                     <i class="bi bi-pencil me-2"></i>Edit Text
                                 </a></li>
                             {% endif %}
-                            <li><a class="dropdown-item" href="{{ url_for('edit_metadata', filename=key) }}">
+                            <li><a class="dropdown-item" href="{{ url_for('edit_metadata', base_name=key) }}">
                                     <i class="bi bi-tags me-2"></i>Edit Metadata
                                 </a></li>
                             <li>
                                 <hr class="dropdown-divider">
                             </li>
-                            <li><a class="dropdown-item text-danger" href="{{ url_for('delete_file', filename=key) }}"
+                            <li><a class="dropdown-item text-danger" href="{{ url_for('delete_file', name=key) }}"
                                     onclick="return confirm('Delete this file?')">
                                     <i class="bi bi-trash me-2"></i>Delete
                                 </a></li>

@@ -1917,6 +1917,59 @@ def task_status(task_id):
 def download_file(name):
     return send_from_directory(app.config["GENERATED_FOLDER"], name)
 
+@app.route('/files/delete/<name>')
+def delete_file(name):
+    """
+    Deletes a specific file or set of files.
+    - If name ends in '_video': deletes ONLY the corresponding .mp4
+    - Otherwise: deletes .mp3, .txt, .meta.json, but NOT .mp4
+    """
+    generated_folder = Path(app.config['GENERATED_FOLDER'])
+    
+    deleted_count = 0
+    
+    # CASE 1: Video File
+    if name.endswith('_video'):
+        real_stem = name[:-6] # Remove '_video'
+        target = generated_folder / f"{real_stem}.mp4"
+        try:
+            if target.exists():
+                os.remove(target)
+                deleted_count += 1
+                flash(f"Deleted video '{target.name}'", "success")
+            else:
+                # Try exact match just in case logic is weird
+                target_exact = generated_folder / f"{name}.mp4"
+                if target_exact.exists():
+                     os.remove(target_exact)
+                     deleted_count += 1
+                     flash(f"Deleted video '{target_exact.name}'", "success")
+        except Exception as e:
+            app.logger.error(f"Error deleting video {name}: {e}")
+            flash(f"Error deleting video: {e}", "error")
+
+    # CASE 2: Audio/Text Book Set
+    else:
+        # Delete mp3, txt, meta, etc. but EXPLICITLY SKIP .mp4
+        # to ensure we don't accidentally wipe a video that shares the basename
+        extensions_to_delete = ['.mp3', '.txt', '.mp3.meta.json', '.m4b']
+        
+        for ext in extensions_to_delete:
+            try:
+                target = generated_folder / f"{name}{ext}"
+                if target.exists():
+                    os.remove(target)
+                    deleted_count += 1
+            except Exception as e:
+                 app.logger.error(f"Error deleting {name}{ext}: {e}")
+                 
+        if deleted_count > 0:
+            flash(f"Deleted audio/text files for '{name}'", "success")
+        else:
+            flash(f"No files found to delete for '{name}'", "warning")
+
+    return redirect(url_for('list_files'))
+
 @app.route('/health')
 def health_check():
     """A simple health check endpoint."""
