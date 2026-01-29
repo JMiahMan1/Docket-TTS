@@ -155,9 +155,9 @@
 
                     <!-- Text Content -->
                     <div class="flex-grow-1 min-width-0 pe-5 me-4"> <!-- High padding to clear badge -->
-                        <!-- Line Clamp 2 lines + Word Break + Hover Title -->
+                        <!-- Line Clamp 2 lines + Standard Break Word (Only break if word > line) -->
                         <h6 class="fw-bold mb-1" title="{{ key }}"
-                            style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; word-break: break-word; overflow-wrap: anywhere;">
+                            style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; word-break: normal; overflow-wrap: break-word;">
                             {{ key }}
                         </h6>
                         <div class="small text-muted mb-2">
