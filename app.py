@@ -1732,10 +1732,16 @@ def api_jobs():
         except:
              all_revoked = set()
 
+        seen_ids = set() # Deduplication Set
+
+
         active_tasks = inspector.active() or {}
         for worker, tasks in active_tasks.items():
             for task in tasks:
                 if task['id'] in all_revoked: continue
+                if task['id'] in seen_ids: continue
+                seen_ids.add(task['id'])
+                
                 original_filename = "Processing..."
                 task_name = task.get('name', '')
                 task_args = task.get('args')
@@ -1809,6 +1815,8 @@ def api_jobs():
         for worker, tasks in reserved_tasks.items():
             for task in tasks:
                 if task['id'] in all_revoked: continue
+                if task['id'] in seen_ids: continue
+                seen_ids.add(task['id'])
 
                 original_filename = "Queued Task"
                 task_name = task.get('name', '')
@@ -1844,6 +1852,12 @@ def api_jobs():
                     try:
                         task_data = json.loads(raw_task)
                         headers = task_data.get('headers', {})
+                        task_id = headers.get('id')
+                        
+                        if not task_id or task_id in all_revoked or task_id in seen_ids:
+                             continue
+                        seen_ids.add(task_id)
+
                         body = task_data.get('body')
                         
                         if isinstance(body, str):
@@ -1881,7 +1895,7 @@ def api_jobs():
                              q_name = f"Task: {Path(t_args[0]).name}"
                         
                         queued_jobs.append({
-                            'id': headers.get('id', 'unknown'), 
+                            'id': task_id or 'unknown', 
                             'name': q_name,
                             'filename': q_name,
                             'state': 'PENDING',
