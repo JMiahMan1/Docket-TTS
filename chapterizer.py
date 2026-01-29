@@ -612,6 +612,40 @@ def _split_large_chapter_into_parts(chapter: Chapter, max_words: int) -> List[Ch
         
     return final_chapter_parts
 
+def _is_toc_like(content: str) -> bool:
+    """
+    Checks if content strongly resembles a Table of Contents segment.
+    """
+    lines = [l.strip() for l in content.splitlines() if l.strip()]
+    if not lines:
+        return False
+        
+    toc_indicators = 0
+    total_lines = len(lines)
+    
+    # 1. Header Check
+    header = lines[0].lower()
+    if 'contents' in header or 'table of' in header:
+         return True
+         
+    # 2. Pattern Check
+    for line in lines:
+        # Match: "... 55" or ".... 12"
+        if re.search(r'(\.{3,}|…)\s*\d+$', line):
+            toc_indicators += 1
+        # Match "Chapter 1       5"
+        elif re.search(r'(chapter|part|section).*?\s+\d+$', line, re.IGNORECASE):
+             toc_indicators += 1
+        # Match just a number?
+        elif re.match(r'^\d+$', line):
+             # Just a page number line
+             toc_indicators += 0.5
+             
+    if total_lines > 0 and (toc_indicators / total_lines) > 0.4:
+         return True
+         
+    return False
+
 def _apply_final_processing(chapters: List[Chapter], config: Dict[str, Any]) -> List[Chapter]:
     """
     Cleans, merges small chapters, and splits large ones.
@@ -645,8 +679,15 @@ def _apply_final_processing(chapters: List[Chapter], config: Dict[str, Any]) -> 
         
         # Check if this chapter is small enough to consider merging
         if current.word_count < min_merge:
+            # SAFETY CHECK: If this small chapter looks like a TOC, DO NOT MERGE it.
+            # We want it to be exposed to the "too short" filter below so it gets dropped.
+            if _is_toc_like(current.content):
+                 logger.info(f"Skipping merge for T0C-like chapter: '{current.title}'")
+                 # It will be handled (dropped) in loop below
+                 pass
+                 
             # Look ahead to see if we can merge into the NEXT chapter
-            if i + 1 < len(pre_cleaned):
+            elif i + 1 < len(pre_cleaned):
                 next_ch = pre_cleaned[i+1]
                 
                 # Check if total size fits within max limit
