@@ -129,14 +129,21 @@
                                     matches</small>
                             </div>
 
-                            <div class="form-check form-switch p-3 bg-light rounded-3">
-                                <input class="form-check-input" type="checkbox" role="switch" id="book_mode"
-                                    name="book_mode" value="true" checked>
-                                <label class="form-check-label fw-medium" for="book_mode">
-                                    Book Mode
-                                    <span class="d-block small text-muted font-weight-normal">Split output by chapter
-                                        (Best for EPUBs)</span>
+                            <div class="mb-3">
+                                <label class="form-check-label small text-uppercase fw-bold text-muted d-block mb-2">
+                                    Output Format
                                 </label>
+                                <div
+                                    class="form-check form-switch ps-0 d-flex align-items-center justify-content-between border rounded-2 p-2 px-3">
+                                    <label class="form-check-label mb-0 fw-medium" for="book_mode">
+                                        Book Mode (Split Chapters)
+                                    </label>
+                                    <input class="form-check-input ms-2 mt-0" type="checkbox" role="switch"
+                                        id="book_mode" name="book_mode" value="true" checked
+                                        style="width: 2.5em; height: 1.25em;">
+                                </div>
+                                <div class="form-text small mt-2">Best for EPUBs. Creates separate MP3s for each
+                                    chapter.</div>
                             </div>
                         </div>
                     </div>
