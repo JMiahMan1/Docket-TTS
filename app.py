@@ -1397,12 +1397,55 @@ def list_files():
         elif entry.suffix == '.txt':
             file_data['txt_name'] = entry.name
             
+    # --- Filtering Logic ---
+    filter_type = request.args.get('filter', 'all')
+    
     processed_files = {}
     for key, data in file_map.items():
         if 'audio_name' not in data: continue
-        processed_files[key] = data
         
-    return render_template('files.html', files=processed_files)
+        # Filter: Video
+        if filter_type == 'video':
+            if not data['audio_name'].endswith('.mp4'):
+                continue
+        # Filter: Audio
+        elif filter_type == 'audio':
+            if data['audio_name'].endswith('.mp4'):
+                continue
+                
+        processed_files[key] = data
+
+    # --- Sorting Logic ---
+    sort_mode = request.args.get('sort', 'date_desc') # Default to newest first
+    
+    # helper for sorting
+    def get_sort_key(item):
+        key, data = item
+        if sort_mode == 'date_desc':
+            return data.get('date', '')
+        elif sort_mode == 'date_asc':
+            return data.get('date', '')
+        elif sort_mode == 'name_asc':
+            return key.lower()
+        return data.get('date', '') # fallback
+
+    # Convert to list to sort
+    items = list(processed_files.items())
+    
+    reverse = False
+    if sort_mode == 'date_desc':
+        reverse = True
+    elif sort_mode == 'date_asc':
+        reverse = False
+    elif sort_mode == 'name_asc':
+        reverse = False
+        
+    items.sort(key=get_sort_key, reverse=reverse)
+    
+    # Rebuild dict in sorted order
+    sorted_files = {k: v for k, v in items}
+        
+    return render_template('files.html', files=sorted_files)
     
 @app.route('/api/files')
 def api_files():
