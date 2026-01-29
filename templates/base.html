@@ -19,18 +19,29 @@
     <style>
         :root {
             --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --secondary-gradient: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%);
-            --glass-bg: rgba(255, 255, 255, 0.92);
-            --card-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -5px rgba(0, 0, 0, 0.04);
+            /* Subtle blue-purple mesh gradient for body */
+            --bg-gradient: radial-gradient(at 0% 0%, hsla(253, 16%, 7%, 1) 0, transparent 50%),
+                radial-gradient(at 50% 0%, hsla(225, 39%, 30%, 1) 0, transparent 50%),
+                radial-gradient(at 100% 0%, hsla(339, 49%, 30%, 1) 0, transparent 50%);
+            /* Lighter version for day mode */
+            --bg-mesh-light: radial-gradient(at 40% 20%, rgba(102, 126, 234, 0.1) 0px, transparent 50%),
+                radial-gradient(at 80% 0%, rgba(118, 75, 162, 0.1) 0px, transparent 50%),
+                linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+
+            --glass-bg: rgba(255, 255, 255, 0.85);
+            /* More transparent to let gradient show */
+            --card-shadow: 0 20px 40px -5px rgba(0, 0, 0, 0.1), 0 10px 20px -5px rgba(0, 0, 0, 0.05);
+            /* Deeper shadow */
             --navbar-height: 70px;
         }
 
         body {
-            background: #f3f4f6;
+            background: var(--bg-mesh-light);
+            background-attachment: fixed;
+            /* Parallax-like fixed bg */
             min-height: 100vh;
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
             padding-top: var(--navbar-height);
-            /* Space for fixed navbar */
         }
 
         html {
@@ -149,12 +160,14 @@
         /* --- Shared Card Styles --- */
         .glass-card {
             background: var(--glass-bg);
-            border: 1px solid rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            /* Stronger white border for 'pop' */
             box-shadow: var(--card-shadow);
-            backdrop-filter: blur(10px);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
             border-radius: 1rem;
             overflow: hidden;
-            /* For header images etc */
+            transition: transform 0.2s, box-shadow 0.2s;
         }
 
         .main-container {
