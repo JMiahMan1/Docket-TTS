@@ -1,171 +1,125 @@
-<!doctype html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="utf-8">
-    <title>Debug Tools - Docket-TTS</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        :root {
-            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --glass-bg: rgba(255, 255, 255, 0.95);
-            --card-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-        }
+{% block title %}Debug Tools - Docket TTS{% endblock %}
 
-        body {
-            background: #f3f4f6;
-            min-height: 100vh;
-            font-family: 'Inter', system-ui, -apple-system, sans-serif;
-        }
+{% block styles %}
+<style>
+    .log-viewer {
+        background: #1e1e1e;
+        color: #d4d4d4;
+        font-family: 'Fira Code', 'Consolas', monospace;
+        font-size: 0.85rem;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        max-height: 600px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+    }
+</style>
+{% endblock %}
 
-        .main-container {
-            max-width: 1000px;
-        }
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-0 fw-bold">System Diagnostics</h2>
+        <p class="text-muted mb-0">Utilities and application status</p>
+    </div>
 
-        .app-header {
-            background: var(--primary-gradient);
-            color: white;
-            padding: 3rem 0;
-            margin-bottom: -3rem;
-            padding-bottom: 5rem;
-        }
+    <div class="d-flex gap-2">
+        <span class="badge bg-light text-secondary border d-flex align-items-center px-3">
+            <i class="bi bi-cpu me-2"></i>v{{ app_version }}
+        </span>
+    </div>
+</div>
 
-        .glass-card {
-            background: var(--glass-bg);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            box-shadow: var(--card-shadow);
-            backdrop-filter: blur(10px);
-            border-radius: 1rem;
-            overflow: hidden;
-        }
-
-        .log-viewer {
-            background: #1e1e1e;
-            color: #d4d4d4;
-            font-family: 'Fira Code', 'Consolas', monospace;
-            font-size: 0.85rem;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            max-height: 600px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-        }
-
-        .btn-outline-light {
-            border-color: rgba(255, 255, 255, 0.4);
-        }
-
-        .btn-outline-light:hover {
-            background: rgba(255, 255, 255, 0.1);
-            color: white;
-            border-color: white;
-        }
-    </style>
-</head>
-
-<body class="bg-light">
-    <!-- Header -->
-    <div class="app-header">
-        <div class="container main-container d-flex justify-content-between align-items-center">
-            <div>
-                <h1 class="h2 fw-bold mb-1">Debug & Info</h1>
-                <p class="mb-0 opacity-75 small">System diagnostics and utilities</p>
+<div class="row g-4">
+    <!-- System Info -->
+    <div class="col-md-4">
+        <div class="card glass-card h-100 border-0">
+            <div class="card-header bg-transparent border-bottom p-3">
+                <h5 class="mb-0 fw-bold text-secondary">ℹ️ Environment</h5>
             </div>
-            <div class="d-flex gap-2">
-                <a href="/" class="btn btn-outline-light btn-sm">← Upload</a>
-                <a href="/jobs" class="btn btn-light btn-sm text-primary fw-medium">View Jobs</a>
+            <div class="card-body p-4">
+                <div class="mb-4">
+                    <label class="small text-uppercase fw-bold text-muted mb-2">Voices Loaded</label>
+                    <ul class="list-unstyled mb-0 bg-light p-3 rounded">
+                        {% for voice in voices %}
+                        <li class="mb-2 d-flex align-items-center">
+                            <span class="badge bg-primary bg-opacity-10 text-primary me-2 rounded-pill">Model</span>
+                            <span class="fw-medium">{{ voice.name }}</span>
+                        </li>
+                        {% else %}
+                        <li class="text-muted">No voices found.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                <div>
+                    <label class="small text-uppercase fw-bold text-muted mb-2">Redis Connection</label>
+                    <div class="d-flex align-items-center text-success">
+                        <i class="bi bi-check-circle-fill me-2"></i> Connected
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
-    <div class="container main-container pb-5">
-
-        <div class="row g-4">
-            <!-- System Info -->
-            <div class="col-md-4">
-                <div class="glass-card h-100">
-                    <div class="p-3 border-bottom bg-white bg-opacity-50">
-                        <h5 class="mb-0 fw-bold text-secondary">ℹ️ System Info</h5>
+    <!-- Normalization Tester -->
+    <div class="col-md-8">
+        <div class="card glass-card h-100 border-0">
+            <div class="card-header bg-transparent border-bottom p-3">
+                <h5 class="mb-0 fw-bold text-secondary">🧪 Normalization Tester</h5>
+            </div>
+            <div class="card-body p-4">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="text_to_normalize" class="form-label text-muted">Enter text to test normalization
+                            logic:</label>
+                        <textarea class="form-control" id="text_to_normalize" name="text_to_normalize" rows="3"
+                            placeholder="Type something here (e.g. 'Chapter 1: The Beginning')...">{{ original_text }}</textarea>
                     </div>
-                    <div class="p-4">
-                        <div class="mb-3">
-                            <label class="small text-uppercase fw-bold text-muted">App Version</label>
-                            <div class="fs-5">{{ app_version }}</div>
-                        </div>
-                        <div>
-                            <label class="small text-uppercase fw-bold text-muted mb-2">Available Voices</label>
-                            <ul class="list-unstyled mb-0">
-                                {% for voice in voices %}
-                                <li class="mb-1 d-flex align-items-center">
-                                    <span
-                                        class="badge bg-primary bg-opacity-10 text-primary me-2 rounded-pill">Model</span>
-                                    {{ voice.name }}
-                                </li>
-                                {% else %}
-                                <li class="text-muted">No voices found.</li>
-                                {% endfor %}
-                            </ul>
-                        </div>
+                    <button type="submit" class="btn btn-primary btn-sm rounded-pill px-4">
+                        <i class="bi bi-magic me-2"></i>Test Normalization
+                    </button>
+                </form>
+
+                {% if normalized_output %}
+                <div class="mt-4">
+                    <label class="small text-uppercase fw-bold text-muted mb-1">Output</label>
+                    <div class="bg-light p-3 rounded border font-monospace small">
+                        {{ normalized_output }}
                     </div>
                 </div>
+                {% endif %}
             </div>
+        </div>
+    </div>
 
-            <!-- Normalization Tester -->
-            <div class="col-md-8">
-                <div class="glass-card h-100">
-                    <div class="p-3 border-bottom bg-white bg-opacity-50">
-                        <h5 class="mb-0 fw-bold text-secondary">🧪 Normalization Tester</h5>
-                    </div>
-                    <div class="p-4">
-                        <form method="POST">
-                            <div class="mb-3">
-                                <label for="text_to_normalize" class="form-label text-muted">Enter text to test
-                                    normalization logic:</label>
-                                <textarea class="form-control" id="text_to_normalize" name="text_to_normalize" rows="3"
-                                    placeholder="Type something here (e.g. 'Chapter 1: The Beginning')...">{{ original_text }}</textarea>
-                            </div>
-                            <button type="submit" class="btn btn-primary btn-sm">Normalize Text</button>
-                        </form>
-
-                        {% if normalized_output %}
-                        <div class="mt-4">
-                            <label class="small text-uppercase fw-bold text-muted mb-1">Output</label>
-                            <div class="bg-light p-3 rounded border">
-                                <code>{{ normalized_output }}</code>
-                            </div>
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
+    <!-- Logs -->
+    <div class="col-12">
+        <div class="card glass-card border-0">
+            <div class="card-header bg-transparent border-bottom p-3 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold text-secondary">📜 Application Logs (Last 500 lines)</h5>
+                <button onclick="window.location.reload()" class="btn btn-sm btn-outline-secondary rounded-pill">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                </button>
             </div>
-
-            <!-- Logs -->
-            <div class="col-12">
-                <div class="glass-card">
-                    <div
-                        class="p-3 border-bottom bg-white bg-opacity-50 d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0 fw-bold text-secondary">📜 Application Logs (Last 500 lines)</h5>
-                        <button onclick="window.location.reload()" class="btn btn-sm btn-outline-secondary">Refresh
-                            Logs</button>
-                    </div>
-                    <div class="p-0">
-                        <div class="log-viewer rounded-0" id="logContainer">
-                            {{ log_content }}
-                        </div>
-                    </div>
+            <div class="card-body p-0">
+                <div class="log-viewer rounded-bottom" id="logContainer">
+                    {{ log_content }}
                 </div>
             </div>
         </div>
-
     </div>
+</div>
+{% endblock %}
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Scroll logs to bottom
-        const logContainer = document.getElementById('logContainer');
+{% block scripts %}
+<script>
+    // Scroll logs to bottom
+    const logContainer = document.getElementById('logContainer');
+    if (logContainer) {
         logContainer.scrollTop = logContainer.scrollHeight;
-    </script>
-</body>
-
-</html>
+    }
+</script>
+{% endblock %}

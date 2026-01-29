@@ -1,592 +1,332 @@
-<!doctype html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="utf-8">
-    <title>Generated Files - Docket-TTS</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
-    <style>
-        :root {
-            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --glass-bg: rgba(255, 255, 255, 0.95);
-            --card-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+{% block title %}Library - Docket TTS{% endblock %}
+
+{% block styles %}
+<style>
+    /* Unique styles for file cards */
+    .glass-card {
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .glass-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.15);
+    }
+
+    .file-card-header {
+        position: relative;
+    }
+
+    .file-card-actions {
+        opacity: 0.7;
+        transition: opacity 0.2s;
+    }
+
+    .glass-card:hover .file-card-actions {
+        opacity: 1;
+    }
+
+    .file-icon {
+        font-size: 2.5rem;
+        color: #667eea;
+    }
+
+    .floating-toolbar {
+        position: fixed;
+        bottom: 2rem;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #ffffff;
+        padding: 1rem 2rem;
+        border-radius: 50rem;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        z-index: 1000;
+        display: none;
+        align-items: center;
+        gap: 1rem;
+        border: 1px solid rgba(0, 0, 0, 0.1);
+    }
+
+    .floating-toolbar.active {
+        display: flex;
+        animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes slideUp {
+        from {
+            transform: translate(-50%, 100%);
+            opacity: 0;
         }
 
-        body {
-            background: #f3f4f6;
-            min-height: 100vh;
-            font-family: 'Inter', system-ui, -apple-system, sans-serif;
-        }
-
-        .main-container {
-            max-width: 1200px;
-        }
-
-        .app-header {
-            background: var(--primary-gradient);
-            color: white;
-            padding: 3rem 0;
-            margin-bottom: -3rem;
-            padding-bottom: 5rem;
-        }
-
-        .glass-card {
-            background: var(--glass-bg);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            box-shadow: var(--card-shadow);
-            backdrop-filter: blur(10px);
-            border-radius: 1rem;
-            overflow: hidden;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .glass-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.15);
-        }
-
-        .file-card-actions {
-            opacity: 0.7;
-            transition: opacity 0.2s;
-        }
-
-        .glass-card:hover .file-card-actions {
+        to {
+            transform: translate(-50%, 0);
             opacity: 1;
         }
+    }
+</style>
+{% endblock %}
 
-        .btn-outline-light {
-            border-color: rgba(255, 255, 255, 0.4);
-        }
-
-        .btn-outline-light:hover {
-            background: rgba(255, 255, 255, 0.1);
-            color: white;
-            border-color: white;
-        }
-
-        .file-icon {
-            font-size: 2.5rem;
-            color: #667eea;
-        }
-
-        .floating-toolbar {
-            position: fixed;
-            bottom: 2rem;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #ffffff;
-            padding: 1rem 2rem;
-            border-radius: 50rem;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-            z-index: 1000;
-            display: none;
-            align-items: center;
-            gap: 1rem;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-        }
-
-        .floating-toolbar.active {
-            display: flex;
-            animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        @keyframes slideUp {
-            from {
-                transform: translate(-50%, 100%);
-                opacity: 0;
-            }
-
-            to {
-                transform: translate(-50%, 0);
-                opacity: 1;
-            }
-        }
-
-        /* CRITICAL FIX: Ensure checkboxes are above the stretched-link pseudo-element */
-        .file-checkbox,
-        .form-check {
-            position: relative;
-            z-index: 10;
-        }
-    </style>
-</head>
-
-<body class="bg-light">
-    <!-- Header -->
-    <div class="app-header">
-        <div class="container main-container d-flex justify-content-between align-items-center">
-            <div>
-                <h1 class="h2 fw-bold mb-1">Generated Files</h1>
-                <p class="mb-0 opacity-75 small">Manage your converted audiobooks and text</p>
-            </div>
-            <div class="d-flex gap-2">
-                <a href="/" class="btn btn-outline-light btn-sm">← Upload</a>
-                <a href="/jobs" class="btn btn-light btn-sm text-primary fw-medium">View Jobs</a>
-            </div>
-        </div>
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-0 fw-bold">Generated Files</h2>
+        <p class="text-muted mb-0">Library of your converted audiobooks</p>
     </div>
 
-    <div class="container main-container pb-5">
-
-        {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-        <div class="mb-4">
-            {% for category, message in messages %}
-            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show border-0 shadow-sm rounded-3"
-                role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            </div>
-            {% endfor %}
+    <div class="d-flex gap-2">
+        <div class="dropdown">
+            <button class="btn btn-light dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                Sort By
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-menu-item dropdown-item" href="?sort=date_desc">Newest First</a></li>
+                <li><a class="dropdown-menu-item dropdown-item" href="?sort=date_asc">Oldest First</a></li>
+                <li><a class="dropdown-menu-item dropdown-item" href="?sort=name_asc">Name (A-Z)</a></li>
+            </ul>
         </div>
-        {% endif %}
-        {% endwith %}
+        <div class="form-check form-switch d-flex align-items-center bg-white p-2 px-3 rounded border">
+            <input class="form-check-input me-2" type="checkbox" role="switch" id="selectAllSwitch">
+            <label class="form-check-label small fw-bold text-muted" for="selectAllSwitch">Select All</label>
+        </div>
+    </div>
+</div>
 
-        <form id="mainForm" method="POST">
-            {% if audio_files %}
-            <!-- Select All Checkbox -->
-            <div class="d-flex align-items-center mb-3 p-3 bg-white rounded-3 shadow-sm">
-                <div class="form-check mb-0">
-                    <input class="form-check-input" type="checkbox" id="selectAll"
-                        style="position: relative; z-index: 10;">
-                    <label class="form-check-label fw-medium" for="selectAll">
-                        Select All Files
-                    </label>
-                </div>
-                <span class="ms-3 text-muted small" id="selectionCount">0 selected</span>
+<!-- Filters -->
+<div class="mb-4">
+    {% set filter = request.args.get('filter', 'all') %}
+    <a href="?filter=all"
+        class="btn btn-sm rounded-pill px-3 me-2 {{ 'btn-primary' if filter == 'all' else 'btn-light text-muted' }}">All</a>
+    <a href="?filter=audio"
+        class="btn btn-sm rounded-pill px-3 me-2 {{ 'btn-primary' if filter == 'audio' else 'btn-light text-muted' }}">Audio</a>
+    <a href="?filter=video"
+        class="btn btn-sm rounded-pill px-3 me-2 {{ 'btn-primary' if filter == 'video' else 'btn-light text-muted' }}">Video</a>
+</div>
+
+{% if not files %}
+<div class="text-center py-5">
+    <div class="display-1 text-muted opacity-25 mb-3"><i class="bi bi-folder2-open"></i></div>
+    <h3 class="text-muted">No files found</h3>
+    <p class="text-muted">Upload a document to get started.</p>
+    <a href="/" class="btn btn-primary mt-3">Create New Task</a>
+</div>
+{% else %}
+<div class="row g-4">
+    {% for key, file in files.items() %}
+    <div class="col-md-6 col-lg-4">
+        <div class="card glass-card border-0 h-100 position-relative">
+
+            <!-- Selection Checkbox (Absolute Top Left) -->
+            <div class="position-absolute top-0 start-0 p-3" style="z-index: 10;">
+                <input class="form-check-input file-checkbox shadow-sm border-2" type="checkbox" value="{{ key }}"
+                    style="width: 1.5em; height: 1.5em; cursor: pointer;">
             </div>
 
-            <div class="row g-4">
-                {% for file in audio_files %}
-                <div class="col-md-6 col-lg-4">
-                    <div class="glass-card h-100 position-relative">
-                        <div class="p-4">
-                            <div class="d-flex justify-content-between align-items-start mb-3">
-                                <div class="file-icon">
-                                    {% if file.audio_name.endswith('.m4b') %}
-                                    <i class="bi bi-collection-play-fill text-warning"></i>
-                                    {% elif file.audio_name.endswith('.mp4') %}
-                                    <i class="bi bi-camera-video-fill text-danger"></i>
-                                    {% else %}
-                                    <i class="bi bi-file-earmark-music-fill"></i>
-                                    {% endif %}
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input file-checkbox border-2"
-                                        style="width: 1.25em; height: 1.25em;" type="checkbox" name="files_to_merge"
-                                        value="{{ file.audio_name }}" data-base="{{ file.base_name }}">
-                                </div>
-                            </div>
-
-                            <h6 class="fw-bold text-truncate mb-1" title="{{ file.audio_name }}">
-                                <a href="{{ url_for('download_file', name=file.audio_name) }}"
-                                    class="text-decoration-none text-dark">{{ file.audio_name }}</a>
-                            </h6>
-                            <p class="small text-muted mb-3 d-flex align-items-center gap-2 flex-wrap">
-                                <span class="text-nowrap">{{ file.duration }}</span>
-                                <span>•</span>
-                                <span class="text-nowrap">{{ file.size }}</span>
-                                {% if file.generation_time %}
-                                <span>•</span>
-                                <span class="text-nowrap text-success" title="Time taken to generate">⚡ {{
-                                    file.generation_time }}</span>
-                                {% endif %}
-                                {% if file.comment %}
-                                <span>•</span>
-                                <span
-                                    class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25"
-                                    title="Page Range">{{ file.comment }}</span>
-                                {% endif %}
-                                <span>•</span>
-                                <span data-utc-date="{{ file.date }}" class="text-nowrap">Loading...</span>
-                            </p>
-
-                            <div class="mb-3">
-                                {% if file.audio_name.endswith('.mp4') %}
-                                <div class="ratio ratio-16x9 rounded overflow-hidden shadow-sm bg-black">
-                                    <video controls preload="metadata" class="w-100 h-100">
-                                        <source src="{{ url_for('download_file', name=file.audio_name) }}"
-                                            type="video/mp4">
-                                        Your browser does not support the video tag.
-                                    </video>
-                                </div>
-                                {% else %}
-                                <audio controls class="w-100" preload="metadata">
-                                    <source src="{{ url_for('download_file', name=file.audio_name) }}"
-                                        type="audio/{{ 'mp4' if file.audio_name.endswith('.m4b') else 'mpeg' }}">
-                                    Your browser does not support the audio element.
-                                </audio>
-                                {% endif %}
-                            </div>
-
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div class="btn-group btn-group-sm">
-                                    <a href="{{ url_for('download_file', name=file.audio_name) }}"
-                                        class="btn btn-outline-secondary" title="Download Media"><i
-                                            class="bi bi-download"></i></a>
-                                    {% if file.txt_name %}
-                                    <a href="{{ url_for('download_file', name=file.txt_name) }}"
-                                        class="btn btn-outline-secondary" title="Download Source Text"><i
-                                            class="bi bi-file-text"></i></a>
-                                    {% endif %}
-                                </div>
-
-                                {% if file.audio_name.endswith('.mp3') %}
-                                <div class="btn-group btn-group-sm">
-                                    <a href="{{ url_for('edit_normalized_text', base_name=file.base_name) }}"
-                                        class="btn btn-outline-primary" title="Edit Text & Regenerate"><i
-                                            class="bi bi-pencil"></i></a>
-                                    <a href="{{ url_for('edit_metadata', base_name=file.base_name) }}"
-                                        class="btn btn-outline-info" title="Edit Metadata"><i class="bi bi-tag"></i></a>
-                                    <button type="button" class="btn btn-outline-dark create-video-btn"
-                                        data-filename="{{ file.audio_name }}" title="Create Video"><i
-                                            class="bi bi-camera-video"></i></button>
-                                </div>
-                                {% endif %}
-                            </div>
+            <div class="card-body">
+                <div class="d-flex align-items-start gap-3 mb-3">
+                    <div class="file-icon flex-shrink-0">
+                        {% if file.audio_name and file.audio_name.endswith('.mp4') %}
+                        <i class="bi bi-file-earmark-play-fill text-danger"></i>
+                        {% else %}
+                        <i class="bi bi-file-earmark-music-fill"></i>
+                        {% endif %}
+                    </div>
+                    <div class="flex-grow-1 min-width-0" style="padding-left: 2rem;"> <!-- Padding for checkbox -->
+                        <h6 class="fw-bold text-truncate mb-1" title="{{ key }}">
+                            {{ key[:50] }}...
+                        </h6>
+                        <div class="small text-muted mb-2">
+                            <i class="bi bi-clock me-1"></i>{{ file.duration }} &bull; {{ file.size }}
                         </div>
+
+                        <!-- Metadata Badges -->
+                        <div class="d-flex flex-wrap gap-1 mb-2">
+                            {% if file.comment %}
+                            <span
+                                class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-10 rounded-pill fw-normal">
+                                <i class="bi bi-book me-1"></i>{{ file.comment }}
+                            </span>
+                            {% endif %}
+
+                            {% if file.generation_time %}
+                            <span
+                                class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-10 rounded-pill fw-normal"
+                                title="Generation Time">
+                                <i class="bi bi-lightning-charge me-1"></i>{{ file.generation_time }}
+                            </span>
+                            {% endif %}
+                        </div>
+
                     </div>
                 </div>
-                {% endfor %}
-            </div>
 
-            <!-- Floating Toolbar -->
-            <div class="floating-toolbar" id="bulkActionsToolbar">
-                <span class="fw-bold text-secondary fs-6"><span id="selectedCount">0</span> Selected</span>
-                <div class="vr"></div>
-                <button type="button" class="btn btn-primary rounded-pill btn-sm fw-medium px-3"
-                    id="createAudiobookBtn">
-                    <i class="bi bi-journal-album me-1"></i> Merge
-                </button>
-                <button type="button" class="btn btn-success rounded-pill btn-sm fw-medium px-3" id="downloadBtn">
-                    <i class="bi bi-archive me-1"></i> Zip
-                </button>
-                <div class="vr"></div>
-                <!-- Hidden inputs for deletion are populated by JS -->
-                <button type="button" class="btn btn-danger rounded-pill btn-sm fw-medium px-3" id="deleteBtn">
-                    <i class="bi bi-trash me-1"></i> Delete
-                </button>
-            </div>
-
-            {% else %}
-            <div class="text-center py-5 glass-card">
-                <div class="mb-3 text-muted" style="font-size: 4rem;"><i class="bi bi-inbox"></i></div>
-                <h4 class="text-muted">No files generated yet</h4>
-                <p class="text-secondary mb-4">Upload a document to get started.</p>
-                <a href="/" class="btn btn-primary px-4 py-2 rounded-pill">Start New Job</a>
-            </div>
-            {% endif %}
-        </form>
-
-    </div>
-
-    <!-- Create Video Modal -->
-    <div class="modal fade" id="videoModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
-                <div class="modal-header bg-light border-0">
-                    <h5 class="modal-title fw-bold" id="videoModalLabel">Create Video</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <!-- Embedded Player -->
+                <div class="bg-light rounded p-2 mb-3">
+                    {% if file.audio_name and file.audio_name.endswith('.mp4') %}
+                    <!-- Video Player -->
+                    <video controls class="w-100 rounded" style="max-height: 150px; background: black;">
+                        <source src="{{ url_for('download_file', filename=file.audio_name) }}" type="video/mp4">
+                        Your browser does not support the video element.
+                    </video>
+                    {% elif file.audio_name %}
+                    <!-- Audio Player -->
+                    <audio controls class="w-100" style="height: 30px;">
+                        <source src="{{ url_for('download_file', filename=file.audio_name) }}" type="audio/mpeg">
+                    </audio>
+                    {% else %}
+                    <div class="text-center text-muted small py-2">Audio preview unavailable</div>
+                    {% endif %}
                 </div>
-                <div class="modal-body p-4">
-                    <p class="text-muted small mb-4">Generate an MP4 video with synced lyrics/subtitles. You can
-                        optionally upload a background image.</p>
-                    <form id="videoForm">
-                        <input type="hidden" id="videoMp3Filename" name="filename">
 
-                        <div class="mb-3">
-                            <label for="videoBgImage" class="form-label fw-bold">Background Image (Optional)</label>
-                            <input class="form-control" type="file" id="videoBgImage" name="background_image"
-                                accept="image/*">
-                            <div class="form-text">If left empty, a black background will be used.</div>
-                        </div>
+                <!-- Actions -->
+                <div class="file-card-actions d-flex justify-content-between align-items-center pt-2 border-top">
+                    <div class="btn-group">
+                        <a href="{{ url_for('download_file', filename=file.audio_name) }}"
+                            class="btn btn-sm btn-outline-primary rounded-pill px-3" download>
+                            <i class="bi bi-download me-1"></i>Download
+                        </a>
 
-                        <div class="d-grid">
-                            <button type="submit" class="btn btn-primary rounded-pill fw-bold">
-                                <i class="bi bi-film me-2"></i> Start Rendering
-                            </button>
-                        </div>
-                    </form>
+                        <!-- Generate Video Button (MP3 Only) -->
+                        {% if file.audio_name and file.audio_name.endswith('.mp3') %}
+                        <button class="btn btn-sm btn-outline-secondary rounded-pill px-3 ms-1"
+                            onclick="openVideoModal('{{ key }}', '{{ file.audio_name }}')">
+                            <i class="bi bi-camera-video me-1"></i>Video
+                        </button>
+                        {% endif %}
+                    </div>
+
+                    <div class="dropdown">
+                        <button class="btn btn-link text-muted p-0" type="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-three-dots-vertical"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
+                            {% if file.text_name %}
+                            <li><a class="dropdown-item" href="{{ url_for('edit_text', filename=file.text_name) }}">
+                                    <i class="bi bi-pencil me-2"></i>Edit Text
+                                </a></li>
+                            {% endif %}
+                            <li><a class="dropdown-item" href="{{ url_for('edit_metadata', filename=key) }}">
+                                    <i class="bi bi-tags me-2"></i>Edit Metadata
+                                </a></li>
+                            <li>
+                                <hr class="dropdown-divider">
+                            </li>
+                            <li><a class="dropdown-item text-danger" href="{{ url_for('delete_file', filename=key) }}"
+                                    onclick="return confirm('Delete this file?')">
+                                    <i class="bi bi-trash me-2"></i>Delete
+                                </a></li>
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
+    {% endfor %}
+</div>
+{% endif %}
 
-    <!-- Audiobook Modal -->
-    <div class="modal fade" id="audiobookModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
-                <div class="modal-header bg-light border-0">
-                    <h5 class="modal-title fw-bold" id="audiobookModalLabel">Create Audiobook</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body p-4">
-                    <div class="text-center py-4" id="metadataSpinner">
-                        <div class="spinner-border text-primary" role="status"><span
-                                class="visually-hidden">Loading...</span></div>
-                        <p class="text-muted mt-2 small">Analyzing metadata...</p>
-                    </div>
-                    <div id="metadataForm" style="display:none;">
-                        <div class="text-center mb-4">
-                            <img id="audiobookCover" src="" class="shadow-sm rounded-3"
-                                style="max-height: 180px; display: none;">
-                        </div>
-                        <div class="form-floating mb-3">
-                            <input type="text" class="form-control" id="audiobookTitle" name="title" placeholder="Title"
-                                required>
-                            <label for="audiobookTitle">Book Title</label>
-                        </div>
-                        <div class="form-floating mb-3">
-                            <input type="text" class="form-control" id="audiobookAuthor" name="author"
-                                placeholder="Author" required>
-                            <label for="audiobookAuthor">Author</label>
-                        </div>
+<!-- Floating Toolbar -->
+<div class="floating-toolbar" id="bulkToolbar">
+    <span class="fw-bold text-secondary"><span id="selectedCount">0</span> selected</span>
+    <div class="vr mx-2"></div>
+    <button class="btn btn-danger btn-sm rounded-pill px-3" id="bulkDeleteBtn">
+        <i class="bi bi-trash me-1"></i> Delete
+    </button>
+    <button class="btn btn-secondary btn-sm rounded-pill px-3" onclick="deselectAll()">
+        Cancel
+    </button>
+</div>
 
-                        <div class="mb-3">
-                            <label class="form-label d-block text-muted small text-uppercase fw-bold">Output
-                                Format</label>
-                            <div class="btn-group w-100" role="group" aria-label="Output Format">
-                                <input type="radio" class="btn-check" name="temp_output_format" id="formatM4B"
-                                    value="m4b" checked>
-                                <label class="btn btn-outline-primary" for="formatM4B">
-                                    <i class="bi bi-collection-play-fill me-1"></i> Audiobook (.m4b)
-                                </label>
-
-                                <input type="radio" class="btn-check" name="temp_output_format" id="formatMP3"
-                                    value="mp3">
-                                <label class="btn btn-outline-primary" for="formatMP3">
-                                    <i class="bi bi-music-note-beamed me-1"></i> MP3 File (.mp3)
-                                </label>
-                            </div>
-                        </div>
-
-                        <input type="hidden" id="audiobookCoverUrl" name="cover_url">
-                    </div>
-                </div>
-                <div class="modal-footer border-0 bg-light">
-                    <button type="button" class="btn btn-link text-decoration-none text-muted"
-                        data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary px-4 rounded-pill" id="submitAudiobook">Create
-                        Audiobook</button>
-                </div>
+<!-- Video Generation Modal -->
+<div class="modal fade" id="videoModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create Video</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
+            <form id="videoForm" method="POST" action="/jobs/create_video" enctype="multipart/form-data">
+                <div class="modal-body">
+                    <input type="hidden" name="audio_filename" id="videoAudioFilename">
+                    <p class="text-muted small">Convert <strong id="videoAudioLabel"></strong> into an MP4 video with
+                        subtitles.</p>
+
+                    <div class="mb-3">
+                        <label for="bg_image" class="form-label">Background Image (Optional)</label>
+                        <input type="file" class="form-control" id="bg_image" name="bg_image" accept="image/*">
+                        <div class="form-text">If not provided, a black background will be used.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Start Generation</button>
+                </div>
+            </form>
         </div>
     </div>
+</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            // Localize Dates
-            document.querySelectorAll('[data-utc-date]').forEach(function (cell) {
-                const utcDateString = cell.getAttribute('data-utc-date');
-                if (utcDateString) {
-                    const date = new Date(utcDateString);
-                    cell.textContent = date.toLocaleString(undefined, {
-                        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
-                    });
-                } else {
-                    cell.textContent = 'N/A';
-                }
-            });
+{% endblock %}
 
-            // Selection Logic
-            const checkboxes = document.querySelectorAll('.file-checkbox');
-            const toolbar = document.getElementById('bulkActionsToolbar');
-            const counter = document.getElementById('selectedCount');
-            const selectAllCheckbox = document.getElementById('selectAll');
-            const selectionCount = document.getElementById('selectionCount');
+{% block scripts %}
+<script>
+    // --- Selection Logic ---
+    const checkboxes = document.querySelectorAll('.file-checkbox');
+    const toolbar = document.getElementById('bulkToolbar');
+    const countSpan = document.getElementById('selectedCount');
+    const selectAllSwitch = document.getElementById('selectAllSwitch');
 
-            checkboxes.forEach(cb => {
-                cb.addEventListener('change', updateToolbar);
-            });
+    function updateToolbar() {
+        const selected = document.querySelectorAll('.file-checkbox:checked');
+        const count = selected.length;
 
-            // Select All functionality
-            if (selectAllCheckbox) {
-                selectAllCheckbox.addEventListener('change', function () {
-                    checkboxes.forEach(cb => {
-                        cb.checked = selectAllCheckbox.checked;
-                    });
-                    updateToolbar();
-                });
-            }
+        countSpan.textContent = count;
 
-            function updateToolbar() {
-                const count = document.querySelectorAll('.file-checkbox:checked').length;
-                counter.innerText = count;
+        if (count > 0) {
+            toolbar.classList.add('active');
+        } else {
+            toolbar.classList.remove('active');
+            selectAllSwitch.checked = false;
+        }
+    }
 
-                // Update selection count display
-                if (selectionCount) {
-                    selectionCount.innerText = count + ' selected';
-                }
+    checkboxes.forEach(cb => {
+        cb.addEventListener('change', updateToolbar);
+        // Important: Stop click propagation so clicking checkbox doesn't trigger card links (if any)
+        cb.addEventListener('click', (e) => e.stopPropagation());
+    });
 
-                // Update Select All checkbox state
-                if (selectAllCheckbox) {
-                    const totalCheckboxes = checkboxes.length;
-                    selectAllCheckbox.checked = count === totalCheckboxes && count > 0;
-                    selectAllCheckbox.indeterminate = count > 0 && count < totalCheckboxes;
-                }
-
-                if (count > 0) {
-                    toolbar.classList.add('active');
-                } else {
-                    toolbar.classList.remove('active');
-                }
-            }
+    // Select All Logic
+    selectAllSwitch.addEventListener('change', function () {
+        const isChecked = this.checked;
+        checkboxes.forEach(cb => {
+            cb.checked = isChecked;
         });
+        updateToolbar();
+    });
 
-        // Audiobook Creation
-        const createAudiobookBtn = document.getElementById('createAudiobookBtn');
-        const audiobookModal = new bootstrap.Modal(document.getElementById('audiobookModal'));
-        const mainForm = document.getElementById('mainForm');
+    function deselectAll() {
+        checkboxes.forEach(cb => cb.checked = false);
+        updateToolbar();
+    }
 
-        createAudiobookBtn.addEventListener('click', async () => {
-            const checkedFiles = document.querySelectorAll('input.file-checkbox:checked');
-            if (checkedFiles.length === 0) return;
+    // Bulk Delete
+    document.getElementById('bulkDeleteBtn').addEventListener('click', () => {
+        const selected = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => cb.value);
+        if (confirm(`Delete ${selected.length} files permanently?`)) {
+            fetch('/files/bulk_delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filenames: selected })
+            }).then(() => window.location.reload());
+        }
+    });
 
-            audiobookModal.show();
-            document.getElementById('metadataSpinner').style.display = 'block';
-            document.getElementById('metadataForm').style.display = 'none';
-            document.getElementById('audiobookCover').style.display = 'none';
-
-            const filenames = Array.from(checkedFiles).map(cb => cb.value);
-
-            try {
-                const response = await fetch('/get-book-metadata', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filenames: filenames })
-                });
-
-                if (!response.ok) throw new Error('Failed to fetch metadata.');
-                const data = await response.json();
-
-                document.getElementById('audiobookTitle').value = data.title || '';
-                document.getElementById('audiobookAuthor').value = data.author || '';
-                document.getElementById('audiobookCoverUrl').value = data.cover_url || '';
-
-                const coverImg = document.getElementById('audiobookCover');
-                if (data.cover_url) {
-                    coverImg.src = data.cover_url;
-                    coverImg.style.display = 'inline-block';
-                }
-            } catch (error) {
-                console.error('Error fetching metadata:', error);
-                // Keep form empty on error but show it
-            } finally {
-                document.getElementById('metadataSpinner').style.display = 'none';
-                document.getElementById('metadataForm').style.display = 'block';
-            }
-        });
-
-        document.getElementById('submitAudiobook').addEventListener('click', () => {
-            mainForm.action = "{{ url_for('create_audiobook') }}";
-
-            // Append modal data to main form
-            const fields = ['audiobookTitle:title', 'audiobookAuthor:author', 'audiobookCoverUrl:cover_url'];
-            fields.forEach(pair => {
-                const [id, name] = pair.split(':');
-                const val = document.getElementById(id).value;
-                const input = document.createElement('input');
-                input.type = 'hidden';
-                input.name = name;
-                input.value = val;
-                mainForm.appendChild(input);
-            });
-
-            // Add Format
-            const format = document.querySelector('input[name="temp_output_format"]:checked').value;
-            const input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = 'output_format';
-            input.value = format;
-            mainForm.appendChild(input);
-
-            mainForm.submit();
-        });
-
-        // Delete Logic
-        document.getElementById('deleteBtn').addEventListener('click', function () {
-            if (confirm(`Delete user selected items? This cannot be undone.`)) {
-
-                // We need to signal which base_names to delete. 
-                // The current form submits 'files_to_merge' which are audio filenames.
-                // The backend likely expects 'files_to_delete' with base_names.
-
-                const checked = document.querySelectorAll('input.file-checkbox:checked');
-                checked.forEach(cb => {
-                    const baseName = cb.getAttribute('data-base');
-                    const input = document.createElement('input');
-                    input.type = 'hidden';
-                    input.name = 'files_to_delete';
-                    input.value = baseName;
-                    mainForm.appendChild(input);
-                });
-
-                mainForm.action = "{{ url_for('delete_bulk') }}";
-                mainForm.submit();
-            }
-        });
-
-        // Download Logic
-        document.getElementById('downloadBtn').addEventListener('click', function () {
-            mainForm.action = "{{ url_for('download_bulk') }}";
-            mainForm.submit();
-        });
-
-        // CRITICAL FIX: Prevent checkbox clicks from triggering the card's stretched-link
-        document.querySelectorAll('.file-checkbox').forEach(checkbox => {
-            checkbox.addEventListener('click', function (e) {
-                e.stopPropagation(); // Prevent click from bubbling to the card
-            });
-        });
-
-        // Create Video Logic
-        const videoModal = new bootstrap.Modal(document.getElementById('videoModal'));
-        const videoForm = document.getElementById('videoForm');
-
-        document.querySelectorAll('.create-video-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const filename = btn.getAttribute('data-filename');
-                document.getElementById('videoMp3Filename').value = filename;
-                videoModal.show();
-            });
-        });
-
-        videoForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData(videoForm);
-            const submitBtn = videoForm.querySelector('button[type="submit"]');
-
-            try {
-                submitBtn.disabled = true;
-                submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Queuing...';
-
-                const response = await fetch('/api/generate-video', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const data = await response.json();
-                if (response.ok) {
-                    alert('Video generation started! Check the Jobs page for progress.');
-                    videoModal.hide();
-                    videoForm.reset();
-                } else {
-                    alert('Error: ' + (data.error || 'Unknown error'));
-                }
-            } catch (err) {
-                alert('Request failed: ' + err.message);
-            } finally {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = '<i class="bi bi-film me-2"></i> Start Rendering';
-            }
-        });
-
-    </script>
-</body>
-
-</html>
+    // Video Modal Logic
+    function openVideoModal(key, filename) {
+        document.getElementById('videoAudioFilename').value = filename;
+        document.getElementById('videoAudioLabel').textContent = filename;
+        new bootstrap.Modal(document.getElementById('videoModal')).show();
+    }
+</script>
+{% endblock %}
