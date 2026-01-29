@@ -2094,16 +2094,66 @@ def delete_file(name):
                 target = generated_folder / f"{name}{ext}"
                 if target.exists():
                     os.remove(target)
-                    deleted_count += 1
+                    deleted += 1
             except Exception as e:
                  app.logger.error(f"Error deleting {name}{ext}: {e}")
                  
-        if deleted_count > 0:
-            flash(f"Deleted audio/text files for '{name}'", "success")
+    if deleted > 0:
+        flash(f"Deleted {deleted} files", "success")
+    else:
+        # If we didn't find specific files, maybe it's a bulk/stem concept?
+        # Trying to delete by stem if the user clicked the 'Delete' button on card
+        count = 0 
+        for f in generated_folder.glob(f"{name}*"):
+             os.remove(f)
+             count += 1
+        if count > 0:
+            flash(f"Deleted {count} related files for '{name}'", "success")
         else:
-            flash(f"No files found to delete for '{name}'", "warning")
-
+             flash(f"Could not find files to delete for '{name}'", "warning")
+             
     return redirect(url_for('list_files'))
+
+@app.route('/files/bulk_delete', methods=['POST'])
+def bulk_delete_files():
+    """
+    Deletes multiple files specified in JSON body.
+    Expects JSON: { "filenames": ["file1", "file2"] }
+    """
+    try:
+        data = request.json
+        filenames = data.get('filenames', [])
+        
+        if not filenames:
+            return jsonify({'error': 'No filenames provided'}), 400
+            
+        generated_folder = Path(app.config['GENERATED_FOLDER'])
+        count = 0
+        
+        for name in filenames:
+            # Safe logic: allow deleting the set associated with this stem
+            # Sanitize slightly to prevent directory traversal
+            clean_name = secure_filename(name)
+            if not clean_name: continue
+            
+            # Use glob to match all extensions (.mp3, .txt, .json, .mp4 potentially)
+            # The 'name' passed from UI is the key/stem usually.
+            found_any = False
+            for f in generated_folder.glob(f"{clean_name}*"):
+                try:
+                    os.remove(f)
+                    found_any = True
+                except OSError:
+                    pass
+            if found_any:
+                count += 1
+                
+        flash(f"Deleted {count} items.", "success")
+        return jsonify({'message': f'Deleted {count} items', 'count': count}), 200
+        
+    except Exception as e:
+        app.logger.error(f"Bulk delete error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/health')
 def health_check():
