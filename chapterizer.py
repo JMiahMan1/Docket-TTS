@@ -614,73 +614,102 @@ def _split_large_chapter_into_parts(chapter: Chapter, max_words: int) -> List[Ch
 
 def _apply_final_processing(chapters: List[Chapter], config: Dict[str, Any]) -> List[Chapter]:
     """
-    Cleans, normalizes, and splits chapters based on config.
+    Cleans, merges small chapters, and splits large ones.
     """
     max_words = config.get("max_chapter_word_count", DEFAULT_CONFIG["max_chapter_word_count"])
     min_words = config.get("min_chapter_word_count", DEFAULT_CONFIG["min_chapter_word_count"])
-    
-    processed_chapters = []
+    min_merge = config.get("min_merge_word_count", 500) # Default 500 words for merging
+
+    # 1. Pre-cleaning Pass
+    # Clean text and filter strictly disallowed titles upfront
+    pre_cleaned = []
     for chapter in chapters:
-        # Clean text
+        # Check disallowed titles first (e.g. Copyright, TOC)
+        if DISALLOWED_TITLES_PATTERN.search(chapter.original_title):
+             logger.info(f"Skipping disallowed chapter: '{chapter.original_title}'")
+             continue
+
         cleaned_content = clean_text(chapter.content)
-        
-        # NOTE: normalize_text is deferred to the TTS stage to avoid hangs in the web thread
-        # We'll use cleaned_content for word count estimations
-        
         word_count = len(cleaned_content.split())
         
-        # Filter out chapters that are too short
-        if word_count < min_words:
+        pre_cleaned.append(chapter._replace(
+            content=cleaned_content, 
+            word_count=word_count
+        ))
 
-            # Check if it's a disallowed title
-            if DISALLOWED_TITLES_PATTERN.search(chapter.original_title):
-                logger.info(f"Skipping short/disallowed chapter: '{chapter.original_title}' ({word_count} words)")
-                continue
-            
-            # Allow very short chapters if they are 'part' delimiters, BUT only if they seem real
-            if chapter.original_title.lower().startswith('part '):
-                # 1. Check for extreme brevity or title repetition (The "Ghost" Chapter)
-                # "Part I" (title) -> "Part I" (content)
-                # content often includes subtitles: "Part I, Biblical Holiness"
+    # 2. Smart Merge Pass
+    merged_chapters = []
+    i = 0
+    while i < len(pre_cleaned):
+        current = pre_cleaned[i]
+        
+        # Check if this chapter is small enough to consider merging
+        if current.word_count < min_merge:
+            # Look ahead to see if we can merge into the NEXT chapter
+            if i + 1 < len(pre_cleaned):
+                next_ch = pre_cleaned[i+1]
                 
-                # aggresively clean content for this check: remove page markers, digits, punctuation
+                # Check if total size fits within max limit
+                if (current.word_count + next_ch.word_count) <= max_words:
+                    # Perform Merge
+                    # Title strategy: "Small & Large"
+                    # If Small is "Part I" and Large is "Chapter 1", result "Part I & Chapter 1"
+                    new_title = f"{current.title} & {next_ch.title}"
+                    new_content = current.content + "\n\n" + next_ch.content
+                    new_word_count = current.word_count + next_ch.word_count
+                    
+                    # Update the NEXT chapter in the list (the "accumulator")
+                    # We modify pre_cleaned[i+1] in place so it can accumulate more predecessor chapters if needed
+                    pre_cleaned[i+1] = next_ch._replace(
+                        title=new_title,
+                        original_title=new_title, 
+                        content=new_content,
+                        word_count=new_word_count,
+                        # We largely keep the next chapter's metadata, but maybe extend page range?
+                        # For simplicity, we keep the destination's page info or start from current?
+                        # Let's keep destination's part info, but maybe start page_range from current.
+                        page_range=(current.page_range[0], next_ch.page_range[1])
+                    )
+                    
+                    logger.info(f"Merged small chapter '{current.title}' ({current.word_count} w) into '{next_ch.title}'")
+                    i += 1
+                    continue
+        
+        merged_chapters.append(current)
+        i += 1
+
+    # 3. Final Filtering & Splitting Pass
+    processed_chapters = []
+    for chapter in merged_chapters:
+        word_count = chapter.word_count
+        
+        # Filter out chapters that are STILL too short (failed to merge, or merge result still tiny)
+        if word_count < min_words:
+             # Ghost Chapter Logic (Part I checks)
+             if chapter.original_title.lower().startswith('part '):
+                # ... (Existing Check) ...
                 content_for_check = re.sub(r'PAGE_\d+', '', chapter.content)
                 content_for_check = re.sub(r'[^\w\s]', '', content_for_check)
                 content_for_check = re.sub(r'\d+', '', content_for_check).strip().lower()
-                
                 title_clean = re.sub(r'[^\w\s]', '', chapter.original_title).strip().lower()
-
-                # If the content is essentially just the title (or title + subtitle), and it's short, skip it.
-                # Threshold increase: 50 words is still very short for a chapter.
+                
                 if word_count < 50:
-                     # Calculate overlap: if most of the content words are in the title or vice versa
                      content_words = set(content_for_check.split())
                      title_words = set(title_clean.split())
-                     
-                     # If content adds little new information (e.g. just "History")
-                     # We skip.
-                     logger.info(f"Skipping short 'Part' chapter (Ghost/Redundant): '{chapter.original_title}' (content: '{content_for_check[:50]}...')")
+                     logger.info(f"Skipping short 'Part' chapter (Ghost/Redundant): '{chapter.original_title}'")
                      continue
 
-                # 2. Check for "Part TOC" structure: lines ending in numbers/dots
-                # If a "Part" chapter is just a list of the chapters inside it, we skip it.
-                # Heuristic: If > 50% of non-empty lines end with a digit, it's a TOC.
+                # Check for TOC structure
                 lines = [l.strip() for l in chapter.content.splitlines() if l.strip()]
                 if lines:
-                    toc_like_lines = 0
+                    toc_like = 0
                     for line in lines:
-                        # Match: "Chapter 1 ... 55" or "Biblical Holiness ...... 12" or just "12"
-                        if re.search(r'[\dIVX]+$', line):
-                            toc_like_lines += 1
-                        elif re.search(r'\.{3,}\s*\d', line): # Dots and number
-                            toc_like_lines += 1
-                    
-                    if len(lines) > 0 and (toc_like_lines / len(lines)) > 0.5:
-                        logger.info(f"Skipping 'Part' chapter (Content looks like TOC): '{chapter.original_title}'")
+                        if re.search(r'[\dIVX]+$', line) or re.search(r'\.{3,}\s*\d', line):
+                            toc_like += 1
+                    if len(lines) > 0 and (toc_like / len(lines)) > 0.5:
+                        logger.info(f"Skipping 'Part' chapter (TOC-like): '{chapter.original_title}'")
                         continue
-
-                logger.info(f"Keeping 'Part' chapter: '{chapter.original_title}'")
-            else:
+             else:
                  logger.info(f"Skipping short chapter: '{chapter.original_title}' ({word_count} words)")
                  continue
 
@@ -688,16 +717,10 @@ def _apply_final_processing(chapters: List[Chapter], config: Dict[str, Any]) -> 
         # Split large chapters
         if word_count > max_words:
             logger.info(f"Chapter '{chapter.original_title}' ({word_count} words) is too large. Splitting...")
-            split_parts = _split_large_chapter_into_parts(
-                chapter._replace(content=cleaned_content, word_count=word_count),
-                max_words
-            )
-
+            split_parts = _split_large_chapter_into_parts(chapter, max_words)
             processed_chapters.extend(split_parts)
         else:
-            processed_chapters.append(
-                chapter._replace(content=cleaned_content, word_count=word_count)
-            )
+            processed_chapters.append(chapter)
 
             
     # Re-number and finalize
