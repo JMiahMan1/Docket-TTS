@@ -15,6 +15,7 @@ services:
     volumes:
       - generated_data:/app/generated:z
       - uploads_data:/app/uploads:z
+      - voices_data:/app/voices:z
     command: /opt/venv/bin/python -m gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 300 app:app
     depends_on:
       - redis
@@ -38,6 +39,7 @@ services:
     volumes:
       - generated_data:/app/generated:z
       - uploads_data:/app/uploads:z
+      - voices_data:/app/voices:z
     depends_on:
       - redis
     restart: always
@@ -48,3 +50,4 @@ services:
 volumes:
   uploads_data:
   generated_data:
+  voices_data:
