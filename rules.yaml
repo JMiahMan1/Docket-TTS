@@ -23,6 +23,11 @@ normalization_rules:
     flags: ["MULTILINE"]
 
   # === STAGE 2: SCRIPTURE NORMALIZATION ===
+  - name: "Strip Page Markers"
+    type: "regex"
+    pattern: '\[\[PAGE_\d+\]\]|\bPAGE_\d+\b'
+    replacement: ''
+    flags: ["IGNORECASE"]
   - name: "Normalize all scripture references (e.g., Romans 8, Rom 8:1, etc.)"
     type: "function"
     function_name: "normalize_scripture"
@@ -55,7 +60,7 @@ normalization_rules:
     function_name: "expand_roman_numerals"
   - name: "Expand all abbreviations"
     type: "dict_lookup"
-    dictionary_name: "abbreviations"
+    dictionary_name: "safe_abbreviations"
     options: { use_case_sensitive_list: true, word_boundary: true }
   - name: "Expand contractions"
     type: "dict_lookup"

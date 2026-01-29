@@ -396,10 +396,10 @@ FUNCTION_REGISTRY = {
     "currency_replacer": currency_replacer,
     "time_replacer": time_replacer, 
 }
-SYMBOLS.pop('$', None)
 DICTIONARY_REGISTRY = {
     "latin_phrases": LATIN_PHRASES,
     "abbreviations": ABBREVIATIONS,
+    "safe_abbreviations": {k: v for k, v in ABBREVIATIONS.items() if k not in NORMALIZATION.get("ambiguous_bible_abbrs", [])},
     "contractions": CONTRACTIONS,
     "symbols": SYMBOLS,
     "punctuation": PUNCTUATION,
@@ -437,7 +437,12 @@ def normalize_text(text: str) -> str:
             for key, value in sorted(dictionary.items(), key=lambda item: len(item[0]), reverse=True):
                 pattern = re.escape(key)
                 if options.get("word_boundary"):
-                    pattern = r'\b' + pattern + r'\b'
+                    # Only add trailing \b if key ends with a word character
+                    if key[-1].isalnum() or key[-1] == '_':
+                         pattern = pattern + r'\b'
+                    # Only add leading \b if key starts with a word character
+                    if key[0].isalnum() or key[0] == '_':
+                         pattern = r'\b' + pattern
                 
                 flags = 0
                 if options.get("use_case_sensitive_list"):
