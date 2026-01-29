@@ -1745,15 +1745,35 @@ def api_jobs():
                           original_filename = f"Analyzing: {task_kwargs['item'].get('original_filename', 'Book')}"
 
                 # Real-time Status Check
+                job_state = 'running' # Default fallback
+                job_progress = {}
+                
                 try:
                     res = celery.AsyncResult(task['id'])
+                    # Map Celery state to Frontend expectation
+                    job_state = res.state 
+                    
                     if res.state == 'PROGRESS' and res.info and isinstance(res.info, dict):
+                        job_progress = res.info
                         status_text = res.info.get('status', '')
                         if status_text:
                             original_filename = f"{original_filename} ({status_text})"
-                except: pass
+                    elif res.state == 'SUCCESS':
+                         job_progress = {'current': 100, 'total': 100, 'status': 'Complete'}
+                    elif res.state == 'PENDING':
+                         job_progress = {'current': 0, 'total': 100, 'status': 'Queued'}
 
-                running_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'running'})
+                except Exception as e:
+                    logger.warning(f"Error inspecting task {task['id']}: {e}")
+
+                running_jobs.append({
+                    'id': task['id'], 
+                    'name': original_filename, 
+                    'filename': original_filename, # Frontend expects filename
+                    'state': job_state,            # Frontend expects state
+                    'progress': job_progress,      # Frontend expects progress object
+                    'eta': '-'
+                })
         
         reserved_tasks = inspector.reserved() or {}
         for worker, tasks in reserved_tasks.items():
