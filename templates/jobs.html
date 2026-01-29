@@ -208,7 +208,7 @@
 
     function clearJob(jobId) {
         // Just visually remove or call an endpoint if we had one for clearing history
-        fetch(`/cancel_job/${jobId}`, { method: 'POST' }) # Re - use cancel to clear from redis list if implemented
+        fetch(`/cancel_job/${jobId}`, { method: 'POST' }) // Re - use cancel to clear from redis list if implemented
             .then(() => updateJobs());
     }
 
