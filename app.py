@@ -611,7 +611,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
     try:
         start_time = time.time() # Start timer
         
-        self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Checking voice model...'})
+        self.update_state(state='PROGRESS', meta={'current': 1, 'total': 5, 'status': 'Checking voice model...', 'start_time': start_time})
         voice_data = ensure_voice_available(voice_name)
         secondary_voice_data = ensure_voice_available(secondary_voice_name) if secondary_voice_name else None
 
@@ -662,7 +662,8 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
             self.update_state(state='PROGRESS', meta={
                 'current': percent, 
                 'total': 100, 
-                'status': f'Synthesizing...'
+                'status': f'Synthesizing...',
+                'start_time': start_time
             })
             
         _, synthesized_text = tts.synthesize(final_content_for_synthesis, output_filepath, progress_callback=progress_tracker)
@@ -997,7 +998,7 @@ def process_chapter_task(self, original_filename, chapter_title, chapter_text, v
         output_filepath = Path(app.config['GENERATED_FOLDER']) / output_filename
         
         # 1. Normalize (10%)
-        self.update_state(state='PROGRESS', meta={'current': 10, 'total': 100, 'status': f'Normalizing {chapter_title}...'})
+        self.update_state(state='PROGRESS', meta={'current': 10, 'total': 100, 'status': f'Normalizing {chapter_title}...', 'start_time': start_time})
         normalized_text = normalize_text(chapter_text)
         
         # 2. Synthesize (10-90%)
@@ -1037,7 +1038,8 @@ def process_chapter_task(self, original_filename, chapter_title, chapter_text, v
             self.update_state(state='PROGRESS', meta={
                 'current': percent, 
                 'total': 100, 
-                'status': f'Synthesizing {chapter_title}...'
+                'status': f'Synthesizing {chapter_title}...',
+                'start_time': start_time
             })
             
         tts.synthesize(normalized_text, str(output_filepath), progress_callback=progress_tracker)
@@ -1747,6 +1749,7 @@ def api_jobs():
                 # Real-time Status Check
                 job_state = 'running' # Default fallback
                 job_progress = {}
+                eta_str = '-'
                 
                 try:
                     res = celery.AsyncResult(task['id'])
@@ -1758,10 +1761,26 @@ def api_jobs():
                         status_text = res.info.get('status', '')
                         if status_text:
                             original_filename = f"{original_filename} ({status_text})"
+                        
+                        # Calculate ETA
+                        start_ts = res.info.get('start_time')
+                        current_pct = res.info.get('current', 0)
+                        if start_ts and current_pct > 0:
+                            elapsed = time.time() - start_ts
+                            # Simple linear projection
+                            estimated_total = elapsed / (current_pct / 100.0)
+                            remaining = estimated_total - elapsed
+                            if remaining < 0: remaining = 0
+                            
+                            m, s = divmod(int(remaining), 60)
+                            eta_str = f"{m}m {s}s"
+
                     elif res.state == 'SUCCESS':
                          job_progress = {'current': 100, 'total': 100, 'status': 'Complete'}
+                         eta_str = 'Done'
                     elif res.state == 'PENDING':
                          job_progress = {'current': 0, 'total': 100, 'status': 'Queued'}
+                         eta_str = 'Queued'
 
                 except Exception as e:
                     logger.warning(f"Error inspecting task {task['id']}: {e}")
@@ -1769,10 +1788,10 @@ def api_jobs():
                 running_jobs.append({
                     'id': task['id'], 
                     'name': original_filename, 
-                    'filename': original_filename, # Frontend expects filename
-                    'state': job_state,            # Frontend expects state
-                    'progress': job_progress,      # Frontend expects progress object
-                    'eta': '-'
+                    'filename': original_filename,
+                    'state': job_state,
+                    'progress': job_progress,
+                    'eta': eta_str
                 })
         
         reserved_tasks = inspector.reserved() or {}
