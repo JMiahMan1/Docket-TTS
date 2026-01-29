@@ -662,7 +662,7 @@ def convert_to_speech_task(self, input_filepath, original_filename, book_title, 
             self.update_state(state='PROGRESS', meta={
                 'current': percent, 
                 'total': 100, 
-                'status': f'Synthesizing... {int((current/total)*100)}%'
+                'status': f'Synthesizing...'
             })
             
         _, synthesized_text = tts.synthesize(final_content_for_synthesis, output_filepath, progress_callback=progress_tracker)
@@ -1037,7 +1037,7 @@ def process_chapter_task(self, original_filename, chapter_title, chapter_text, v
             self.update_state(state='PROGRESS', meta={
                 'current': percent, 
                 'total': 100, 
-                'status': f'Synthesizing {chapter_title}... {int((current/total)*100)}%'
+                'status': f'Synthesizing {chapter_title}...'
             })
             
         tts.synthesize(normalized_text, str(output_filepath), progress_callback=progress_tracker)
