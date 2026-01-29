@@ -1788,7 +1788,14 @@ def api_jobs():
                     elif 'analyze_book_task' in task_name and len(task_args) > 0 and isinstance(task_args[0], dict):
                          original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book')}"
                 
-                queued_jobs.append({'id': task['id'], 'name': original_filename, 'status': 'Reserved'})
+                queued_jobs.append({
+                    'id': task['id'], 
+                    'name': original_filename,
+                    'filename': original_filename,
+                    'state': 'PENDING',
+                    'progress': {'current': 0, 'total': 100, 'status': 'Reserved'},
+                    'eta': 'Reserved'
+                })
 
         if redis_client:
             try:
@@ -1829,7 +1836,14 @@ def api_jobs():
                              if len(t_args) > 1:
                                   q_name = f"{t_args[1]}"
                         
-                        queued_jobs.append({'id': headers.get('id', 'unknown'), 'name': q_name, 'status': 'Pending (Redis)'})
+                        queued_jobs.append({
+                            'id': headers.get('id', 'unknown'), 
+                            'name': q_name,
+                            'filename': q_name,
+                            'state': 'PENDING',
+                            'progress': {'current': 0, 'total': 100, 'status': 'Pending (Redis)'},
+                            'eta': 'Pending'
+                        })
                     except: pass
             except Exception as e:
                 app.logger.error(f"Redis fetch error: {e}")
