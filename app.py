@@ -28,6 +28,9 @@ import requests
 import textwrap
 from PIL import Image, ImageDraw, ImageFont
 import logging
+
+from chapterizer import chapterize, PROFILES, Chapter
+from filename_utils import sanitize_filename
 from logging.handlers import RotatingFileHandler
 from huggingface_hub import list_repo_files, hf_hub_download
 from difflib import SequenceMatcher
@@ -977,10 +980,15 @@ def process_chapter_task(self, original_filename, chapter_title, chapter_text, v
     try:
         start_time = time.time() # Start global timer
         
-        safe_base_name = secure_filename(Path(original_filename).stem)
-        safe_chapter_title = secure_filename(chapter_title)
+        # Use sanitize_filename to restrict length.
+        # Limit base name (Book Title) to 50 chars to leave room for Chapter Title
+        safe_base_name = sanitize_filename(Path(original_filename).stem, max_length=50)
+        
+        # Limit Chapter Title to 150 chars. Total approx 210 chars (safe for 255 limit)
+        safe_chapter_title = sanitize_filename(chapter_title, max_length=150)
         
         # Unique output filename with ordering
+        # Ensure the number is 0001 format for sequential sorting
         if chapter_number is not None:
              output_filename = f"{safe_base_name}_{int(chapter_number):04d}_{safe_chapter_title}.mp3"
         else:
@@ -1351,8 +1359,22 @@ def list_files():
                 file_data['duration'] = "Unknown"
                 
             # Read Generation Time & Page Range from Metadata
-            meta_path = entry.with_suffix(entry.suffix + '.meta.json')
-            if meta_path.exists():
+            # Handle potential "File Name Too Long" error if mp3 name is near the limit
+            # and adding suffix pushes it over.
+            try:
+                meta_path = entry.with_suffix(entry.suffix + '.meta.json')
+                if meta_path.exists():
+                    try:
+                        with open(meta_path, 'r') as f:
+                            meta = json.load(f)
+                            file_data['generation_time'] = meta.get('generation_time', '')
+                            # Prefer metadata file over ID3 tag for speed
+                            if 'page_range' in meta:
+                                file_data['comment'] = meta['page_range']
+                    except: pass
+            except OSError:
+                app.logger.warning(f"Could not check metadata for {entry.name}: Filename too long.")
+
                 try:
                     with open(meta_path, 'r') as f:
                         meta = json.load(f)
