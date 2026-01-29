@@ -1720,12 +1720,23 @@ def jobs_page():
 @app.route('/api/jobs')
 def api_jobs():
     running_jobs, queued_jobs = [], []
-    try:
+    if request.method == 'GET':
         inspector = celery.control.inspect()
+
+        # Get Revoked Tasks to filter out "zombies"
+        try:
+            revoked_tasks = inspector.revoked() or {}
+            all_revoked = set()
+            for worker, tasks in revoked_tasks.items():
+                all_revoked.update(tasks)
+        except:
+             all_revoked = set()
+
         active_tasks = inspector.active() or {}
         for worker, tasks in active_tasks.items():
             for task in tasks:
-                original_filename = "N/A"
+                if task['id'] in all_revoked: continue
+                original_filename = "Processing..."
                 task_name = task.get('name', '')
                 task_args = task.get('args')
                 task_kwargs = task.get('kwargs') or {}
@@ -1797,15 +1808,25 @@ def api_jobs():
         reserved_tasks = inspector.reserved() or {}
         for worker, tasks in reserved_tasks.items():
             for task in tasks:
+                if task['id'] in all_revoked: continue
+
                 original_filename = "Queued Task"
                 task_name = task.get('name', '')
                 task_args = task.get('args')
-                # Similar parsing logic...
+                
+                # Robust Naming Logic
                 if task_args and isinstance(task_args, (list, tuple)):
                     if 'process_chapter_task' in task_name and len(task_args) > 3:
                          original_filename = f"{task_args[1].get('title', 'Book')} - Ch. {task_args[2]['number']}"
                     elif 'analyze_book_task' in task_name and len(task_args) > 0 and isinstance(task_args[0], dict):
                          original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book')}"
+                    elif 'update_metadata_task' in task_name and len(task_args) > 0:
+                         base = task_args[0]
+                         original_filename = f"Update Meta: {base}"
+                    elif 'convert_to_speech_task' in task_name and len(task_args) > 1:
+                         original_filename = f"{task_args[1]}"
+                    elif len(task_args) > 0 and isinstance(task_args[0], str):
+                         original_filename = f"Task: {Path(task_args[0]).name}"
                 
                 queued_jobs.append({
                     'id': task['id'], 
@@ -1851,9 +1872,13 @@ def api_jobs():
                         elif 'analyze_book_task' in t_name:
                              if len(t_args) > 0 and isinstance(t_args[0], dict):
                                   q_name = f"Analyzing: {t_args[0].get('original_filename', 'Book')}"
+                        elif 'update_metadata_task' in t_name and len(t_args) > 0:
+                             q_name = f"Update Meta: {t_args[0]}"
                         elif 'convert_to_speech_task' in t_name:
                              if len(t_args) > 1:
                                   q_name = f"{t_args[1]}"
+                        elif len(t_args) > 0 and isinstance(t_args[0], str):
+                             q_name = f"Task: {Path(t_args[0]).name}"
                         
                         queued_jobs.append({
                             'id': headers.get('id', 'unknown'), 
