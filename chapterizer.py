@@ -641,11 +641,25 @@ def _apply_final_processing(chapters: List[Chapter], config: Dict[str, Any]) -> 
             if chapter.original_title.lower().startswith('part '):
                 # 1. Check for extreme brevity or title repetition (The "Ghost" Chapter)
                 # "Part I" (title) -> "Part I" (content)
-                cleaned_lower = clean_text(chapter.content).lower().replace('\n', ' ').strip()
-                title_lower = chapter.original_title.lower().strip()
+                # content often includes subtitles: "Part I, Biblical Holiness"
                 
-                if word_count < 15 and (cleaned_lower in title_lower or title_lower in cleaned_lower):
-                     logger.info(f"Skipping short 'Part' chapter (Ghost/Redundant): '{chapter.original_title}'")
+                # aggresively clean content for this check: remove page markers, digits, punctuation
+                content_for_check = re.sub(r'PAGE_\d+', '', chapter.content)
+                content_for_check = re.sub(r'[^\w\s]', '', content_for_check)
+                content_for_check = re.sub(r'\d+', '', content_for_check).strip().lower()
+                
+                title_clean = re.sub(r'[^\w\s]', '', chapter.original_title).strip().lower()
+
+                # If the content is essentially just the title (or title + subtitle), and it's short, skip it.
+                # Threshold increase: 50 words is still very short for a chapter.
+                if word_count < 50:
+                     # Calculate overlap: if most of the content words are in the title or vice versa
+                     content_words = set(content_for_check.split())
+                     title_words = set(title_clean.split())
+                     
+                     # If content adds little new information (e.g. just "History")
+                     # We skip.
+                     logger.info(f"Skipping short 'Part' chapter (Ghost/Redundant): '{chapter.original_title}' (content: '{content_for_check[:50]}...')")
                      continue
 
                 # 2. Check for "Part TOC" structure: lines ending in numbers/dots
