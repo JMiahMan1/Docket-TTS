@@ -568,8 +568,8 @@ def fetch_enhanced_metadata(title, author):
             metadata['publisher'] = book_info.get('publisher')
             metadata['published_date'] = book_info.get('publishedDate')
             metadata['cover_url'] = book_info.get('imageLinks', {}).get('thumbnail', '')
-    except requests.RequestException as e:
-        app.logger.error(f"Google Books API request failed: {e}")
+    except Exception as e:
+        app.logger.warning(f"Google Books API request failed (non-critical): {e}")
     
     return metadata
 
