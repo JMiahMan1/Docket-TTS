@@ -79,20 +79,27 @@
         <p class="text-muted mb-0">Library of your converted audiobooks</p>
     </div>
 
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 align-items-center">
         <div class="dropdown">
-            <button class="btn btn-light dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                Sort By
+            <button class="btn btn-light dropdown-toggle bg-white border shadow-sm" type="button"
+                data-bs-toggle="dropdown">
+                <i class="bi bi-sort-down me-1"></i>Sort
             </button>
-            <ul class="dropdown-menu">
+            <ul class="dropdown-menu shadow-sm border-0">
                 <li><a class="dropdown-menu-item dropdown-item" href="?sort=date_desc">Newest First</a></li>
                 <li><a class="dropdown-menu-item dropdown-item" href="?sort=date_asc">Oldest First</a></li>
                 <li><a class="dropdown-menu-item dropdown-item" href="?sort=name_asc">Name (A-Z)</a></li>
             </ul>
         </div>
-        <div class="form-check form-switch d-flex align-items-center bg-white p-2 px-3 rounded border">
-            <input class="form-check-input me-2" type="checkbox" role="switch" id="selectAllSwitch">
-            <label class="form-check-label small fw-bold text-muted" for="selectAllSwitch">Select All</label>
+
+        <!-- Select All Switch -->
+        <div class="bg-white border rounded shadow-sm d-flex align-items-center px-3 py-2">
+            <div class="form-check form-switch m-0 d-flex align-items-center">
+                <input class="form-check-input m-0" type="checkbox" role="switch" id="selectAllSwitch"
+                    style="cursor: pointer;">
+                <label class="form-check-label small fw-bold text-muted ms-2" for="selectAllSwitch"
+                    style="cursor: pointer; line-height: 1;">Select All</label>
+            </div>
         </div>
     </div>
 </div>
