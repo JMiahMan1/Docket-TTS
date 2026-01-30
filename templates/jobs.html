@@ -227,11 +227,7 @@
             });
     });
 
-    document.getElementById('clearCompletedBtn').addEventListener('click', () => {
-        // Client side filter or server endpoint?
-        // For now, reload to see if backend cleared them
-        window.location.reload();
-    });
+
 
     setInterval(updateJobs, 2000);
     updateJobs();
