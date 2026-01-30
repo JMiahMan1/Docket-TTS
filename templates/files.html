@@ -272,21 +272,21 @@
                 <h5 class="modal-title">Create Video</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form id="videoForm" method="POST" action="/jobs/create_video" enctype="multipart/form-data">
+            <form id="videoForm" onsubmit="handleVideoSubmit(event)">
                 <div class="modal-body">
-                    <input type="hidden" name="audio_filename" id="videoAudioFilename">
+                    <input type="hidden" name="filename" id="videoAudioFilename">
                     <p class="text-muted small">Convert <strong id="videoAudioLabel"></strong> into an MP4 video with
                         subtitles.</p>
 
                     <div class="mb-3">
                         <label for="bg_image" class="form-label">Background Image (Optional)</label>
-                        <input type="file" class="form-control" id="bg_image" name="bg_image" accept="image/*">
+                        <input type="file" class="form-control" id="bg_image" name="background_image" accept="image/*">
                         <div class="form-text">If not provided, a black background will be used.</div>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Start Generation</button>
+                    <button type="submit" class="btn btn-primary" id="startGenBtn">Start Generation</button>
                 </div>
             </form>
         </div>
@@ -387,6 +387,33 @@
         document.getElementById('videoAudioFilename').value = filename;
         document.getElementById('videoAudioLabel').textContent = filename;
         new bootstrap.Modal(document.getElementById('videoModal')).show();
+    }
+
+    function handleVideoSubmit(e) {
+        e.preventDefault();
+        const btn = document.getElementById('startGenBtn');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Queueing...';
+
+        const formData = new FormData(e.target);
+
+        fetch('/api/generate-video', {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => {
+                if (response.ok) {
+                    window.location.href = '/jobs';
+                } else {
+                    return response.json().then(err => { throw new Error(err.error || 'Unknown error'); });
+                }
+            })
+            .catch(err => {
+                alert('Failed to start task: ' + err.message);
+                btn.disabled = false;
+                btn.textContent = originalText;
+            });
     }
 </script>
 {% endblock %}
