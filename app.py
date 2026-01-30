@@ -2417,3 +2417,24 @@ def api_generate_video():
         'message': 'Video generation queued.',
         'task_id': task.id
     }), 202
+
+@app.route('/jobs/create_video', methods=['POST'])
+def create_video():
+    """Form submission endpoint for video generation"""
+    audio_filename = request.form.get('audio_filename')
+    bg_image = request.files.get('bg_image')
+    
+    if not audio_filename:
+        flash("No audio file selected.", "error")
+        return redirect(url_for('list_files'))
+        
+    image_filename = None
+    if bg_image and bg_image.filename:
+        ext = Path(bg_image.filename).suffix
+        image_filename = f"bg_{uuid.uuid4().hex}{ext}"
+        image_path = Path(app.config['GENERATED_FOLDER']) / image_filename
+        bg_image.save(image_path)
+        
+    task = generate_video_task.delay(audio_filename, image_filename)
+    flash("Video generation started.", "success")
+    return redirect(url_for('jobs_page'))
