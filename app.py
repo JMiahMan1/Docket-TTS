@@ -1690,9 +1690,10 @@ def api_jobs():
                     elif res.state == 'SUCCESS':
                          job_progress = {'current': 100, 'total': 100, 'status': 'Complete'}
                          eta_str = 'Done'
-                    elif res.state == 'PENDING':
                          job_progress = {'current': 0, 'total': 100, 'status': 'Queued'}
                          eta_str = 'Queued'
+
+                except Exception: pass
 
                 # Add to running list
                 running_jobs.append({
@@ -1752,91 +1753,7 @@ def api_jobs():
         'waiting_jobs': queued_jobs, # We didn't populate queued_jobs from redis logic in this snippet, but running_jobs covers active/reserved
         'unassigned_job_count': 0 
     })
-                    elif 'analyze_book_task' in task_name and len(task_args) > 0 and isinstance(task_args[0], dict):
-                         original_filename = f"Analyzing: {task_args[0].get('original_filename', 'Book')}"
-                    elif 'update_metadata_task' in task_name and len(task_args) > 0:
-                         base = task_args[0]
-                         original_filename = f"Update Meta: {base}"
-                    elif 'convert_to_speech_task' in task_name and len(task_args) > 1:
-                         original_filename = f"{task_args[1]}"
-                    elif len(task_args) > 0 and isinstance(task_args[0], str):
-                         original_filename = f"Task: {Path(task_args[0]).name}"
-                
-                queued_jobs.append({
-                    'id': task['id'], 
-                    'name': original_filename,
-                    'filename': original_filename,
-                    'state': 'PENDING',
-                    'progress': {'current': 0, 'total': 100, 'status': 'Reserved'},
-                    'eta': 'Reserved'
-                })
 
-        if redis_client:
-            try:
-                raw_tasks = redis_client.lrange('celery', 0, 99)
-                for raw_task in raw_tasks:
-                    try:
-                        task_data = json.loads(raw_task)
-                        headers = task_data.get('headers', {})
-                        task_id = headers.get('id')
-                        
-                        if not task_id or task_id in all_revoked or task_id in seen_ids:
-                             continue
-                        seen_ids.add(task_id)
-
-                        body = task_data.get('body')
-                        
-                        if isinstance(body, str):
-                            try:
-                                import base64
-                                body = json.loads(base64.b64decode(body).decode('utf-8'))
-                            except: pass
-                        
-                        t_args = []
-                        t_kwargs = {}
-                        t_name = headers.get('task') or task_data.get('task') or ''
-                        
-                        if isinstance(body, (list, tuple)):
-                            if len(body) > 0: t_args = body[0]
-                            if len(body) > 1: t_kwargs = body[1]
-                        elif isinstance(body, dict):
-                             t_args = body.get('args', [])
-                             t_kwargs = body.get('kwargs', {})
-                             
-                        q_name = "Queued Task"
-                        if 'process_chapter_task' in t_name:
-                             if len(t_args) > 3 and isinstance(t_args[2], dict):
-                                  q_name = f"{t_args[1].get('title', 'Book')} - Ch. {t_args[2].get('number', '?')}"
-                             elif 'original_filename' in t_kwargs:
-                                  q_name = f"{t_kwargs['original_filename']} - {t_kwargs.get('chapter_title', 'Chapter')}"
-                        elif 'analyze_book_task' in t_name:
-                             if len(t_args) > 0 and isinstance(t_args[0], dict):
-                                  q_name = f"Analyzing: {t_args[0].get('original_filename', 'Book')}"
-                        elif 'update_metadata_task' in t_name and len(t_args) > 0:
-                             q_name = f"Update Meta: {t_args[0]}"
-                        elif 'convert_to_speech_task' in t_name:
-                             if len(t_args) > 1:
-                                  q_name = f"{t_args[1]}"
-                        elif len(t_args) > 0 and isinstance(t_args[0], str):
-                             q_name = f"Task: {Path(t_args[0]).name}"
-                        
-                        queued_jobs.append({
-                            'id': task_id or 'unknown', 
-                            'name': q_name,
-                            'filename': q_name,
-                            'state': 'PENDING',
-                            'progress': {'current': 0, 'total': 100, 'status': 'Pending (Redis)'},
-                            'eta': 'Pending'
-                        })
-                    except: pass
-            except Exception as e:
-                app.logger.error(f"Redis fetch error: {e}")
-
-    except Exception as e:
-        app.logger.error(f"Could not inspect Celery: {e}")
-        return jsonify({'error': str(e)}), 500
-        
-    return jsonify(running_jobs + queued_jobs)
 
 
 @app.route('/cancel-job/<task_id>', methods=['POST'])
