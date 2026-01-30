@@ -69,9 +69,6 @@
         <button id="cancelAllBtn" class="btn btn-outline-danger btn-sm d-flex align-items-center">
             <i class="bi bi-x-circle me-2"></i>Cancel All Jobs
         </button>
-        <button id="clearCompletedBtn" class="btn btn-outline-secondary btn-sm d-flex align-items-center">
-            <i class="bi bi-trash me-2"></i>Clear Completed
-        </button>
     </div>
 </div>
 
@@ -126,8 +123,10 @@
                 const tbody = document.getElementById('jobsBody');
                 tbody.innerHTML = '';
 
+                const jobs = [...(data.running_jobs || []), ...(data.waiting_jobs || [])];
+
                 // Handle Empty State
-                if (data.length === 0) {
+                if (jobs.length === 0) {
                     tbody.innerHTML = `
                         <tr>
                             <td colspan="6" class="text-center py-5 text-muted">
@@ -139,7 +138,7 @@
                     return;
                 }
 
-                data.forEach(job => {
+                jobs.forEach(job => {
                     let statusClass = 'status-waiting';
                     let statusIcon = '<i class="bi bi-hourglass me-1"></i>';
 

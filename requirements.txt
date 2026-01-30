@@ -9,3 +9,4 @@ reportlab
 EbookLib
 python-docx
 openai-whisper
+djlint

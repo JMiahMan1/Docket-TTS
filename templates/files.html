@@ -253,6 +253,9 @@
 <div class="floating-toolbar" id="bulkToolbar">
     <span class="fw-bold text-secondary"><span id="selectedCount">0</span> selected</span>
     <div class="vr mx-2"></div>
+    <button class="btn btn-primary btn-sm rounded-pill px-3" id="bulkMergeBtn">
+        <i class="bi bi-music-note-list me-1"></i> Merge
+    </button>
     <button class="btn btn-danger btn-sm rounded-pill px-3" id="bulkDeleteBtn">
         <i class="bi bi-trash me-1"></i> Delete
     </button>
@@ -347,6 +350,37 @@
             }).then(() => window.location.reload());
         }
     });
+
+    // Bulk Merge
+    const mergeBtn = document.getElementById('bulkMergeBtn');
+    if (mergeBtn) {
+        mergeBtn.addEventListener('click', () => {
+            const selected = Array.from(document.querySelectorAll('.file-checkbox:checked')).map(cb => cb.value);
+            if (selected.length < 2) {
+                alert("Please select at least 2 files to merge.");
+                return;
+            }
+            if (confirm(`Merge ${selected.length} files into an M4B Audiobook? This will run in the background.`)) {
+                fetch('/files/merge_files', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filenames: selected })
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            alert("Error: " + data.error);
+                        } else {
+                            window.location.href = "/jobs";
+                        }
+                    })
+                    .catch(err => alert("Request failed: " + err));
+            }
+        });
+    }
+
+    // Initialize state
+    updateToolbar();
 
     // Video Modal Logic
     function openVideoModal(key, filename) {
