@@ -200,14 +200,14 @@
 
     function cancelJob(jobId) {
         if (confirm('Stop this task?')) {
-            fetch(`/cancel_job/${jobId}`, { method: 'POST' })
+            fetch(`/cancel-job/${jobId}`, { method: 'POST' })
                 .then(() => updateJobs());
         }
     }
 
     function clearJob(jobId) {
         // Just visually remove or call an endpoint if we had one for clearing history
-        fetch(`/cancel_job/${jobId}`, { method: 'POST' }) // Re - use cancel to clear from redis list if implemented
+        fetch(`/cancel-job/${jobId}`, { method: 'POST' }) // Re - use cancel to clear from redis list if implemented
             .then(() => updateJobs());
     }
 
