@@ -1956,7 +1956,7 @@ def delete_file(name):
     """
     generated_folder = Path(app.config['GENERATED_FOLDER'])
     
-    deleted_count = 0
+    deleted = 0
     
     # CASE 1: Video File
     if name.endswith('_video'):
@@ -1965,14 +1965,14 @@ def delete_file(name):
         try:
             if target.exists():
                 os.remove(target)
-                deleted_count += 1
+                deleted += 1
                 flash(f"Deleted video '{target.name}'", "success")
             else:
                 # Try exact match just in case logic is weird
                 target_exact = generated_folder / f"{name}.mp4"
                 if target_exact.exists():
                      os.remove(target_exact)
-                     deleted_count += 1
+                     deleted += 1
                      flash(f"Deleted video '{target_exact.name}'", "success")
         except Exception as e:
             app.logger.error(f"Error deleting video {name}: {e}")
