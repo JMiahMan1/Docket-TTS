@@ -598,6 +598,7 @@ class TTSService:
         # Final cleanup: Collapse dense punctuation (e.g., ", , " or ", .")
         synthesized_text = re.sub(r'([,.;:!])\s*([,.;:!])', r'\1', synthesized_text) # Dedup punct
         synthesized_text = re.sub(r'\s+([,.;:!])', r'\1', synthesized_text) # Strip space before punct
+        synthesized_text = synthesized_text.rstrip('"') # Punctuation fix: Trailing quotes can cause breath artifacts
 
         if not synthesized_text or not synthesized_text.strip():
             print(f"WARNING: No text to synthesize for output file {output_path}. Generating 0.5s of silence.")
